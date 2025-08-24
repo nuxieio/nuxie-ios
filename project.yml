@@ -1,0 +1,80 @@
+name: NuxieSDK
+options:
+  bundleIdPrefix: com.nuxie
+  deploymentTarget:
+    iOS: 15.0
+  generateEmptyDirectories: true
+  groupSortPosition: top
+  
+packages:
+  Nuxie:
+    path: .
+  Quick:
+    url: https://github.com/Quick/Quick.git
+    from: 7.0.0
+  Nimble:
+    url: https://github.com/Quick/Nimble.git
+    from: 13.0.0
+  Factory:
+    url: https://github.com/hmlongco/Factory.git
+    from: 2.5.0
+    
+targets:
+  NuxieSDK:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Sources/Nuxie
+        name: Nuxie
+        excludes:
+          - "**/*.md"
+    dependencies:
+      - package: Factory
+        product: FactoryKit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk
+      PRODUCT_NAME: Nuxie
+      MARKETING_VERSION: 0.1.0
+      CURRENT_PROJECT_VERSION: 1
+      SWIFT_VERSION: 5.9
+      ENABLE_TESTABILITY: YES
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+      
+  NuxieSDKTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/NuxieTests
+        name: NuxieTests
+    dependencies:
+      - target: NuxieSDK
+      - package: Quick
+      - package: Nimble
+      - package: Factory
+        product: FactoryKit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.tests
+      TEST_HOST: ""
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+    scheme:
+      testTargets:
+        - NuxieSDKTests
+      gatherCoverageData: true
+      
+schemes:
+  NuxieSDK:
+    build:
+      targets:
+        NuxieSDK: all
+    test:
+      targets:
+        - NuxieSDKTests
+      gatherCoverageData: true
+    run:
+      config: Debug
+    archive:
+      config: Release

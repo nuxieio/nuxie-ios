@@ -1,0 +1,39 @@
+name: NuxieDemoApp
+options:
+  bundleIdPrefix: io.nuxie.demo
+  
+targets:
+  DemoApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - Sources
+    dependencies:
+      - package: Nuxie
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.nuxie.demo.app
+      PRODUCT_NAME: Nuxie Demo
+      INFOPLIST_FILE: Sources/Info.plist
+      SWIFT_VERSION: "5.5"
+      TARGETED_DEVICE_FAMILY: "1,2"
+
+packages:
+  Nuxie:
+    path: ../../
+
+schemes:
+  DemoApp:
+    build:
+      targets:
+        DemoApp: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
