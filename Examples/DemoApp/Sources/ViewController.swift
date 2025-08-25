@@ -277,37 +277,13 @@ class ViewController: UIViewController {
     @objc private func openStaticFlowTapped() {
         // Replace with a known flow id for the demo
         let staticFlowId = "flow_demo_123"
-        #if compiler(>=5.5)
-        if #available(iOS 15.0, *) {
-            Task { @MainActor in
-                do {
-                    let vc = try await NuxieSDK.shared.getFlow(withId: staticFlowId)
-                    self.present(vc, animated: true)
-                } catch {
-                    self.showAlert(title: "Error", message: "Failed to load flow: \(error.localizedDescription)")
-                }
-            }
-        } else {
-            NuxieSDK.shared.getFlow(withId: staticFlowId) { vc, error in
-                DispatchQueue.main.async {
-                    if let vc = vc as? UIViewController {
-                        self.present(vc, animated: true)
-                    } else {
-                        self.showAlert(title: "Error", message: error?.localizedDescription ?? "Unknown error")
-                    }
-                }
+        Task { @MainActor in
+            do {
+                let vc = try await NuxieSDK.shared.getFlowViewController(with: staticFlowId)
+                self.present(vc, animated: true)
+            } catch {
+                self.showAlert(title: "Error", message: "Failed to load flow: \(error.localizedDescription)")
             }
         }
-        #else
-        NuxieSDK.shared.getFlow(withId: staticFlowId) { vc, error in
-            DispatchQueue.main.async {
-                if let vc = vc as? UIViewController {
-                    self.present(vc, animated: true)
-                } else {
-                    self.showAlert(title: "Error", message: error?.localizedDescription ?? "Unknown error")
-                }
-            }
-        }
-        #endif
     }
 }

@@ -471,7 +471,7 @@ public final class NuxieSDK {
   /// - Returns: A FlowViewController configured for the flow
   /// - Throws: NuxieError if SDK not configured or flow not found
   @MainActor
-  public func viewController(for flowId: String) async throws -> FlowViewController {
+  public func getFlowViewController(with flowId: String) async throws -> FlowViewController {
     guard isSetup else {
       throw NuxieError.notConfigured
     }

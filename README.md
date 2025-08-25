@@ -146,6 +146,25 @@ NuxieSDK.shared.reset() // keepAnonymousId = true by default
 - Plugins: `installPlugin(_:)`, `uninstallPlugin(_:)`, `startPlugin(_:)`, `stopPlugin(_:)`, `isPluginInstalled(_:)`.
 - `NuxieSDK.shared.shutdown()`: tear down services (usually not needed).
 
+### Flows
+
+- `NuxieSDK.shared.getFlowViewController(with:)`: asynchronously returns a view controller for a specific flow ID using the flow cache (or fetches on-demand). Useful for debugging a flow directly.
+- `NuxieSDK.shared.showFlow(with:)`: presents a flow by ID in a dedicated overlay window.
+
+Example (UIKit):
+
+```swift
+@MainActor
+func debugFlow() async {
+  do {
+    let vc = try await NuxieSDK.shared.getFlowViewController(id: "your_flow_id")
+    present(vc, animated: true)
+  } catch {
+    print("Failed to load flow: \(error)")
+  }
+}
+```
+
 ## Configuration Highlights
 
 Create with `NuxieConfiguration(apiKey:)` and optionally set:
