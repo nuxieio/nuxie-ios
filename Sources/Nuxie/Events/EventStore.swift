@@ -22,7 +22,7 @@ actor SQLiteEventStore {
         name TEXT NOT NULL,
         properties BLOB NOT NULL,
         timestamp INTEGER NOT NULL,
-        user_id TEXT,
+        user_id TEXT NOT NULL,
         session_id TEXT
     );
     """
@@ -180,11 +180,7 @@ actor SQLiteEventStore {
 
     sqlite3_bind_int64(statement, 4, Int64(event.timestamp.timeIntervalSince1970 * 1000))  // Store as milliseconds
 
-    if let distinctId = event.distinctId {
-      sqlite3_bind_text(statement, 5, distinctId, -1, SQLITE_TRANSIENT)
-    } else {
-      sqlite3_bind_null(statement, 5)
-    }
+    sqlite3_bind_text(statement, 5, event.distinctId, -1, SQLITE_TRANSIENT)
 
     // Use sessionId field directly for database storage
     if let sessionId = event.sessionId {
@@ -251,15 +247,7 @@ actor SQLiteEventStore {
       let timestampMs = sqlite3_column_int64(statement, 3)
       let timestamp = Date(timeIntervalSince1970: Double(timestampMs) / 1000.0)
 
-      let distinctId: String? = {
-        if sqlite3_column_type(statement, 4) == SQLITE_NULL {
-          return nil
-        }
-        if let text = sqlite3_column_text(statement, 4) {
-          return String(cString: text)
-        }
-        return nil
-      }()
+      let distinctId = String(cString: sqlite3_column_text(statement, 4))
 
       let sessionId: String? = {
         if sqlite3_column_type(statement, 5) == SQLITE_NULL {
@@ -711,15 +699,7 @@ actor SQLiteEventStore {
       let timestampMs = sqlite3_column_int64(statement, 3)
       let timestamp = Date(timeIntervalSince1970: Double(timestampMs) / 1000.0)
 
-      let distinctId: String? = {
-        if sqlite3_column_type(statement, 4) == SQLITE_NULL {
-          return nil
-        }
-        if let text = sqlite3_column_text(statement, 4) {
-          return String(cString: text)
-        }
-        return nil
-      }()
+      let distinctId = String(cString: sqlite3_column_text(statement, 4))
 
       // Session ID is already known (we're filtering by it)
 

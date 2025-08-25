@@ -14,8 +14,9 @@ public struct StoredEvent: Codable {
     /// When the event was created
     let timestamp: Date
     
-    /// Distinct ID associated with the event (nil for anonymous)
-    let distinctId: String?
+    /// Distinct ID associated with the event (identified or anonymous).
+    /// Always present for SDK-generated events.
+    let distinctId: String
     
     /// Session ID for efficient database queries (also in properties as $session_id)
     let sessionId: String?
@@ -26,13 +27,13 @@ public struct StoredEvent: Codable {
     ///   - name: Event name
     ///   - properties: Event properties dictionary
     ///   - timestamp: Event timestamp (defaults to now)
-    ///   - distinctId: Distinct ID (optional)
+    ///   - distinctId: Distinct ID (required)
     init(
         id: String = UUID.v7().uuidString,
         name: String,
         properties: [String: Any] = [:],
         timestamp: Date = Date(),
-        distinctId: String? = nil
+        distinctId: String
     ) throws {
         self.id = id
         self.name = name
@@ -53,14 +54,14 @@ public struct StoredEvent: Codable {
     ///   - name: Event name
     ///   - properties: Event properties as JSON Data
     ///   - timestamp: Event timestamp
-    ///   - distinctId: Distinct ID (optional)
+    ///   - distinctId: Distinct ID (required)
     ///   - sessionId: Session ID (optional)
     init(
         id: String,
         name: String,
         properties: Data,
         timestamp: Date,
-        distinctId: String?,
+        distinctId: String,
         sessionId: String?
     ) {
         self.id = id

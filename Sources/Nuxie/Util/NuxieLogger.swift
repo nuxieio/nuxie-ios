@@ -108,10 +108,6 @@ internal final class NuxieLogger {
     guard let distinctId = distinctId else { return "nil" }
     guard redactSensitiveData else { return distinctId }
 
-    if distinctId.hasPrefix("anon_") {
-      return distinctId  // Anonymous IDs are safe to log
-    }
-
     if distinctId.count > 8 {
       return "\(distinctId.prefix(3))...\(distinctId.suffix(3))"
     } else {

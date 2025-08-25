@@ -48,7 +48,7 @@ public class MockEventStore: EventStoreProtocol {
         isClosed = false
     }
         
-    public func storeEvent(name: String, properties: [String: Any], distinctId: String?) async throws {
+    public func storeEvent(name: String, properties: [String: Any], distinctId: String) async throws {
         storeEventCallCount += 1
         
         if shouldFailStore {
@@ -63,7 +63,7 @@ public class MockEventStore: EventStoreProtocol {
             name: name,
             properties: enrichedProps,
             timestamp: Date(),
-            distinctId: distinctId ?? "anonymous"
+            distinctId: distinctId
         )
         
         storedEvents.append(event)

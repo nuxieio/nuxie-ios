@@ -281,7 +281,7 @@ class JourneyExecutorTestEventStore: EventStoreProtocol {
         eventCount = 0
     }
     
-    func storeEvent(name: String, properties: [String: Any], distinctId: String?) throws {
+    func storeEvent(name: String, properties: [String: Any], distinctId: String) throws {
         // Add session ID to properties
         var propertiesWithSession = properties
         propertiesWithSession["$session_id"] = defaultSessionId

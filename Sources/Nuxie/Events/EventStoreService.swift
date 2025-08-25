@@ -15,7 +15,7 @@ protocol EventStoreProtocol {
     ///   - properties: Event properties
     ///   - distinctId: Distinct ID (optional)
     /// - Throws: EventStorageError if storage fails
-    func storeEvent(name: String, properties: [String: Any], distinctId: String?) async throws
+    func storeEvent(name: String, properties: [String: Any], distinctId: String) async throws
     
     /// Get recent events for analysis
     /// - Parameter limit: Maximum events to return (default: 100)
@@ -146,7 +146,7 @@ final class EventStore: EventStoreProtocol {
     func storeEvent(
         name: String,
         properties: [String: Any] = [:],
-        distinctId: String? = nil
+        distinctId: String
     ) async throws {
         LogDebug("EventStore.storeEvent called - name: \(name), distinctId: \(distinctId ?? "nil")")
         
