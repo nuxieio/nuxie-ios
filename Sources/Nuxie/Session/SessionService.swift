@@ -31,6 +31,9 @@ public protocol SessionServiceProtocol {
     
     /// Update session activity timestamp (called on each event)
     func touchSession()
+
+    func onAppDidEnterBackground()
+    func onAppBecameActive()
 }
 
 /// Reasons for session ID changes
@@ -73,20 +76,10 @@ public final class SessionService: SessionServiceProtocol {
     public var onSessionIdChanged: ((SessionIDChangeReason) -> Void)?
     
     // MARK: - Lifecycle Observers
-    
-    private var notificationObservers: [Any] = []
-    
+        
     // MARK: - Initialization
     
     public init() {
-        setupLifecycleObservers()
-        LogInfo("SessionService initialized")
-    }
-    
-    deinit {
-        for observer in notificationObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
     }
     
     // MARK: - Public API
@@ -247,39 +240,7 @@ public final class SessionService: SessionServiceProtocol {
     
     // MARK: - Lifecycle Monitoring
     
-    private func setupLifecycleObservers() {
-        #if canImport(UIKit)
-        let notificationCenter = NotificationCenter.default
-        
-        // App became active (foreground)
-        let activeObserver = notificationCenter.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleAppBecameActive()
-        }
-        notificationObservers.append(activeObserver)
-        
-        // App entered background
-        let backgroundObserver = notificationCenter.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.handleAppEnteredBackground()
-        }
-        notificationObservers.append(backgroundObserver)
-        
-        // Monitor UI events for activity detection (iOS/tvOS)
-        if #available(iOS 11.0, tvOS 11.0, *) {
-            // Could add UIEvent monitoring here if needed
-            // For now, activity is tracked through touchSession() calls
-        }
-        #endif
-    }
-    
-    private func handleAppBecameActive() {
+    public func onAppBecameActive() {
         lock.lock()
         defer { lock.unlock() }
         
@@ -294,7 +255,7 @@ public final class SessionService: SessionServiceProtocol {
         LogDebug("App became active, session: \(sessionId ?? "none")")
     }
     
-    private func handleAppEnteredBackground() {
+    public func onAppDidEnterBackground() {
         lock.lock()
         defer { lock.unlock() }
         

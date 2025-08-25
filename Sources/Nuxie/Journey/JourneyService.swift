@@ -44,6 +44,12 @@ public protocol JourneyServiceProtocol: AnyObject {
   /// Initialize service and restore journeys
   func initialize() async
 
+  func onAppWillEnterForeground() async
+
+  func onAppBecameActive() async
+
+  func onAppDidEnterBackground() async
+
   /// Shutdown service
   func shutdown() async
   
@@ -115,11 +121,39 @@ public actor JourneyService: JourneyServiceProtocol {
     // Check for expired timers
     await checkExpiredTimers()
 
-    // Register for app lifecycle events
-    registerForAppLifecycle()
-
     // Register for segment changes
     registerForSegmentChanges()
+  }
+
+  public func onAppWillEnterForeground() async {
+    // 1) Resume any timers that already matured
+    await checkExpiredTimers()
+
+    // 2) Re-arm not-yet-matured timers
+    let candidates = getAllLiveJourneys().filter { $0.status == .paused }
+    var scheduled = 0
+    for journey in candidates {
+      if let at = journey.resumeAt, at > dateProvider.now() {
+        scheduleResume(journey, at: at)
+        scheduled += 1
+      }
+    }
+    if scheduled > 0 { LogInfo("Re-armed \(scheduled) journey timers") }
+  }
+
+  public func onAppBecameActive() async {
+    // No-op for now; the normal execution path will present flows as nodes run.
+    // But this hook gives us a place to nudge journeys that were waiting on "app active", if we add that later.
+  }
+
+  public func onAppDidEnterBackground() async {
+    await self.cancelAllTasks()
+    // Persist any paused journeys (already done). Optionally also persist active journeys that are at a node boundary.
+    let journeys = await self.getAllLiveJourneys()
+    for j in journeys where j.status == .paused {
+      await self.persistJourney(j)
+    }
+    LogInfo("JourneyService background snapshot complete")
   }
 
   /// Shutdown service
@@ -757,46 +791,6 @@ public actor JourneyService: JourneyServiceProtocol {
       task.cancel()
     }
     activeTasks.removeAll()
-  }
-
-  // MARK: - App Lifecycle
-
-  private func registerForAppLifecycle() {
-    #if canImport(UIKit)
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(appDidEnterBackground),
-        name: UIApplication.didEnterBackgroundNotification,
-        object: nil
-      )
-
-      NotificationCenter.default.addObserver(
-        self,
-        selector: #selector(appWillEnterForeground),
-        name: UIApplication.willEnterForegroundNotification,
-        object: nil
-      )
-    #endif
-  }
-
-  @objc nonisolated private func appDidEnterBackground() {
-    LogDebug("App entering background - cancelling journey tasks")
-    Task {
-      await self.cancelAllTasks()
-
-      // Persist any active journeys
-      let journeys = await self.getAllLiveJourneys()
-      for journey in journeys where journey.status == .paused {
-        await self.persistJourney(journey)
-      }
-    }
-  }
-
-  @objc nonisolated private func appWillEnterForeground() {
-    LogDebug("App entering foreground - checking expired journeys")
-    Task {
-      await self.checkExpiredTimers()
-    }
   }
 
   // MARK: - Segment Integration

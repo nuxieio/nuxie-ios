@@ -64,6 +64,16 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
         isPresentingFlow = false
     }
     
+    @MainActor
+    public func onAppBecameActive() {
+        // Mock implementation - no-op for tests
+    }
+    
+    @MainActor
+    public func onAppDidEnterBackground() {
+        // Mock implementation - no-op for tests
+    }
+    
     // MARK: - Test Helper Methods
     
     /// Simulate successful flow presentation

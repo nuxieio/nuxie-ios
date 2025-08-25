@@ -541,6 +541,9 @@ final class EventServiceTests: AsyncSpec {
           func initialize() async {}
           func shutdown() async {}
           func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {}
+          func onAppWillEnterForeground() async {}
+          func onAppBecameActive() async {}
+          func onAppDidEnterBackground() async {}
 
           // helper for Nimble
           func handledCount() async -> Int { handled.count }

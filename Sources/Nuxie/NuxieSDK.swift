@@ -30,6 +30,8 @@ public final class NuxieSDK {
 
   private let container = Container.shared
 
+  private var lifecycleCoordinator: NuxieLifecycleCoordinator?
+
   // MARK: - Setup
 
   /// Setup the SDK (must be called before any other methods)
@@ -47,7 +49,9 @@ public final class NuxieSDK {
       return
     }
 
+    // Store configuration and register it FIRST before any service creation
     self.configuration = configuration
+    container.sdkConfiguration.register { configuration }
 
     // Configure logger
     NuxieLogger.shared.configure(
@@ -57,7 +61,9 @@ public final class NuxieSDK {
       redactSensitiveData: configuration.redactSensitiveData
     )
 
-    container.sdkConfiguration.register { configuration }
+    // Start lifecycle coordinator after configuration is registered
+    lifecycleCoordinator = NuxieLifecycleCoordinator()
+    lifecycleCoordinator?.start()
 
     // Initialize event system
     LogDebug("Setting up event system...")
@@ -127,6 +133,9 @@ public final class NuxieSDK {
 
     // API is managed by Factory container
     configuration = nil
+
+    lifecycleCoordinator?.stop()
+    lifecycleCoordinator = nil
 
     LogInfo("SDK shutdown completed")
   }

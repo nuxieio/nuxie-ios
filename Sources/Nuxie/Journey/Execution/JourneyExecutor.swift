@@ -674,30 +674,27 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
 
   private func calculateNextValidDay(from date: Date, validDays: [Int], timezone: TimeZone) -> Date
   {
-    let calendar = Calendar.current
+    // Use a calendar pinned to the provided timezone for all computations.
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = timezone
 
-    // Find next valid day
-    // validDays uses iOS weekday format: 1=Sunday, 2=Monday, ..., 7=Saturday
+    // Find next valid day (1=Sun ... 7=Sat)
     for i in 1...7 {
-      let nextDate = calendar.date(byAdding: .day, value: i, to: date)!
-      let nextComponents = calendar.dateComponents(in: timezone, from: nextDate)
-
-      if let weekday = nextComponents.weekday, validDays.contains(weekday) {
-        // Create date components for start of that valid day
-        var validDayComponents = DateComponents()
-        validDayComponents.year = nextComponents.year
-        validDayComponents.month = nextComponents.month
-        validDayComponents.day = nextComponents.day
-        validDayComponents.hour = 0
-        validDayComponents.minute = 0
-        validDayComponents.second = 0
-        validDayComponents.timeZone = timezone
-
-        return calendar.date(from: validDayComponents) ?? nextDate
+      guard let nextDate = cal.date(byAdding: .day, value: i, to: date) else { continue }
+      let weekday = cal.component(.weekday, from: nextDate)
+      if validDays.contains(weekday) {
+        // Start of that valid day in tz
+        var comps = cal.dateComponents([.year, .month, .day], from: nextDate)
+        comps.hour = 0
+        comps.minute = 0
+        comps.second = 0
+        comps.timeZone = timezone
+        return cal.date(from: comps) ?? nextDate
       }
     }
 
-    return date  // Fallback
+    // Fallback: return the given date (should not happen)
+    return date
   }
 
   private func calculateNextWindowOpen(

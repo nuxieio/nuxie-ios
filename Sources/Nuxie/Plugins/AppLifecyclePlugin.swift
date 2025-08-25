@@ -14,7 +14,6 @@ public class AppLifecyclePlugin: NuxiePlugin {
     
     private weak var sdk: NuxieSDK?
     private var isStarted = false
-    private var notificationObservers: [Any] = []
     
     // UserDefaults keys for tracking app state
     private let hasLaunchedBeforeKey = "nuxie_has_launched_before"
@@ -41,10 +40,8 @@ public class AppLifecyclePlugin: NuxiePlugin {
     public func start() {
         guard !isStarted else { return }
         
-        // Register for app lifecycle notifications
-        registerForNotifications()
-        
-        // Track app launch events (install/update/open)
+        // Track app launch events immediately on start
+        // The event system has internal queuing to handle events before it's ready
         trackAppLaunchEvents()
         
         isStarted = true
@@ -54,43 +51,36 @@ public class AppLifecyclePlugin: NuxiePlugin {
     public func stop() {
         guard isStarted else { return }
         
-        // Unregister from notifications
-        for observer in notificationObservers {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        notificationObservers.removeAll()
-        
         isStarted = false
         LogInfo("AppLifecyclePlugin stopped")
     }
     
-    // MARK: - Private Methods
+    // MARK: - Lifecycle Events
     
-    private func registerForNotifications() {
-        #if canImport(UIKit)
-        let notificationCenter = NotificationCenter.default
+    public func onAppDidEnterBackground() {
+        guard isStarted else { return }
         
-        let backgroundObserver = notificationCenter.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.appDidEnterBackground()
-        }
-        notificationObservers.append(backgroundObserver)
+        let properties: [String: Any] = [
+            "source": "app_lifecycle_plugin",
+            "background_date": Date().timeIntervalSince1970
+        ]
         
-        let foregroundObserver = notificationCenter.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.appWillEnterForeground()
-        }
-        notificationObservers.append(foregroundObserver)
-        #endif
+        sdk?.track("$app_backgrounded", properties: properties)
     }
     
-    // MARK: - Event Tracking Methods
+    public func onAppWillEnterForeground() {
+        guard isStarted else { return }
+        
+        let properties: [String: Any] = [
+            "source": "app_lifecycle_plugin",
+            "foreground_date": Date().timeIntervalSince1970,
+            "app_version": getCurrentAppVersion()
+        ]
+        
+        sdk?.track("$app_opened", properties: properties)
+    }
+    
+    // MARK: - Private Methods
     
     private func trackAppLaunchEvents() {
         let userDefaults = UserDefaults.standard
@@ -136,30 +126,5 @@ public class AppLifecyclePlugin: NuxiePlugin {
             return version
         }
         return "unknown"
-    }
-    
-    // MARK: - Notification Handlers
-    
-    private func appDidEnterBackground() {
-        #if canImport(UIKit)
-        let properties: [String: Any] = [
-            "source": "app_lifecycle_plugin",
-            "background_date": Date().timeIntervalSince1970
-        ]
-        
-        sdk?.track("$app_backgrounded", properties: properties)
-        #endif
-    }
-    
-    private func appWillEnterForeground() {
-        #if canImport(UIKit)
-        let properties: [String: Any] = [
-            "source": "app_lifecycle_plugin",
-            "foreground_date": Date().timeIntervalSince1970,
-            "app_version": getCurrentAppVersion()
-        ]
-        
-        sdk?.track("$app_opened", properties: properties)
-        #endif
     }
 }

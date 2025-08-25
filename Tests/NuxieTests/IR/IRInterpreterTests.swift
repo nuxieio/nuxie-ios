@@ -105,6 +105,8 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
     func resumeEventQueue() async {}
     func reassignEvents(from fromUserId: String, to toUserId: String) async throws -> Int { return 0 }
     func close() async {}
+    func onAppDidEnterBackground() async {}
+    func onAppBecameActive() async {}
 }
 
 final class IRTestSegmentService: SegmentServiceProtocol, IRSegmentQueries {

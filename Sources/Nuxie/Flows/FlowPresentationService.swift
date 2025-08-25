@@ -12,9 +12,16 @@ protocol FlowPresentationServiceProtocol: AnyObject {
     
     /// Check if a flow is currently presented
     @MainActor var isFlowPresented: Bool { get }
+    
+    /// Called when app becomes active - starts grace period
+    @MainActor func onAppBecameActive()
+    
+    /// Called when app enters background - clears grace period
+    @MainActor func onAppDidEnterBackground()
 }
 
 /// Service for presenting flows in dedicated windows over the entire app
+@MainActor
 final class FlowPresentationService: FlowPresentationServiceProtocol {
     
     // MARK: - Dependencies
@@ -29,6 +36,11 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     internal var currentFlowId: String?
     internal var currentJourney: Journey?
     
+    // MARK: - Grace Period
+    
+    private let foregroundGracePeriod: TimeInterval = 0.75  // UX grace window
+    private var gracePeriodEndTime: Date?
+    
     // MARK: - Initialization
     
     init(windowProvider: WindowProviderProtocol? = nil) {
@@ -37,14 +49,22 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     
     // MARK: - Public API
     
-    @MainActor
     var isFlowPresented: Bool {
         currentWindow?.isPresenting ?? false
     }
     
-    @MainActor
     func presentFlow(_ flowId: String, from journey: Journey?) async throws {
         LogInfo("FlowPresentationService: Presenting flow \(flowId)")
+        
+        // Check if we're within the grace period
+        if let gracePeriodEnd = gracePeriodEndTime {
+            let now = Date()
+            if now < gracePeriodEnd {
+                let delaySeconds = gracePeriodEnd.timeIntervalSince(now)
+                LogDebug("FlowPresentationService: Delaying flow presentation by \(delaySeconds) seconds (grace period)")
+                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+            }
+        }
         
         // Dismiss any currently presented flow first
         if isFlowPresented {
@@ -85,7 +105,6 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         LogDebug("FlowPresentationService: Successfully presented flow \(flowId)")
     }
     
-    @MainActor
     func dismissCurrentFlow() async {
         guard let window = currentWindow else {
             LogDebug("FlowPresentationService: No flow to dismiss")
@@ -101,9 +120,20 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         await cleanupPresentation()
     }
     
+    func onAppBecameActive() {
+        LogDebug("FlowPresentationService: App became active, starting grace period")
+        // Set grace period end time
+        gracePeriodEndTime = Date().addingTimeInterval(foregroundGracePeriod)
+    }
+    
+    func onAppDidEnterBackground() {
+        LogDebug("FlowPresentationService: App entered background, clearing grace period")
+        // Clear grace period when going to background
+        gracePeriodEndTime = nil
+    }
+    
     // MARK: - Private Methods
     
-    @MainActor
     private func handleFlowDismissal(reason: CloseReason) async {
         let flowId = currentFlowId ?? "unknown"
         let journey = currentJourney
@@ -151,7 +181,6 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         }
     }
     
-    @MainActor
     private func cleanupPresentation() async {
         LogDebug("FlowPresentationService: Cleaning up presentation")
         
@@ -187,7 +216,6 @@ enum FlowPresentationError: LocalizedError {
 // MARK: - UIViewController Async Presentation Extension
 
 private extension UIViewController {
-    @MainActor
     func present(_ viewControllerToPresent: UIViewController, animated: Bool) async {
         await withCheckedContinuation { continuation in
             self.present(viewControllerToPresent, animated: animated) {
@@ -196,7 +224,6 @@ private extension UIViewController {
         }
     }
     
-    @MainActor
     func dismiss(animated: Bool) async {
         await withCheckedContinuation { continuation in
             self.dismiss(animated: animated) {

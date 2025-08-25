@@ -30,14 +30,13 @@ protocol PresentationWindowProtocol: AnyObject {
 // MARK: - Default Implementation
 
 /// Default window provider using UIApplication
+@MainActor
 class DefaultWindowProvider: WindowProviderProtocol {
     
-    @MainActor
     func canPresentWindow() -> Bool {
         return UIApplication.shared.activeWindowScene != nil
     }
     
-    @MainActor
     func createPresentationWindow() -> PresentationWindowProtocol? {
         guard let scene = UIApplication.shared.activeWindowScene else {
             return nil
@@ -47,6 +46,7 @@ class DefaultWindowProvider: WindowProviderProtocol {
 }
 
 /// Real presentation window implementation
+@MainActor
 class RealPresentationWindow: PresentationWindowProtocol {
     private let window: UIWindow
     private let rootViewController: UIViewController
@@ -64,7 +64,6 @@ class RealPresentationWindow: PresentationWindowProtocol {
         window.backgroundColor = .clear
     }
     
-    @MainActor
     func present(_ viewController: UIViewController) async {
         window.makeKeyAndVisible()
         
@@ -75,7 +74,6 @@ class RealPresentationWindow: PresentationWindowProtocol {
         }
     }
     
-    @MainActor
     func dismiss() async {
         guard rootViewController.presentedViewController != nil else { return }
         
@@ -86,13 +84,11 @@ class RealPresentationWindow: PresentationWindowProtocol {
         }
     }
     
-    @MainActor
     func destroy() {
         window.isHidden = true
         window.rootViewController = nil
     }
     
-    @MainActor
     var isPresenting: Bool {
         return rootViewController.presentedViewController != nil
     }

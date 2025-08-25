@@ -74,7 +74,7 @@ extension Container {
   }
 
   var flowPresentationService: Factory<FlowPresentationServiceProtocol> {
-    self { FlowPresentationService(windowProvider: nil) }
+    self { @MainActor in FlowPresentationService(windowProvider: nil) }
       .scope(.sdk)
   }
 

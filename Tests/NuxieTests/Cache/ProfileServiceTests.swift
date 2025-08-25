@@ -379,12 +379,12 @@ class ProfileServiceTests: AsyncSpec {
                     }
                 }
                 
-                context("handleAppBecameActive") {
+                context("onAppBecameActive") {
                     it("refreshes if cache is older than 15 minutes") {
                         // Advance time by 20 minutes
                         mocks.dateProvider.advance(by: 20 * 60)
                         
-                        await sut.handleAppBecameActive()
+                        await sut.onAppBecameActive()
                         
                         // Should trigger background refresh
                         await expect { await mocks.nuxieApi.fetchProfileCallCount }
@@ -395,7 +395,7 @@ class ProfileServiceTests: AsyncSpec {
                         // Advance time by only 5 minutes
                         mocks.dateProvider.advance(by: 5 * 60)
                         
-                        await sut.handleAppBecameActive()
+                        await sut.onAppBecameActive()
                         
                         // Give a moment to check no refresh happens
                         await Task.yield()

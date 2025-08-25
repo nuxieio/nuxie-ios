@@ -18,6 +18,26 @@ public protocol NuxiePlugin: AnyObject {
     
     /// Called to stop the plugin functionality
     func stop()
+    
+    // MARK: - Lifecycle Events (Optional)
+    
+    /// Called when app becomes active (after all services have processed the event)
+    func onAppBecameActive()
+    
+    /// Called when app enters background (after all services have processed the event)
+    func onAppDidEnterBackground()
+    
+    /// Called when app will enter foreground (after all services have processed the event)
+    func onAppWillEnterForeground()
+}
+
+// MARK: - Default Implementations
+
+public extension NuxiePlugin {
+    // Provide default empty implementations for optional lifecycle methods
+    func onAppBecameActive() {}
+    func onAppDidEnterBackground() {}
+    func onAppWillEnterForeground() {}
 }
 
 /// Plugin error types

@@ -226,6 +226,14 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
         // Mock implementation - just reset state
         reset()
     }
+    
+    func onAppDidEnterBackground() async {
+        // Mock implementation - no-op for tests
+    }
+    
+    func onAppBecameActive() async {
+        // Mock implementation - no-op for tests
+    }
 }
 
 class JourneyExecutorTestIdentityService: IdentityServiceProtocol {

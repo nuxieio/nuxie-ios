@@ -118,6 +118,9 @@ public protocol EventServiceProtocol {
         contextBuilder: NuxieContextBuilder?,
         configuration: NuxieConfiguration?
     ) async throws
+
+    func onAppDidEnterBackground() async
+    func onAppBecameActive() async
     
     // MARK: - Event History Access
     
@@ -333,6 +336,15 @@ public class EventService: EventServiceProtocol {
         )
         // Signal that storage is initialized and safe to use
         await ready.open()
+    }
+    
+    public func onAppDidEnterBackground() async {
+      await pauseEventQueue()
+    }
+
+    public func onAppBecameActive() async {
+      await resumeEventQueue()
+      _ = await flushEvents()  // optional; may jitter
     }
     
     // MARK: - Public Track Method

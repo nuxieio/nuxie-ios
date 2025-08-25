@@ -27,6 +27,8 @@ protocol ProfileServiceProtocol: AnyObject {
     
     /// Handle user change - clear old cache and load new
     func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async
+
+    func onAppBecameActive() async
 }
 
 /// Wrapper for cached profile data with metadata
@@ -343,7 +345,7 @@ internal actor ProfileService: ProfileServiceProtocol {
     }
     
     /// Handle app becoming active - refresh if stale
-    func handleAppBecameActive() async {
+    func onAppBecameActive() async {
         guard let cached = cachedProfile else {
             // No cache, load from disk or fetch
             await loadFromDisk()

@@ -122,6 +122,18 @@ public actor MockJourneyService: JourneyServiceProtocol {
         // New user starts with no journeys in mock
     }
     
+    public func onAppWillEnterForeground() async {
+        // Mock implementation - no-op for tests
+    }
+    
+    public func onAppBecameActive() async {
+        // Mock implementation - no-op for tests
+    }
+    
+    public func onAppDidEnterBackground() async {
+        // Mock implementation - no-op for tests
+    }
+    
     // MARK: - Test Helper Methods
     
     /// Reset all mock state

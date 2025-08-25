@@ -12,7 +12,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
         var mockEventService: MockEventService!
         var mockWindowProvider: MockWindowProvider!
         
-        beforeEach {
+        beforeEach { @MainActor in
             // Reset container
             Container.shared.reset()
             
@@ -44,7 +44,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
             service = FlowPresentationService(windowProvider: mockWindowProvider)
         }
         
-        afterEach {
+        afterEach { @MainActor in
             // Clean up
             mockWindowProvider.reset()
             Container.shared.reset()
@@ -233,7 +233,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
         }
         
         describe("journey integration") {
-            it("should accept journey context") {
+            it("should accept journey context") { @MainActor in
                 // Create mock campaign and journey using TestBuilders
                 let campaign = TestCampaignBuilder(id: "campaign-1")
                     .withName("Test Campaign")
@@ -262,7 +262,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
                 expect(service.currentJourney?.id).toNot(beNil())
             }
             
-            it("should handle nil journey context") {
+            it("should handle nil journey context") { @MainActor in
                 let flowId = "no-journey-flow"
                 let mockVC = MockFlowViewController(mockFlowId: flowId)
                 mockFlowService.mockViewControllers[flowId] = mockVC
@@ -277,7 +277,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
         }
         
         describe("window management") {
-            it("should create window and present view controller") {
+            it("should create window and present view controller") { @MainActor in
                 let flowId = "window-props"
                 let mockVC = MockFlowViewController(mockFlowId: flowId)
                 mockFlowService.mockViewControllers[flowId] = mockVC
@@ -291,7 +291,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
                 await expect { await window?.isPresenting }.to(beTrue())
             }
             
-            it("should properly clean up window on dismissal") {
+            it("should properly clean up window on dismissal") { @MainActor in
                 let flowId = "cleanup-test"
                 let mockVC = MockFlowViewController(mockFlowId: flowId)
                 mockFlowService.mockViewControllers[flowId] = mockVC

@@ -322,4 +322,14 @@ public class MockEventService: EventServiceProtocol {
         // Mock implementation: just reset state
         reset()
     }
+    
+    // MARK: - Lifecycle Events
+    
+    public func onAppDidEnterBackground() async {
+        // Mock implementation - no-op for tests
+    }
+    
+    public func onAppBecameActive() async {
+        // Mock implementation - no-op for tests
+    }
 }

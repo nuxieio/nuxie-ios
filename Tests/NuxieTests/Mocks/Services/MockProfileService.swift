@@ -124,6 +124,10 @@ public class MockProfileService: ProfileServiceProtocol {
         // No-op for other aspects in mock
     }
     
+    public func onAppBecameActive() async {
+        // Mock implementation - no-op for tests
+    }
+    
     // Test helpers
     public func reset() {
         setupDefaultProfileResponse()

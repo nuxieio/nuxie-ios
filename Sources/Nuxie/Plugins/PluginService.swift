@@ -147,6 +147,41 @@ public class PluginService {
         return installedPlugins[pluginId] != nil
     }
     
+    // MARK: - Lifecycle Event Delegation
+    
+    /// Notify all started plugins that the app became active
+    public func onAppBecameActive() {
+        pluginLock.lock()
+        defer { pluginLock.unlock() }
+        
+        for plugin in installedPlugins.values {
+            plugin.onAppBecameActive()
+        }
+        LogDebug("Notified plugins of app becoming active")
+    }
+    
+    /// Notify all started plugins that the app entered background
+    public func onAppDidEnterBackground() {
+        pluginLock.lock()
+        defer { pluginLock.unlock() }
+        
+        for plugin in installedPlugins.values {
+            plugin.onAppDidEnterBackground()
+        }
+        LogDebug("Notified plugins of app entering background")
+    }
+    
+    /// Notify all started plugins that the app will enter foreground
+    public func onAppWillEnterForeground() {
+        pluginLock.lock()
+        defer { pluginLock.unlock() }
+        
+        for plugin in installedPlugins.values {
+            plugin.onAppWillEnterForeground()
+        }
+        LogDebug("Notified plugins of app will enter foreground")
+    }
+    
     // MARK: - Cleanup
     
     /// Uninstall all plugins and clean up
