@@ -64,7 +64,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
           journey: journey,
           node: node,
           result: result
-        )
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
       )
 
       return result
@@ -81,7 +84,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
           "node_id": node.id,
           "node_type": node.type.rawValue,
           "error_message": error.localizedDescription,
-        ]
+        ],
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
       )
 
       return errorResult
@@ -210,7 +216,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
         journey: journey,
         nodeId: node.id,
         flowId: flowId
-      )
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     // Continue to next node immediately (fire-and-forget pattern)
@@ -277,7 +286,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
         nodeId: node.id,
         branchPath: result ? "true" : "false",
         conditionResult: result
-      )
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
     return .continue([nextNodeId])
   }
@@ -315,7 +327,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
             nodeId: node.id,
             branchPath: "condition_\(index)",
             conditionResult: true
-          )
+          ),
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
         )
 
         return .continue([nextNodeId])
@@ -335,7 +350,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
           nodeId: node.id,
           branchPath: "default",
           conditionResult: false
-        )
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
       )
 
       return .continue([defaultNodeId])
@@ -369,7 +387,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
         journey: journey,
         nodeId: node.id,
         attributesUpdated: Array(attributes.keys)
-      )
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     LogInfo("Updated \(attributes.count) attributes for user \(journey.distinctId)")
@@ -399,7 +420,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     // Create and route event
     eventService.track(
       eventNode.data.eventName,
-      properties: properties
+      properties: properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     // Track event sent for observability
@@ -410,7 +434,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
         nodeId: node.id,
         eventName: eventNode.data.eventName,
         eventProperties: properties
-      )
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     LogInfo("Sent event '\(eventNode.data.eventName)' with \(properties.count) properties")
@@ -521,7 +548,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
             nodeId: waitNode.id,
             matchedPath: path.id,
             waitDurationSeconds: TimeInterval(waitDurationSeconds(now))
-          )
+          ),
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
         )
         clearWaitState(in: journey)
         return .continue([path.next])
@@ -541,7 +571,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
             nodeId: waitNode.id,
             matchedPath: path.id,
             waitDurationSeconds: TimeInterval(waitDurationSeconds(now))
-          )
+          ),
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
         )
         clearWaitState(in: journey)
         return .continue([path.next])
@@ -597,7 +630,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
             nodeId: node.id,
             cohortName: cohortName,
             cohortValue: random
-          )
+          ),
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
         )
 
         guard index < randomNode.next.count else {
@@ -648,7 +684,10 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
         nodeId: node.id,
         message: delegateNode.data.message,
         payload: delegateNode.data.payload?.value
-      )
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     LogInfo("Delegate called with message '\(delegateNode.data.message)'")

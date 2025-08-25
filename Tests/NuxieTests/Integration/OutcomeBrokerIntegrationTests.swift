@@ -141,7 +141,14 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
             ]
           )
 
-          await eventService.route(flowCompleted)
+          eventService.track(
+            flowCompleted.name,
+            properties: flowCompleted.properties,
+            userProperties: nil,
+            userPropertiesSetOnce: nil,
+            completion: nil
+          )
+          await eventService.drain()
 
           // Verify result
           await expect(capturedResult).toEventuallyNot(beNil(), timeout: .milliseconds(100))
@@ -206,7 +213,14 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
             ]
           )
 
-          await eventService.route(flowCompleted)
+          eventService.track(
+            flowCompleted.name,
+            properties: flowCompleted.properties,
+            userProperties: nil,
+            userPropertiesSetOnce: nil,
+            completion: nil
+          )
+          await eventService.drain()
 
           await expect(capturedResult).toEventuallyNot(beNil())
 
@@ -373,7 +387,14 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
             ]
           )
 
-          await eventService.route(flowCompleted)
+          eventService.track(
+            flowCompleted.name,
+            properties: flowCompleted.properties,
+            userProperties: nil,
+            userPropertiesSetOnce: nil,
+            completion: nil
+          )
+          await eventService.drain()
 
           await expect(capturedResult).toEventuallyNot(beNil())
 

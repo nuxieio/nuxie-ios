@@ -156,39 +156,7 @@ public final class NuxieSDK {
     userPropertiesSetOnce: [String: Any]? = nil,
     completion: ((EventResult) -> Void)? = nil
   ) {
-    Task {
-      await trackAsync(
-        event,
-        properties: properties,
-        userProperties: userProperties,
-        userPropertiesSetOnce: userPropertiesSetOnce,
-        completion: completion
-      )
-    }
-  }
-  
-  /// Track an event with optional user properties (async version)
-  /// - Parameters:
-  ///   - event: Event name
-  ///   - properties: Event properties
-  ///   - userProperties: Properties to set on the user profile (mapped to $set)
-  ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
-  ///   - completion: Optional completion handler called when event completes (immediately or after immediate flow)
-  public func trackAsync(
-    _ event: String,
-    properties: [String: Any]? = nil,
-    userProperties: [String: Any]? = nil,
-    userPropertiesSetOnce: [String: Any]? = nil,
-    completion: ((EventResult) -> Void)? = nil
-  ) async {
-    guard isSetup else {
-      completion?(.failed(NuxieError.notConfigured))
-      return
-    }
-
-    // Delegate all enrichment and routing to EventService
-    let eventService = container.eventService()
-    await eventService.trackAsync(
+    container.eventService().track(
       event,
       properties: properties,
       userProperties: userProperties,
@@ -217,11 +185,6 @@ public final class NuxieSDK {
     let oldDistinctId = identityService.getDistinctId()
     let wasIdentified = identityService.isIdentified
     let hasDifferentDistinctId = distinctId != oldDistinctId
-    
-    // Close the network ordering barrier before changing IDs
-    if hasDifferentDistinctId {
-      eventService.beginIdentityTransition()
-    }
     
     // Set distinct ID for identified user
     identityService.setDistinctId(distinctId)
@@ -268,15 +231,17 @@ public final class NuxieSDK {
     container.sessionService().startSession()
     
     // Use EventService's identifyUser method for proper queue management
-    Task {
-      await eventService.identifyUser(
-        distinctId: currentDistinctId,
-        anonymousId: hasDifferentDistinctId && !wasIdentified ? oldDistinctId : nil,
-        wasIdentified: wasIdentified,
-        userProperties: userProperties,
-        userPropertiesSetOnce: userPropertiesSetOnce
-      )
+    var props: [String: Any] = ["distinct_id": currentDistinctId]
+    if !wasIdentified, hasDifferentDistinctId {
+      props["$anon_distinct_id"] = oldDistinctId
     }
+    eventService.track(
+      "$identify",
+      properties: props,
+      userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce,
+      completion: nil
+    )
   }
 
   /// Reset user identity (logout)

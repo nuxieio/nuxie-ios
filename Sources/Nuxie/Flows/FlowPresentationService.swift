@@ -161,7 +161,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                 break
             }
             
-            eventService.track(JourneyEvents.flowCompleted, properties: properties)
+            eventService.track(JourneyEvents.flowCompleted, properties: properties, userProperties: nil, userPropertiesSetOnce: nil, completion: nil)
         }
         
         // Clean up

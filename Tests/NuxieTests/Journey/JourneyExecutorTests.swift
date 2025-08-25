@@ -58,41 +58,13 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
     private(set) var routedEvents: [NuxieEvent] = []
     private(set) var trackedEvents: [(name: String, properties: [String: Any]?)] = []
     
-    func beginIdentityTransition() {
-        // Mock implementation - no-op for tests
-    }
-    
-    func identifyUser(distinctId: String, anonymousId: String?, wasIdentified: Bool, userProperties: [String: Any]?, userPropertiesSetOnce: [String: Any]?) async {
-        // Mock implementation - track as identify event
-        var identifyProperties: [String: Any] = ["distinct_id": distinctId]
-        
-        if !wasIdentified, let anonymousId = anonymousId {
-            identifyProperties["$anon_distinct_id"] = anonymousId
-        }
-        
-        if let userProperties = userProperties {
-            identifyProperties["$set"] = userProperties
-        }
-        
-        if let userPropertiesSetOnce = userPropertiesSetOnce {
-            identifyProperties["$set_once"] = userPropertiesSetOnce
-        }
-        
-        let identifyEvent = NuxieEvent(
-            name: "$identify",
-            distinctId: distinctId,
-            properties: identifyProperties
-        )
-        await route(identifyEvent)
-    }
-    
-    func trackAsync(
+    func track(
         _ event: String,
         properties: [String: Any]?,
         userProperties: [String: Any]?,
         userPropertiesSetOnce: [String: Any]?,
         completion: ((EventResult) -> Void)?
-    ) async {
+    ) {
         // Track the event for test verification
         trackedEvents.append((name: event, properties: properties))
         
@@ -102,8 +74,10 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
             .withProperties(properties ?? [:])
             .build()
         
-        await route(nuxieEvent)
-        completion?(.noInteraction)
+        Task {
+            await route(nuxieEvent)
+            completion?(.noInteraction)
+        }
     }
     
     func route(_ event: NuxieEvent) async -> NuxieEvent? {
@@ -111,13 +85,6 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
         lastEvent = event
         routedEvents.append(event)
         return event
-    }
-    
-    func routeBatch(_ events: [NuxieEvent]) async -> [NuxieEvent] {
-        for event in events {
-            _ = await route(event)
-        }
-        return events
     }
     
     func configure(

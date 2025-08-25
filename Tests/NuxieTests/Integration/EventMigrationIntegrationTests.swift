@@ -152,9 +152,15 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         NuxieSDK.shared.track("onboarding_step_1_completed")
                         NuxieSDK.shared.track("onboarding_step_2_completed")
                         
+                        // Wait for events to be stored
+                        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                        
                         // Identify user
                         let userId = "journey_user"
                         NuxieSDK.shared.identify(userId)
+                        
+                        // Give time for async reassignment to complete
+                        try await Task.sleep(nanoseconds: 500_000_000) // 500ms
                         
                         // Continue tracking after identification
                         NuxieSDK.shared.track("onboarding_step_3_completed")

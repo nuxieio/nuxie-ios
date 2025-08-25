@@ -12,13 +12,13 @@ public class MockEventService: EventServiceProtocol {
     private var lastEventTimes: [String: Date] = [:]
     
     // Primary protocol method - matches EventServiceProtocol
-    public func trackAsync(
+    public func track(
         _ event: String,
-        properties: [String: Any]?,
-        userProperties: [String: Any]?,
-        userPropertiesSetOnce: [String: Any]?,
-        completion: ((EventResult) -> Void)?
-    ) async {
+        properties: [String: Any]? = nil,
+        userProperties: [String: Any]? = nil,
+        userPropertiesSetOnce: [String: Any]? = nil,
+        completion: ((EventResult) -> Void)? = nil
+    ) {
         // Track the event for test verification
         trackedEvents.append((name: event, properties: properties))
         
@@ -28,26 +28,9 @@ public class MockEventService: EventServiceProtocol {
             .withProperties(properties ?? [:])
             .build()
         
-        await route(nuxieEvent)
-        completion?(.noInteraction)
-    }
-    
-    // Convenience method for synchronous tracking (test helper)
-    public func track(
-        _ event: String,
-        properties: [String: Any]? = nil,
-        userProperties: [String: Any]? = nil,
-        userPropertiesSetOnce: [String: Any]? = nil,
-        completion: ((EventResult) -> Void)? = nil
-    ) {
         Task {
-            await trackAsync(
-                event,
-                properties: properties,
-                userProperties: userProperties,
-                userPropertiesSetOnce: userPropertiesSetOnce,
-                completion: completion
-            )
+            await route(nuxieEvent)
+            completion?(.noInteraction)
         }
     }
     
@@ -259,42 +242,6 @@ public class MockEventService: EventServiceProtocol {
     }
     
     // MARK: - User Identity Management
-    
-    public func beginIdentityTransition() {
-        // Mock implementation - no-op
-    }
-    
-    public func identifyUser(
-        distinctId: String,
-        anonymousId: String?,
-        wasIdentified: Bool,
-        userProperties: [String: Any]?,
-        userPropertiesSetOnce: [String: Any]?
-    ) async {
-        // Mock implementation: build properties like the real implementation
-        var identifyProperties: [String: Any] = [:]
-        identifyProperties["distinct_id"] = distinctId
-        
-        if !wasIdentified, let anonymousId = anonymousId {
-            identifyProperties["$anon_distinct_id"] = anonymousId
-        }
-        
-        if let userProperties = userProperties {
-            identifyProperties["$set"] = userProperties
-        }
-        
-        if let userPropertiesSetOnce = userPropertiesSetOnce {
-            identifyProperties["$set_once"] = userPropertiesSetOnce
-        }
-        
-        let identifyEvent = NuxieEvent(
-            name: "$identify",
-            distinctId: distinctId,
-            properties: identifyProperties
-        )
-        
-        await route(identifyEvent)
-    }
     
     public func reassignEvents(from fromUserId: String, to toUserId: String) async throws -> Int {
         // Mock implementation: Update distinctId in routed events

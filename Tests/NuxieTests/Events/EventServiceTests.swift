@@ -14,9 +14,14 @@ final class EventServiceTests: AsyncSpec {
     var mockIdentityService: MockIdentityService!
     var mockNetworkQueue: NuxieNetworkQueue!
     var mockNuxieApi: MockNuxieApi!
+    var mockOutcomeBroker: MockOutcomeBroker!
 
     beforeEach {
       mockFactory = MockFactory.shared
+
+      // Create and register mock outcome broker FIRST (before EventService creation)
+      mockOutcomeBroker = await MockOutcomeBroker()
+      Container.shared.outcomeBroker.register { mockOutcomeBroker }
 
       // Create mock event store
       mockEventStore = MockEventStore()
@@ -32,7 +37,7 @@ final class EventServiceTests: AsyncSpec {
       // Register mock segment service
       Container.shared.segmentService.register { mockFactory.segmentService }
 
-      // Create event service with mock event store
+      // Create event service with mock event store (AFTER registering mocks)
       eventService = EventService(eventStore: mockEventStore)
 
       // Create network queue
@@ -46,6 +51,7 @@ final class EventServiceTests: AsyncSpec {
     afterEach {
       await mockNetworkQueue?.shutdown()
       await mockNuxieApi?.reset()
+      await mockOutcomeBroker?.reset()
       mockEventStore.resetMock()
       mockIdentityService.reset()
       Container.shared.reset()
@@ -66,44 +72,58 @@ final class EventServiceTests: AsyncSpec {
             journeyService: nil
           )
 
-          // Configuration is internal, so we test its effects by routing an event
-          let event = TestEventBuilder(name: "test_event")
-            .withDistinctId("user123")
-            .withProperties(["key": "value"])
-            .build()
-
-          let result = await eventService.route(event)
-          expect(result).toNot(beNil())
+          // Configuration is internal, so we test its effects by tracking an event
+          var trackResult: EventResult?
+          eventService.track(
+            "test_event",
+            properties: ["key": "value"],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          expect(trackResult).to(equal(.noInteraction))
         }
 
         it("should work without network queue or journey service") {
           try await eventService.configure(networkQueue: nil, journeyService: nil)
 
-          let event = TestEventBuilder(name: "test_event")
-            .withDistinctId("user123")
-            .withProperties(["key": "value"])
-            .build()
-
-          let result = await eventService.route(event)
-          expect(result).toNot(beNil())
+          var trackResult: EventResult?
+          eventService.track(
+            "test_event",
+            properties: ["key": "value"],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          expect(trackResult).to(equal(.noInteraction))
         }
       }
 
-      describe("route") {
+      describe("track") {
 
-        it("should route event to local storage") {
+        it("should track event to local storage") {
           // Configure the service to open the ready latch
           try await eventService.configure(networkQueue: nil, journeyService: nil)
 
-          let event = TestEventBuilder(name: "test_event")
-            .withDistinctId("user123")
-            .withProperties(["key": "value", "$session_id": "session1"])
-            .build()
-
-          let result = await eventService.route(event)
-
-          expect(result).toNot(beNil())
-          expect(result?.name).to(equal("test_event"))
+          var trackResult: EventResult?
+          eventService.track(
+            "test_event",
+            properties: ["key": "value", "$session_id": "session1"],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          
+          expect(trackResult).to(equal(.noInteraction))
 
           // Verify event was stored
           expect(mockEventStore.storeEventCallCount).to(equal(1))
@@ -111,17 +131,22 @@ final class EventServiceTests: AsyncSpec {
           expect(mockEventStore.storedEvents.first?.name).to(equal("test_event"))
         }
 
-        it("should route event to network queue when configured") {
+        it("should track event to network queue when configured") {
           try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
 
-          let event = TestEventBuilder(name: "network_test")
-            .withDistinctId("user123")
-            .withProperties(["test": "value"])
-            .build()
-
-          let result = await eventService.route(event)
-
-          expect(result).toNot(beNil())
+          var trackResult: EventResult?
+          eventService.track(
+            "network_test",
+            properties: ["test": "value"],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          
+          expect(trackResult).to(equal(.noInteraction))
 
           // Give network queue time to process
           await expect { await mockNetworkQueue.getQueueSize() }
@@ -133,15 +158,22 @@ final class EventServiceTests: AsyncSpec {
 
           mockIdentityService.setDistinctId("user123")
 
-          let event = TestEventBuilder(name: "user_update")
-            .withDistinctId("user123")
-            .withProperties([
+          var trackResult: EventResult?
+          eventService.track(
+            "user_update",
+            properties: [
               "$set": ["name": "John Doe", "email": "john@example.com"],
               "other": "value",
-            ])
-            .build()
-
-          await eventService.route(event)
+            ],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          
+          expect(trackResult).to(equal(.noInteraction))
 
           // Verify identity service received the properties
           let userProps = mockIdentityService.getUserProperties()
@@ -154,15 +186,22 @@ final class EventServiceTests: AsyncSpec {
 
           mockIdentityService.setDistinctId("user123")
 
-          let event = TestEventBuilder(name: "user_update")
-            .withDistinctId("user123")
-            .withProperties([
+          var trackResult: EventResult?
+          eventService.track(
+            "user_update",
+            properties: [
               "$set_once": ["first_seen": "2024-01-01", "source": "organic"],
               "other": "value",
-            ])
-            .build()
-
-          await eventService.route(event)
+            ],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          
+          expect(trackResult).to(equal(.noInteraction))
 
           // Verify identity service received the properties
           let userProps = mockIdentityService.getUserProperties()
@@ -175,49 +214,71 @@ final class EventServiceTests: AsyncSpec {
 
           mockEventStore.shouldFailStore = true
 
-          let event = TestEventBuilder(name: "fail_test")
-            .withDistinctId("user123")
-            .withProperties(["key": "value"])
-            .build()
-
-          // Should not throw, just log error
-          let result = await eventService.route(event)
-
-          expect(result).toNot(beNil())
+          var trackResult: EventResult?
+          eventService.track(
+            "fail_test",
+            properties: ["key": "value"],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          
+          // Should not throw, just continues with noInteraction
+          expect(trackResult).to(equal(.noInteraction))
           expect(mockEventStore.storeEventCallCount).to(equal(1))
           expect(mockEventStore.storedEvents.count).to(equal(0))
         }
 
-        it("should return the same event that was routed") {
+        it("should store event with correct properties") {
           try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
 
-          let event = TestEventBuilder(name: "return_test")
-            .withDistinctId("user123")
-            .withProperties(["unique": "identifier"])
-            .build()
-
-          let result = await eventService.route(event)
-
-          expect(result?.id).to(equal(event.id))
-          expect(result?.name).to(equal(event.name))
-          expect(result?.distinctId).to(equal(event.distinctId))
+          var trackResult: EventResult?
+          eventService.track(
+            "return_test",
+            properties: ["unique": "identifier"],
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+          ) { result in
+            trackResult = result
+          }
+          
+          await eventService.drain()
+          
+          expect(trackResult).to(equal(.noInteraction))
+          
+          // Verify stored event has correct properties
+          let storedEvent = mockEventStore.storedEvents.first
+          expect(storedEvent?.name).to(equal("return_test"))
+          let props = storedEvent?.getPropertiesDict()
+          expect(props?["unique"] as? String).to(equal("identifier"))
         }
       }
 
-      describe("routeBatch") {
+      describe("track multiple events") {
 
-        it("should route multiple events") {
+        it("should track multiple events") {
           try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
 
-          let events = [
-            TestEventBuilder(name: "event1").withDistinctId("user1").build(),
-            TestEventBuilder(name: "event2").withDistinctId("user2").build(),
-            TestEventBuilder(name: "event3").withDistinctId("user3").build(),
-          ]
+          // Track multiple events
+          var results: [EventResult?] = []
+          
+          eventService.track("event1", properties: nil, userProperties: nil, userPropertiesSetOnce: nil) { result in
+            results.append(result)
+          }
+          eventService.track("event2", properties: nil, userProperties: nil, userPropertiesSetOnce: nil) { result in
+            results.append(result)
+          }
+          eventService.track("event3", properties: nil, userProperties: nil, userPropertiesSetOnce: nil) { result in
+            results.append(result)
+          }
+          
+          await eventService.drain()
 
-          let routed = await eventService.routeBatch(events)
-
-          expect(routed.count).to(equal(3))
+          expect(results.count).to(equal(3))
+          expect(results.allSatisfy { $0 == .noInteraction }).to(beTrue())
           expect(mockEventStore.storedEvents.count).to(equal(3))
           expect(mockEventStore.storeEventCallCount).to(equal(3))
         }
@@ -225,28 +286,34 @@ final class EventServiceTests: AsyncSpec {
         it("should handle partial failures in batch") {
           try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
 
-          // Simulate a temporary storage failure
-          let events = [
-            TestEventBuilder(name: "event1").withDistinctId("user1").build(),
-            TestEventBuilder(name: "event2").withDistinctId("user2").build(),
-            TestEventBuilder(name: "event3").withDistinctId("user3").build(),
-          ]
-
+          var results: [EventResult?] = []
+          
           // First event succeeds
           mockEventStore.shouldFailStore = false
-          await eventService.route(events[0])
+          eventService.track("event1", properties: nil, userProperties: nil, userPropertiesSetOnce: nil) { result in
+            results.append(result)
+          }
+          await eventService.drain()
 
           // Second event fails
           mockEventStore.shouldFailStore = true
-          await eventService.route(events[1])
+          eventService.track("event2", properties: nil, userProperties: nil, userPropertiesSetOnce: nil) { result in
+            results.append(result)
+          }
+          await eventService.drain()
 
           // Third event succeeds again
           mockEventStore.shouldFailStore = false
-          await eventService.route(events[2])
+          eventService.track("event3", properties: nil, userProperties: nil, userPropertiesSetOnce: nil) { result in
+            results.append(result)
+          }
+          await eventService.drain()
 
           // Check that events 1 and 3 were stored despite event 2 failing
           expect(mockEventStore.storedEvents.count).to(equal(2))
           expect(mockEventStore.storeEventCallCount).to(equal(3))
+          expect(results.count).to(equal(3))
+          expect(results.allSatisfy { $0 == .noInteraction }).to(beTrue())
         }
       }
 
@@ -547,223 +614,6 @@ final class EventServiceTests: AsyncSpec {
 
           // helper for Nimble
           func handledCount() async -> Int { handled.count }
-        }
-
-        it(
-          "buffers post-identify network enqueues but does NOT block local store or journeys; then sends $identify first and drains in order"
-        ) {
-          // Arrange
-          try await eventService.configure(
-            networkQueue: mockNetworkQueue, journeyService: JourneyServiceSpy())
-
-          let anonId = "anon-\(UUID().uuidString)"
-          mockIdentityService.setDistinctId(anonId)
-
-          // Begin the ordering barrier BEFORE any post-identify tracks
-          eventService.beginIdentityTransition()
-
-          // Post-identify events (these should be buffered for NETWORK only)
-          let post1 = TestEventBuilder(name: "post_1")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "s1"])
-            .build()
-
-          let post2 = TestEventBuilder(name: "post_2")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "s1"])
-            .build()
-
-          // Act: route while barrier is closed
-          await eventService.route(post1)
-          await eventService.route(post2)
-
-          // Assert: local storage occurred immediately
-          expect(mockEventStore.storeEventCallCount).to(equal(2))
-          expect(mockEventStore.storedEvents.map { $0.name }).to(contain(["post_1", "post_2"]))
-
-          // Assert: nothing has reached the NETWORK queue yet (buffering)
-          await expect { await mockNetworkQueue.getQueueSize() }
-            .toEventually(equal(0), timeout: .milliseconds(200))
-
-          // Now perform identify (this enqueues + flushes $identify, then drains the buffer)
-          await eventService.identifyUser(
-            distinctId: "user123",
-            anonymousId: anonId,
-            wasIdentified: false,
-            userProperties: nil,
-            userPropertiesSetOnce: nil
-          )
-
-          // Wait until the API observed all three events
-          await expect { await mockNuxieApi.sentEvents.count }
-            .toEventually(equal(3), timeout: .seconds(2))
-
-          // Assert exact on-the-wire order: $identify first, then buffered events in order
-          let names = await mockNuxieApi.sentEvents.map(\.name)
-          expect(names.first).to(equal("$identify"))
-          expect(Array(names.dropFirst())).to(equal(["post_1", "post_2"]))
-        }
-
-        it("re-opens after draining: subsequent events enqueue immediately") {
-          // Arrange
-          try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
-
-          let anonId = "anon-\(UUID().uuidString)"
-          mockIdentityService.setDistinctId(anonId)
-          eventService.beginIdentityTransition()
-
-          // Buffer one event
-          let buffered = TestEventBuilder(name: "buffered")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "s1"])
-            .build()
-          await eventService.route(buffered)
-
-          // Identify (routes $identify, drains buffer, resumes)
-          await eventService.identifyUser(
-            distinctId: "user123",
-            anonymousId: anonId,
-            wasIdentified: false,
-            userProperties: nil,
-            userPropertiesSetOnce: nil
-          )
-
-          // Wait until the API saw the two events
-          await expect { await mockNuxieApi.sentEvents.count }
-            .toEventually(equal(2), timeout: .seconds(2))
-
-          // Now route another event; with the barrier open it should go straight to the queue
-          let after = TestEventBuilder(name: "after_open")
-            .withDistinctId("user123")
-            .withProperties(["$session_id": "s2"])
-            .build()
-          let _ = await eventService.route(after)
-          
-          // Manually flush to ensure the event is sent
-          _ = await eventService.flushEvents()
-
-          // Either it gets queued or flushed quickly; assert it arrives at the API soon.
-          await expect { await mockNuxieApi.sentEvents.map(\.name).contains("after_open") }
-            .toEventually(beTrue(), timeout: .seconds(2))
-        }
-
-        it("$identify is first relative to any post-identify tracks even under concurrency") {
-          // Arrange
-          try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
-
-          let anonId = "anon-\(UUID().uuidString)"
-          mockIdentityService.setDistinctId(anonId)
-          
-          // Start the barrier just before we begin concurrent operations
-          eventService.beginIdentityTransition()
-          
-          // First, route some events that will definitely be buffered
-          let pre1 = TestEventBuilder(name: "pre1")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "sx"])
-            .build()
-          let pre2 = TestEventBuilder(name: "pre2")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "sx"])
-            .build()
-          await eventService.route(pre1)
-          await eventService.route(pre2)
-
-          // Now kick off concurrent tracks that might race with identify
-          await withTaskGroup(of: Void.self) { group in
-            for i in 0..<3 {
-              group.addTask {
-                let e = TestEventBuilder(name: "p\(i)")
-                  .withDistinctId(anonId)
-                  .withProperties(["$session_id": "sx"])
-                  .build()
-                await eventService.route(e)
-              }
-            }
-            // Small delay to let some events get buffered
-            group.addTask {
-              try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
-              await eventService.identifyUser(
-                distinctId: "userXYZ",
-                anonymousId: anonId,
-                wasIdentified: false,
-                userProperties: nil,
-                userPropertiesSetOnce: nil
-              )
-            }
-            await group.waitForAll()
-          }
-
-          // Wait for everything to be delivered
-          await expect { await mockNuxieApi.sentEvents.count }
-            .toEventually(equal(6), timeout: .seconds(3))
-
-          let names = await mockNuxieApi.sentEvents.map(\.name)
-          expect(names.first).to(equal("$identify"))  // first must be identify
-          
-          // The rest should be our pre and p events (order among them doesn't matter)
-          let remainingNames = Set(names.dropFirst())
-          expect(remainingNames).to(equal(Set(["pre1", "pre2", "p0", "p1", "p2"])))
-        }
-        
-        it("$identify is sent in its own batch, separate from buffered events") {
-          // This test verifies that $identify is sent alone in the first batch,
-          // and buffered events are sent in a subsequent batch
-          
-          // Arrange
-          try await eventService.configure(networkQueue: mockNetworkQueue, journeyService: nil)
-          
-          let anonId = "anon-\(UUID().uuidString)"
-          mockIdentityService.setDistinctId(anonId)
-          eventService.beginIdentityTransition()
-          
-          // Route events that will be buffered
-          let event1 = TestEventBuilder(name: "buffered_1")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "s1"])
-            .build()
-          let event2 = TestEventBuilder(name: "buffered_2")
-            .withDistinctId(anonId)
-            .withProperties(["$session_id": "s1"])
-            .build()
-            
-          await eventService.route(event1)
-          await eventService.route(event2)
-          
-          // Track how many times sendBatch is called
-          var batchCallCount = 0
-          var firstBatchEvents: [String] = []
-          var secondBatchEvents: [String] = []
-          
-          // Override the mock API to capture batch calls
-          await mockNuxieApi.reset()
-          
-          // Now identify - this should trigger two separate batches
-          await eventService.identifyUser(
-            distinctId: "user123",
-            anonymousId: anonId,
-            wasIdentified: false,
-            userProperties: nil,
-            userPropertiesSetOnce: nil
-          )
-          
-          // Wait for events to be sent
-          await expect { await mockNuxieApi.sentEvents.count }
-            .toEventually(equal(3), timeout: .seconds(2))
-          
-          // Get the sent events
-          let sentEvents = await mockNuxieApi.sentEvents
-          
-          // Verify $identify was sent first
-          expect(sentEvents.first?.name).to(equal("$identify"))
-          
-          // Check the sendBatch call count to verify separate batches
-          let callCount = await mockNuxieApi.sendBatchCallCount
-          expect(callCount).to(beGreaterThanOrEqualTo(2)) // At least 2 batches
-          
-          // Verify the order: $identify first, then the buffered events
-          let eventNames = sentEvents.map(\.name)
-          expect(eventNames).to(equal(["$identify", "buffered_1", "buffered_2"]))
         }
       }
 

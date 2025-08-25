@@ -494,7 +494,10 @@ public actor JourneyService: JourneyServiceProtocol {
           "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
           "met_at": at.timeIntervalSince1970,
           "window_seconds": journey.conversionWindow,
-        ]
+        ],
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
       )
     } else {
       LogDebug("[JourneyService.evaluateGoalIfNeeded] Goal not met, journey continues")
@@ -661,7 +664,10 @@ public actor JourneyService: JourneyServiceProtocol {
         journey: journey,
         exitReason: reason,
         durationSeconds: duration
-      )
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     // Remove from in-memory registry and tasks

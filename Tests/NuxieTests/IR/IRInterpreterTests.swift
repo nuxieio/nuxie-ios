@@ -42,14 +42,6 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
     var stoppedResult = false
     var restartedResult = false
     
-    func beginIdentityTransition() {
-        // Mock implementation - no-op for tests
-    }
-    
-    func identifyUser(distinctId: String, anonymousId: String?, wasIdentified: Bool, userProperties: [String: Any]?, userPropertiesSetOnce: [String: Any]?) async {
-        // Mock implementation - no-op for tests
-    }
-    
     func exists(name: String, since: Date?, until: Date?, where predicate: IRPredicate?) async -> Bool {
         return existsResult
     }
@@ -87,11 +79,9 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
     }
     
     // Required EventServiceProtocol methods
-    func trackAsync(_ event: String, properties: [String: Any]?, userProperties: [String: Any]?, userPropertiesSetOnce: [String: Any]?, completion: ((EventResult) -> Void)?) async {
+    func track(_ event: String, properties: [String: Any]?, userProperties: [String: Any]?, userPropertiesSetOnce: [String: Any]?, completion: ((EventResult) -> Void)?) {
         completion?(.noInteraction)
     }
-    func route(_ event: NuxieEvent) async -> NuxieEvent? { return event }
-    func routeBatch(_ events: [NuxieEvent]) async -> [NuxieEvent] { return events }
     func configure(networkQueue: NuxieNetworkQueue?, journeyService: JourneyServiceProtocol?, contextBuilder: NuxieContextBuilder?, configuration: NuxieConfiguration?) async throws {}
     func getRecentEvents(limit: Int) async -> [StoredEvent] { return [] }
     func getEventsForUser(_ distinctId: String, limit: Int) async -> [StoredEvent] { return [] }
