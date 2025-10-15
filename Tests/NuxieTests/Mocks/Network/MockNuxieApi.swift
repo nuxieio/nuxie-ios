@@ -25,6 +25,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
     public var sendBatchCallCount = 0
     public var fetchFlowCallCount = 0
     public var trackEventCallCount = 0
+    public var lastRequestedLocale: String?
+    public var flowResponses: [String: RemoteFlow] = [:]
     
     public var lastTimeoutUsed: TimeInterval?
     
@@ -93,6 +95,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
             flows: [flow],
             userProperties: nil
         )
+        setFlowResponse(flow)
     }
     
     // Configuration methods
@@ -171,11 +174,20 @@ public actor MockNuxieApi: NuxieApiProtocol {
         return try await fetchProfile(for: distinctId)
     }
     
-    public func fetchFlow(flowId: String) async throws -> RemoteFlow {
+    public func fetchFlow(flowId: String, locale: String? = nil) async throws -> RemoteFlow {
         fetchFlowCallCount += 1
+        lastRequestedLocale = locale
         
         if shouldFailFlow {
             throw NuxieNetworkError.httpError(statusCode: 404, message: "Flow not found")
+        }
+
+        let key = flowKey(flowId, locale)
+        if let response = flowResponses[key] {
+            return response
+        }
+        if let fallback = flowResponses[flowKey(flowId, nil)] {
+            return fallback
         }
         
         return RemoteFlow(
@@ -188,7 +200,9 @@ public actor MockNuxieApi: NuxieApiProtocol {
                 totalSize: 1024,
                 contentHash: "hash123",
                 files: []
-            )
+            ),
+            locale: locale,
+            defaultLocale: locale
         )
     }
     
@@ -214,6 +228,15 @@ public actor MockNuxieApi: NuxieApiProtocol {
             usage: nil
         )
     }
+
+    public func setFlowResponse(_ flow: RemoteFlow, locale: String? = nil) {
+        flowResponses[flowKey(flow.id, locale)] = flow
+    }
+
+    private func flowKey(_ flowId: String, _ locale: String?) -> String {
+        let normalized = locale?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "default"
+        return "\(flowId)#\(normalized)"
+    }
     
     // Test helpers
     public func reset() {
@@ -229,6 +252,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
         trackEventCallCount = 0
         lastTimeoutUsed = nil
         sentEvents.removeAll()
+        flowResponses.removeAll()
+        lastRequestedLocale = nil
         
         // Reset profileResponse to default
         setupDefaultProfileResponse()

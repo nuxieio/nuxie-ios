@@ -117,12 +117,115 @@ public struct Segment: Codable {
 }
 
 // RemoteFlow represents immutable flow data from the server
+public struct RemoteFlowLocaleVariant: Codable, Equatable {
+    public let locale: String
+    public let url: String
+    public let manifest: BuildManifest
+    public let products: [RemoteFlowProduct]?
+    public let name: String?
+
+    public init(
+        locale: String,
+        url: String,
+        manifest: BuildManifest,
+        products: [RemoteFlowProduct]? = nil,
+        name: String? = nil
+    ) {
+        self.locale = locale
+        self.url = url
+        self.manifest = manifest
+        self.products = products
+        self.name = name
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case locale
+        case url
+        case manifest
+        case products
+        case name
+    }
+}
+
 public struct RemoteFlow: Codable {
     public let id: String
     public let name: String
     public let url: String
     public let products: [RemoteFlowProduct]
     public let manifest: BuildManifest
+    public let locale: String?
+    public let defaultLocale: String?
+    public let availableLocales: [RemoteFlowLocaleVariant]
+
+    public init(
+        id: String,
+        name: String,
+        url: String,
+        products: [RemoteFlowProduct],
+        manifest: BuildManifest,
+        locale: String? = nil,
+        defaultLocale: String? = nil,
+        availableLocales: [RemoteFlowLocaleVariant] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.products = products
+        self.manifest = manifest
+        self.locale = locale
+        self.defaultLocale = defaultLocale
+        self.availableLocales = availableLocales
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case url
+        case products
+        case manifest
+        case locale
+        case defaultLocale
+        case availableLocales
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let name = try container.decode(String.self, forKey: .name)
+        let url = try container.decode(String.self, forKey: .url)
+        let products = try container.decodeIfPresent([RemoteFlowProduct].self, forKey: .products) ?? []
+        let manifest = try container.decode(BuildManifest.self, forKey: .manifest)
+        let locale = try container.decodeIfPresent(String.self, forKey: .locale)
+        let defaultLocale = try container.decodeIfPresent(String.self, forKey: .defaultLocale)
+        let availableLocales = try container.decodeIfPresent(
+            [RemoteFlowLocaleVariant].self,
+            forKey: .availableLocales
+        ) ?? []
+
+        self.init(
+            id: id,
+            name: name,
+            url: url,
+            products: products,
+            manifest: manifest,
+            locale: locale,
+            defaultLocale: defaultLocale,
+            availableLocales: availableLocales
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(url, forKey: .url)
+        try container.encode(products, forKey: .products)
+        try container.encode(manifest, forKey: .manifest)
+        try container.encodeIfPresent(locale, forKey: .locale)
+        try container.encodeIfPresent(defaultLocale, forKey: .defaultLocale)
+        if !availableLocales.isEmpty {
+            try container.encode(availableLocales, forKey: .availableLocales)
+        }
+    }
 }
 
 public struct Frame: Codable {

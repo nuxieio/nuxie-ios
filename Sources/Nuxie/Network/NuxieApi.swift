@@ -58,19 +58,27 @@ public actor NuxieApi: NuxieApiProtocol {
         var request = URLRequest(url: url)
         request.httpMethod = endpoint.method.rawValue
         
-        // Auth handling
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        var queryItems = components?.queryItems ?? []
+        if let endpointItems = endpoint.queryItems {
+            queryItems.append(contentsOf: endpointItems)
+        }
+
         switch endpoint.authMethod {
         case .apiKeyInBody:
-            // apiKey added in body later
             break
         case .apiKeyInQuery:
-            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            var items = comps?.queryItems ?? []
-            items.append(URLQueryItem(name: "apiKey", value: apiKey))
-            comps?.queryItems = items
-            if let composed = comps?.url { 
-                request.url = composed 
-            }
+            queryItems.append(URLQueryItem(name: "apiKey", value: apiKey))
+        }
+
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+
+        if let composed = components?.url {
+            request.url = composed
+        } else {
+            request.url = url
         }
         
         // Handle request body
@@ -159,19 +167,27 @@ public actor NuxieApi: NuxieApiProtocol {
         request.httpMethod = endpoint.method.rawValue
         request.timeoutInterval = timeout  // Set timeout on the request itself
         
-        // Auth handling
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        var queryItems = components?.queryItems ?? []
+        if let endpointItems = endpoint.queryItems {
+            queryItems.append(contentsOf: endpointItems)
+        }
+
         switch endpoint.authMethod {
         case .apiKeyInBody:
-            // apiKey added in body later
             break
         case .apiKeyInQuery:
-            var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-            var items = comps?.queryItems ?? []
-            items.append(URLQueryItem(name: "apiKey", value: apiKey))
-            comps?.queryItems = items
-            if let composed = comps?.url { 
-                request.url = composed 
-            }
+            queryItems.append(URLQueryItem(name: "apiKey", value: apiKey))
+        }
+
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+
+        if let composed = components?.url {
+            request.url = composed
+        } else {
+            request.url = url
         }
         
         // Handle request body
@@ -337,9 +353,9 @@ extension NuxieApi {
     // MARK: - Flow
     
     /// Fetch flow by ID
-    public func fetchFlow(flowId: String) async throws -> RemoteFlow {
+    public func fetchFlow(flowId: String, locale: String? = nil) async throws -> RemoteFlow {
         return try await self.request(
-            endpoint: .flow(flowId),
+            endpoint: .flow(flowId, locale: locale),
             body: nil,
             responseType: RemoteFlow.self
         )
@@ -370,4 +386,3 @@ extension NuxieApi {
         )
     }
 }
-

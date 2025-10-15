@@ -21,7 +21,7 @@ class JourneyExecutorTestFlowService: FlowServiceProtocol {
     }
     
     @MainActor
-    func viewController(for flowId: String) async throws -> FlowViewController {
+    func viewController(for flowId: String, locale: String?) async throws -> FlowViewController {
         viewControllerCalled = true
         lastFlowId = flowId
         if shouldFailViewController {

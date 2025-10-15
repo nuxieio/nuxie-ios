@@ -6,6 +6,7 @@ import Foundation
 public struct Flow {
     // IMPORTANT: RemoteFlow is immutable server data - never modify
     public let remoteFlow: RemoteFlow              // Original data from ProfileManager/API
+    public let locale: String?
     
     // Client-side enrichments
     public var products: [FlowProduct]         // Products fetched from StoreKit
@@ -15,6 +16,7 @@ public struct Flow {
     public var name: String { remoteFlow.name }
     public var manifest: BuildManifest { remoteFlow.manifest }
     public var url: String { remoteFlow.url }
+    public var localeIdentifier: String? { locale }
     
     // Validation
     public var isValid: Bool {
@@ -23,10 +25,12 @@ public struct Flow {
     
     public init(
         remoteFlow: RemoteFlow,
-        products: [FlowProduct] = []
+        products: [FlowProduct] = [],
+        locale: String? = nil
     ) {
         self.remoteFlow = remoteFlow
         self.products = products
+        self.locale = locale ?? remoteFlow.locale ?? remoteFlow.defaultLocale
     }
 }
 
@@ -147,15 +151,17 @@ public struct IntroductoryOffer: Equatable, Codable {
 /// Composite key for caching flows with variants
 public struct FlowCacheKey: Hashable {
     public let id: String
+    public let locale: String?
     public let variant: String?
     public let userSegment: String?
     
     public var hash: String {
-        "\(id)_\(variant ?? "default")_\(userSegment ?? "all")"
+        "\(id)_locale:\(locale ?? "default")_variant:\(variant ?? "base")_segment:\(userSegment ?? "all")"
     }
     
-    public init(id: String, variant: String? = nil, userSegment: String? = nil) {
+    public init(id: String, locale: String? = nil, variant: String? = nil, userSegment: String? = nil) {
         self.id = id
+        self.locale = locale
         self.variant = variant
         self.userSegment = userSegment
     }

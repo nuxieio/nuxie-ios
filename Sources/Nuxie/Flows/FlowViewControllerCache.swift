@@ -27,22 +27,28 @@ final class FlowViewControllerCache {
     // MARK: - Public Methods
     
     /// 1. Get view controller from cache (returns nil if not cached)
-    func getCachedViewController(for flowId: String) -> FlowViewController? {
-        return cache[flowId]
+    func getCachedViewController(for flowId: String, locale: String?) -> FlowViewController? {
+        let key = storageKey(for: flowId, locale: locale)
+        return cache[key]
     }
     
     /// 2. Create view controller and insert into cache
     func createViewController(for flow: Flow) -> FlowViewController {
         // MainActor ensures we're on main thread
         let viewController = FlowViewController(flow: flow, archiveService: flowArchiver)
-        cache[flow.id] = viewController
+        let key = storageKey(for: flow.id, locale: flow.localeIdentifier)
+        cache[key] = viewController
         return viewController
     }
     
     /// 3. Remove a specific view controller from cache
     func removeViewController(for flowId: String) {
-        cache.removeValue(forKey: flowId)
-        loadedViewControllers.remove(flowId)
+        cache.keys
+            .filter { $0.hasPrefix("\(flowId)#") }
+            .forEach { key in
+                cache.removeValue(forKey: key)
+                loadedViewControllers.remove(key)
+            }
     }
     
     /// 4. Clear all cached view controllers
@@ -61,5 +67,12 @@ final class FlowViewControllerCache {
     /// Get loaded view controller count
     var loadedCount: Int {
         return loadedViewControllers.count
+    }
+
+    // MARK: - Helpers
+
+    private func storageKey(for flowId: String, locale: String?) -> String {
+        let normalizedLocale = locale?.lowercased() ?? "default"
+        return "\(flowId)#\(normalizedLocale)"
     }
 }

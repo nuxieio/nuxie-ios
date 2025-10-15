@@ -4,7 +4,7 @@ enum APIEndpoint {
     case profile(ProfileRequest)
     case event(EventRequest)
     case batch(BatchRequest)
-    case flow(String) // flowId
+    case flow(String, locale: String? = nil) // flowId
     
     var path: String {
         switch self {
@@ -14,7 +14,7 @@ enum APIEndpoint {
             return "/api/i/event"
         case .batch:
             return "/api/i/batch"
-        case .flow(let flowId):
+        case .flow(let flowId, _):
             return "/api/i/flows/\(flowId)"
         }
     }
@@ -34,6 +34,18 @@ enum APIEndpoint {
             return .apiKeyInBody
         case .flow:
             return .apiKeyInQuery
+        }
+    }
+
+    var queryItems: [URLQueryItem]? {
+        switch self {
+        case .flow(_, let locale):
+            if let locale, !locale.isEmpty {
+                return [URLQueryItem(name: "locale", value: locale)]
+            }
+            return nil
+        default:
+            return nil
         }
     }
 }

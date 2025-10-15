@@ -134,13 +134,14 @@ class FlowViewModel {
         // Check if the flow content has changed (using manifest hash)
         let hasContentChanged = flow.remoteFlow.manifest.contentHash != newFlow.remoteFlow.manifest.contentHash
         let hasURLChanged = flow.remoteFlow.url != newFlow.remoteFlow.url
+        let localeChanged = (flow.localeIdentifier?.lowercased() ?? "default") != (newFlow.localeIdentifier?.lowercased() ?? "default")
         
         // Always update the flow reference
         self.flow = newFlow
         self.products = newFlow.products
         
         // If content or URL changed, reload the web view
-        if hasContentChanged || hasURLChanged {
+        if hasContentChanged || hasURLChanged || localeChanged {
             LogDebug("Flow content changed for \(flow.id), reloading web view")
             loadFlow()
         } else if products != newFlow.products {

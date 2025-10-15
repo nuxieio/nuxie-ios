@@ -12,7 +12,7 @@ protocol FlowServiceProtocol: AnyObject {
     
     /// Get a view controller for a flow by ID
     @MainActor
-    func viewController(for flowId: String) async throws -> FlowViewController
+    func viewController(for flowId: String, locale: String?) async throws -> FlowViewController
     
     /// Clear all cached data (flows and WebArchives)
     func clearCache() async
@@ -86,9 +86,9 @@ final class FlowService: FlowServiceProtocol {
     // MARK: - Data Operations (can be called from any thread)
     
     /// Fetch flow data with products - does not create UI
-    func fetchFlow(id: String) async throws -> Flow {
+    func fetchFlow(id: String, locale: String? = nil) async throws -> Flow {
         // This can be called from any thread
-        return try await flowStore.flow(with: id)
+        return try await flowStore.flow(with: id, locale: locale)
     }
         
     // MARK: - UI Operations (MUST be called from main thread)
@@ -100,7 +100,7 @@ final class FlowService: FlowServiceProtocol {
     @MainActor
     func viewController(for flow: Flow) -> FlowViewController {
         // Path A: Check cache first
-        if let cached = viewControllerCache.getCachedViewController(for: flow.id) {
+        if let cached = viewControllerCache.getCachedViewController(for: flow.id, locale: flow.localeIdentifier) {
             LogDebug("Cache hit: returning cached view controller for flow: \(flow.id)")
             
             // Update the cached view controller with the latest flow data
@@ -118,9 +118,9 @@ final class FlowService: FlowServiceProtocol {
     
     /// Get view controller for flow by ID - fetches flow first then creates view controller
     @MainActor
-    func viewController(for flowId: String) async throws -> FlowViewController {
+    func viewController(for flowId: String, locale: String?) async throws -> FlowViewController {
         // Fetch the flow data first
-        let flow = try await fetchFlow(id: flowId)
+        let flow = try await fetchFlow(id: flowId, locale: locale)
         
         // Then get or create the view controller
         return viewController(for: flow)
@@ -180,5 +180,14 @@ enum FlowError: LocalizedError {
         case .configurationFailed(let error):
             return "Flow configuration failed: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - Convenience Helpers
+
+extension FlowServiceProtocol {
+    @MainActor
+    func viewController(for flowId: String) async throws -> FlowViewController {
+        try await viewController(for: flowId, locale: nil)
     }
 }

@@ -12,7 +12,7 @@ public protocol NuxieApiProtocol: AnyObject {
     func fetchProfileWithTimeout(for distinctId: String, timeout: TimeInterval) async throws -> ProfileResponse
     
     /// Fetch flow by ID
-    func fetchFlow(flowId: String) async throws -> RemoteFlow
+    func fetchFlow(flowId: String, locale: String?) async throws -> RemoteFlow
     
     /// Track a single event
     func trackEvent(

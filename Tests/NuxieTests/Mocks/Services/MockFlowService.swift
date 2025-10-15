@@ -9,7 +9,7 @@ public class MockFlowService: FlowServiceProtocol {
     // Error testing properties
     public var shouldFailFlowDisplay = false
     public var failureError: Error?
-    public var displayAttempts: [(flowId: String, timestamp: Date)] = []
+    public var displayAttempts: [(flowId: String, locale: String?, timestamp: Date)] = []
     
     // Property storage for testing
     private var properties: [String: Any] = [:]
@@ -27,9 +27,9 @@ public class MockFlowService: FlowServiceProtocol {
     }
     
     @MainActor
-    public func viewController(for flowId: String) async throws -> FlowViewController {
+    public func viewController(for flowId: String, locale: String? = nil) async throws -> FlowViewController {
         // Track display attempts
-        displayAttempts.append((flowId: flowId, timestamp: Date()))
+        displayAttempts.append((flowId: flowId, locale: locale, timestamp: Date()))
         
         // Check if we should fail
         if shouldFailFlowDisplay {
@@ -37,6 +37,11 @@ public class MockFlowService: FlowServiceProtocol {
         }
         
         // Return specific mock view controller if available
+        let localeKey = storageKey(for: flowId, locale: locale)
+        if let mockVC = mockViewControllers[localeKey] {
+            return mockVC
+        }
+        
         if let mockVC = mockViewControllers[flowId] {
             return mockVC
         }
@@ -74,6 +79,11 @@ public class MockFlowService: FlowServiceProtocol {
     
     public func setProperty(_ key: String, value: Any?) {
         properties[key] = value
+    }
+
+    private func storageKey(for flowId: String, locale: String?) -> String {
+        let normalized = locale?.lowercased() ?? "default"
+        return "\(flowId)#\(normalized)"
     }
 }
 

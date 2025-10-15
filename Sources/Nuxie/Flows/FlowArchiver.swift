@@ -147,7 +147,13 @@ actor FlowArchiver {
         // Use the content hash and flow ID for canonical path
         // This ensures same content = same file
         let hash = flow.manifest.contentHash
-        let filename = "flow_\(flow.id)_\(hash).webarchive"
+        let locale = flow.locale ?? flow.defaultLocale ?? "default"
+        let filename = "flow_\(flow.id)_\(sanitizeLocale(locale))_\(hash).webarchive"
         return cacheDirectory.appendingPathComponent(filename)
+    }
+
+    private func sanitizeLocale(_ locale: String) -> String {
+        let pattern = "[^A-Za-z0-9-]"
+        return locale.replacingOccurrences(of: pattern, with: "-", options: .regularExpression)
     }
 }
