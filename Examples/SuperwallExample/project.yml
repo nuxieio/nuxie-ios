@@ -1,0 +1,47 @@
+name: NuxieSuperwallExample
+options:
+  bundleIdPrefix: io.nuxie.example
+
+packages:
+  Nuxie:
+    path: ../../
+  Superwall:
+    url: https://github.com/superwall/Superwall-iOS.git
+    branch: develop
+
+targets:
+  SuperwallExample:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - Sources
+    dependencies:
+      - package: Nuxie
+        product: Nuxie
+      - package: Nuxie
+        product: NuxieSuperwall
+      - package: Superwall
+        product: SuperwallKit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.nuxie.example.superwall
+      PRODUCT_NAME: Nuxie + Superwall
+      INFOPLIST_FILE: Sources/Info.plist
+      SWIFT_VERSION: "5.9"
+      TARGETED_DEVICE_FAMILY: "1,2"
+
+schemes:
+  SuperwallExample:
+    build:
+      targets:
+        SuperwallExample: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

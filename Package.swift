@@ -11,11 +11,21 @@ let package = Package(
             name: "Nuxie",
             targets: ["Nuxie"]
         ),
+        .library(
+            name: "NuxieRevenueCat",
+            targets: ["NuxieRevenueCat"]
+        ),
+        .library(
+            name: "NuxieSuperwall",
+            targets: ["NuxieSuperwall"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/Quick/Quick.git", from: "7.0.0"),
         .package(url: "https://github.com/Quick/Nimble.git", from: "13.0.0"),
         .package(url: "https://github.com/hmlongco/Factory.git", from: "2.5.0"),
+        .package(url: "https://github.com/RevenueCat/purchases-ios.git", branch: "main"),
+        .package(url: "https://github.com/superwall/Superwall-iOS.git", branch: "develop"),
     ],
     targets: [
         .target(
@@ -36,6 +46,22 @@ let package = Package(
                 "Nimble"
             ],
             path: "Tests/NuxieTests"
+        ),
+        .target(
+            name: "NuxieRevenueCat",
+            dependencies: [
+                "Nuxie",
+                .product(name: "RevenueCat", package: "purchases-ios")
+            ],
+            path: "Sources/NuxieRevenueCat"
+        ),
+        .target(
+            name: "NuxieSuperwall",
+            dependencies: [
+                "Nuxie",
+                .product(name: "SuperwallKit", package: "Superwall-iOS")
+            ],
+            path: "Sources/NuxieSuperwall"
         ),
     ]
 )
