@@ -28,7 +28,7 @@ public final class NuxieSuperwallPurchaseDelegate: NuxiePurchaseDelegate {
         self.superwall = superwall
     }
 
-    public func purchase(_ product: any StoreProductProtocol) async -> PurchaseResult {
+    public func purchase(_ product: any StoreProductProtocol) async -> Nuxie.PurchaseResult {
         do {
             let storeProduct = try await fetchProduct(withIdentifier: product.id)
             let result = await superwall.purchase(storeProduct)
@@ -60,7 +60,7 @@ public final class NuxieSuperwallPurchaseDelegate: NuxiePurchaseDelegate {
         throw NuxieSuperwallBridgeError.productNotFound(identifier: identifier)
     }
 
-    private func mapPurchaseResult(_ result: SuperwallKit.PurchaseResult) -> PurchaseResult {
+    private func mapPurchaseResult(_ result: SuperwallKit.PurchaseResult) -> Nuxie.PurchaseResult {
         switch result {
         case .purchased:
             return .success
