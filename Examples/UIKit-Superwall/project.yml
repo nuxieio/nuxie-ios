@@ -1,0 +1,46 @@
+name: MoodLog-Superwall
+options:
+  bundleIdPrefix: io.nuxie.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  MoodLog-Superwall:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - Sources
+    dependencies:
+      - package: Nuxie
+        product: Nuxie
+      - package: Nuxie
+        product: NuxieSuperwall
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.nuxie.examples.moodlog.superwall
+      PRODUCT_NAME: MoodLog (Superwall)
+      INFOPLIST_FILE: Sources/App/Info.plist
+      SWIFT_VERSION: "5.9"
+      TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+
+packages:
+  Nuxie:
+    path: ../../
+
+schemes:
+  MoodLog-Superwall:
+    build:
+      targets:
+        MoodLog-Superwall: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
