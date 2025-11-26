@@ -189,7 +189,48 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
       throw JourneyError.invalidNodeType
     }
 
-    let flowId = showFlowNode.data.flowId
+    let flowId: String
+    var experimentContext: (experimentId: String, variantId: String)? = nil
+
+    // Check for experiment mode (A/B testing)
+    if let experiment = showFlowNode.data.experiment {
+      // Assign variant using stable hash (same user always gets same variant)
+      let variant = assignExperimentVariant(
+        distinctId: journey.distinctId,
+        experiment: experiment
+      )
+      flowId = variant.flowId
+      experimentContext = (experiment.id, variant.id)
+
+      LogInfo(
+        "Experiment '\(experiment.name ?? experiment.id)': assigned variant '\(variant.name ?? variant.id)' to user \(journey.distinctId)"
+      )
+
+      // Track experiment assignment event
+      eventService.track(
+        JourneyEvents.experimentVariantAssigned,
+        properties: JourneyEvents.experimentVariantAssignedProperties(
+          journey: journey,
+          nodeId: node.id,
+          experiment: experiment,
+          variant: variant
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
+
+      // Store experiment context in journey for attribution on downstream events
+      journey.setContext("_experiment_id", value: experiment.id)
+      journey.setContext("_variant_id", value: variant.id)
+    } else if let singleFlowId = showFlowNode.data.flowId {
+      // Single flow mode (existing behavior)
+      flowId = singleFlowId
+    } else {
+      LogError("ShowFlowNode has neither flowId nor experiment configured")
+      return .skip(node.next.first)
+    }
+
     LogInfo("Showing flow \(flowId) for journey \(journey.id)")
     LogDebug("[JourneyExecutor] ShowFlow node \(node.id): flowId=\(flowId), next=\(node.next)")
 
@@ -209,14 +250,19 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
       }
     }
 
-    // Track flow shown event for observability
+    // Track flow shown event for observability (with experiment context if present)
+    var flowShownProps = JourneyEvents.flowShownProperties(
+      journey: journey,
+      nodeId: node.id,
+      flowId: flowId
+    )
+    if let expCtx = experimentContext {
+      flowShownProps["experiment_id"] = expCtx.experimentId
+      flowShownProps["variant_id"] = expCtx.variantId
+    }
     eventService.track(
       JourneyEvents.flowShown,
-      properties: JourneyEvents.flowShownProperties(
-        journey: journey,
-        nodeId: node.id,
-        flowId: flowId
-      ),
+      properties: flowShownProps,
       userProperties: nil,
       userPropertiesSetOnce: nil,
       completion: nil
@@ -225,6 +271,40 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     // Continue to next node immediately (fire-and-forget pattern)
     LogDebug("[JourneyExecutor] ShowFlow returning continue to nodes: \(node.next)")
     return .continue(node.next)
+  }
+
+  // MARK: - Experiment Helpers
+
+  /// Assign a variant to a user using a deterministic hash
+  /// This ensures the same user always gets the same variant across sessions
+  private func assignExperimentVariant(
+    distinctId: String,
+    experiment: ExperimentConfig
+  ) -> ExperimentVariant {
+    let seed = "\(distinctId):\(experiment.id)"
+    let bucket = stableHash(seed) % 100
+
+    var cumulative: Double = 0
+    for variant in experiment.variants {
+      cumulative += variant.percentage
+      if Double(bucket) < cumulative {
+        return variant
+      }
+    }
+
+    // Fallback to first variant (shouldn't happen if percentages sum to 100)
+    return experiment.variants[0]
+  }
+
+  /// Deterministic hash function (FNV-1a)
+  /// Produces consistent results across sessions for the same input
+  private func stableHash(_ input: String) -> Int {
+    var hash: UInt64 = 14_695_981_039_346_656_037
+    for byte in input.utf8 {
+      hash ^= UInt64(byte)
+      hash &*= 1_099_511_628_211
+    }
+    return Int(hash & 0x7FFF_FFFF_FFFF_FFFF)
   }
 
   private func executeTimeDelay(_ node: WorkflowNode, journey: Journey) -> NodeExecutionResult {

@@ -33,6 +33,36 @@ public enum NodeType: String, Codable {
     case exit = "exit"
 }
 
+// MARK: - Experiment Types (A/B Testing)
+
+/// A single variant in an A/B test experiment
+public struct ExperimentVariant: Codable {
+    public let id: String
+    public let flowId: String
+    public let percentage: Double // 0-100, all variants must sum to 100
+    public let name: String? // Display name (e.g., "Control", "Variant A")
+
+    public init(id: String, flowId: String, percentage: Double, name: String? = nil) {
+        self.id = id
+        self.flowId = flowId
+        self.percentage = percentage
+        self.name = name
+    }
+}
+
+/// Configuration for an A/B test experiment on a show_flow node
+public struct ExperimentConfig: Codable {
+    public let id: String // Unique experiment identifier
+    public let name: String? // Display name for the experiment
+    public let variants: [ExperimentVariant] // At least 2 variants (control + variation)
+
+    public init(id: String, name: String? = nil, variants: [ExperimentVariant]) {
+        self.id = id
+        self.name = name
+        self.variants = variants
+    }
+}
+
 // MARK: - Phase 1 Node Implementations (MVP)
 
 /// Show a flow/paywall to the user
@@ -41,9 +71,17 @@ public struct ShowFlowNode: WorkflowNode {
     public let type = NodeType.showFlow
     public let next: [String]
     public let data: ShowFlowData
-    
+
     public struct ShowFlowData: Codable {
-        public let flowId: String
+        // Single flow mode
+        public let flowId: String?
+        // Experiment mode (A/B testing)
+        public let experiment: ExperimentConfig?
+
+        public init(flowId: String? = nil, experiment: ExperimentConfig? = nil) {
+            self.flowId = flowId
+            self.experiment = experiment
+        }
     }
 }
 

@@ -34,6 +34,9 @@ public class JourneyEvents {
     
     /// Delegate events
     public static let delegateCalled = "$delegate_called"
+
+    /// Experiment events (A/B testing)
+    public static let experimentVariantAssigned = "$experiment_variant_assigned"
     
     // MARK: - Event Property Builders
     
@@ -292,20 +295,42 @@ public class JourneyEvents {
             "exit_reason": exitReason.rawValue,
             "had_conversion": journey.convertedAt != nil
         ]
-        
+
         if let duration = durationSeconds {
             properties["duration_seconds"] = Int(duration)
         }
-        
+
         if let convertedAt = journey.convertedAt {
             properties["converted_at"] = convertedAt.timeIntervalSince1970
         }
-        
+
         if let goalKind = journey.goalSnapshot?.kind {
             properties["goal_kind"] = goalKind.rawValue
         }
-        
+
         return properties
+    }
+
+    // MARK: - Experiment Event Properties
+
+    /// Build properties for experiment_variant_assigned event
+    /// Follows Customer.io's "Experiment Viewed" semantic event schema
+    public static func experimentVariantAssignedProperties(
+        journey: Journey,
+        nodeId: String,
+        experiment: ExperimentConfig,
+        variant: ExperimentVariant
+    ) -> [String: Any] {
+        return [
+            "experiment_id": experiment.id,
+            "experiment_name": experiment.name ?? "",
+            "variant_id": variant.id,
+            "variant_name": variant.name ?? "",
+            "flow_id": variant.flowId,
+            "campaign_id": journey.campaignId,
+            "journey_id": journey.id,
+            "node_id": nodeId
+        ]
     }
 }
 
