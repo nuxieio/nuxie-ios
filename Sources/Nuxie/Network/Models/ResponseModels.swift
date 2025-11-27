@@ -23,6 +23,15 @@ public struct ProfileResponse: Codable {
     public let segments: [Segment]
     public let flows: [RemoteFlow]
     public let userProperties: [String: AnyCodable]?
+    /// Server-computed experiment variant assignments (experimentId -> assignment)
+    public let experimentAssignments: [String: ExperimentAssignment]?
+}
+
+/// Pre-computed experiment variant assignment from server
+public struct ExperimentAssignment: Codable {
+    public let experimentId: String
+    public let variantId: String
+    public let flowId: String
 }
 
 // MARK: - Campaign Models
