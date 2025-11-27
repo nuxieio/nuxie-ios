@@ -190,8 +190,8 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
       throw JourneyError.invalidNodeType
     }
 
-    let flowId: String
-    var experimentContext: (experimentId: String, variantId: String)? = nil
+    var flowId: String? = nil
+    var experimentContext: (experimentId: String, variantId: String, isHoldout: Bool)? = nil
 
     // Check for experiment mode (A/B testing)
     if let experiment = showFlowNode.data.experiment {
@@ -200,22 +200,25 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
         distinctId: journey.distinctId,
         experiment: experiment
       )
-      flowId = variant.flowId
-      experimentContext = (experiment.id, variant.id)
+      flowId = variant.flowId  // May be nil for holdout variants
+      let isHoldout = variant.flowId == nil
+      experimentContext = (experiment.id, variant.id, isHoldout)
 
       LogInfo(
-        "Experiment '\(experiment.name ?? experiment.id)': assigned variant '\(variant.name ?? variant.id)' to user \(journey.distinctId)"
+        "Experiment '\(experiment.name ?? experiment.id)': assigned variant '\(variant.name ?? variant.id)' (holdout: \(isHoldout)) to user \(journey.distinctId)"
       )
 
       // Track experiment assignment event
+      var assignmentProps = JourneyEvents.experimentVariantAssignedProperties(
+        journey: journey,
+        nodeId: node.id,
+        experiment: experiment,
+        variant: variant
+      )
+      assignmentProps["is_holdout"] = isHoldout
       eventService.track(
         JourneyEvents.experimentVariantAssigned,
-        properties: JourneyEvents.experimentVariantAssignedProperties(
-          journey: journey,
-          nodeId: node.id,
-          experiment: experiment,
-          variant: variant
-        ),
+        properties: assignmentProps,
         userProperties: nil,
         userPropertiesSetOnce: nil,
         completion: nil
@@ -224,6 +227,7 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
       // Store experiment context in journey for attribution on downstream events
       journey.setContext("_experiment_id", value: experiment.id)
       journey.setContext("_variant_id", value: variant.id)
+      journey.setContext("_is_holdout", value: isHoldout)
     } else if let singleFlowId = showFlowNode.data.flowId {
       // Single flow mode (existing behavior)
       flowId = singleFlowId
@@ -232,22 +236,50 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
       return .skip(node.next.first)
     }
 
-    LogInfo("Showing flow \(flowId) for journey \(journey.id)")
-    LogDebug("[JourneyExecutor] ShowFlow node \(node.id): flowId=\(flowId), next=\(node.next)")
+    // Handle holdout variant - track exposure but don't show any flow
+    if flowId == nil {
+      LogInfo("Holdout variant assigned for journey \(journey.id) - skipping flow presentation")
+
+      // Track holdout exposure for analytics
+      if let expCtx = experimentContext {
+        eventService.track(
+          "$experiment_holdout_exposure",
+          properties: [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "node_id": node.id,
+            "experiment_id": expCtx.experimentId,
+            "variant_id": expCtx.variantId,
+          ],
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
+        )
+      }
+
+      // Continue to next node without showing a flow
+      return .continue(node.next)
+    }
+
+    // Non-holdout path: show the flow
+    let resolvedFlowId = flowId!
+
+    LogInfo("Showing flow \(resolvedFlowId) for journey \(journey.id)")
+    LogDebug("[JourneyExecutor] ShowFlow node \(node.id): flowId=\(resolvedFlowId), next=\(node.next)")
 
     // Bind the journey/flow to the originating event for outcome tracking
     if let originEventId = journey.getContext("_origin_event_id") as? String {
-      await outcomeBroker.bind(eventId: originEventId, journeyId: journey.id, flowId: flowId)
+      await outcomeBroker.bind(eventId: originEventId, journeyId: journey.id, flowId: resolvedFlowId)
     }
 
     // Present flow using FlowPresentationService (fire-and-forget)
     Task { @MainActor [weak self] in
       guard let self = self else { return }
       do {
-        try await self.flowPresentationService.presentFlow(flowId, from: journey)
-        LogInfo("Successfully presented flow \(flowId) for journey \(journey.id)")
+        try await self.flowPresentationService.presentFlow(resolvedFlowId, from: journey)
+        LogInfo("Successfully presented flow \(resolvedFlowId) for journey \(journey.id)")
       } catch {
-        LogError("Failed to present flow \(flowId): \(error)")
+        LogError("Failed to present flow \(resolvedFlowId): \(error)")
       }
     }
 
@@ -255,11 +287,12 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     var flowShownProps = JourneyEvents.flowShownProperties(
       journey: journey,
       nodeId: node.id,
-      flowId: flowId
+      flowId: resolvedFlowId
     )
     if let expCtx = experimentContext {
       flowShownProps["experiment_id"] = expCtx.experimentId
       flowShownProps["variant_id"] = expCtx.variantId
+      flowShownProps["is_holdout"] = expCtx.isHoldout
     }
     eventService.track(
       JourneyEvents.flowShown,

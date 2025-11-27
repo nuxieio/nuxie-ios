@@ -31,7 +31,7 @@ public struct ProfileResponse: Codable {
 public struct ExperimentAssignment: Codable {
     public let experimentId: String
     public let variantId: String
-    public let flowId: String
+    public let flowId: String? // nil = holdout (control group that shows nothing)
 }
 
 // MARK: - Campaign Models
