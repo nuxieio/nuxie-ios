@@ -38,11 +38,11 @@ public enum NodeType: String, Codable {
 /// A single variant in an A/B test experiment
 public struct ExperimentVariant: Codable {
     public let id: String
-    public let flowId: String
+    public let flowId: String? // nil = holdout (control group that shows nothing)
     public let percentage: Double // 0-100, all variants must sum to 100
     public let name: String? // Display name (e.g., "Control", "Variant A")
 
-    public init(id: String, flowId: String, percentage: Double, name: String? = nil) {
+    public init(id: String, flowId: String?, percentage: Double, name: String? = nil) {
         self.id = id
         self.flowId = flowId
         self.percentage = percentage
