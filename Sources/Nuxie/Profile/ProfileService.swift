@@ -154,6 +154,17 @@ internal actor ProfileService: ProfileServiceProtocol {
 
     // MARK: - Helpers
 
+    /// Get the effective locale to send in profile requests
+    /// Uses configured override or device locale
+    private var effectiveLocale: String {
+        // Check for configured locale override first
+        if let overrideLocale = NuxieSDK.shared.configuration?.localeIdentifier {
+            return overrideLocale
+        }
+        // Fall back to device locale
+        return Locale.current.identifier
+    }
+
     /// Load profile from disk cache into memory on startup
     private func loadFromDisk() async {
         let distinctId = identityService.getDistinctId()
@@ -172,8 +183,9 @@ internal actor ProfileService: ProfileServiceProtocol {
     /// Refresh profile from network
     private func refreshProfile(distinctId: String) async throws -> ProfileResponse {
         do {
-            let fresh = try await api.fetchProfile(for: distinctId)
-            LogInfo("Network fetch succeeded; updating cache")
+            let locale = effectiveLocale
+            let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
+            LogInfo("Network fetch succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
             await handleProfileUpdate(fresh)
             return fresh
@@ -186,8 +198,9 @@ internal actor ProfileService: ProfileServiceProtocol {
     /// Background refresh without throwing
     private func refreshInBackground(distinctId: String) async {
         do {
-            let fresh = try await api.fetchProfile(for: distinctId)
-            LogInfo("Background refresh succeeded; updating cache")
+            let locale = effectiveLocale
+            let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
+            LogInfo("Background refresh succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
             await handleProfileUpdate(fresh)
         } catch {

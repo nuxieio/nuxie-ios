@@ -87,7 +87,16 @@ public class NuxieConfiguration {
     public var defaultPaywallTimeout: TimeInterval = 10
     public var respectDoNotTrack: Bool = true
     public var eventLinkingPolicy: EventLinkingPolicy = .migrateOnIdentify
-    
+
+    /// Locale settings
+    /// Override device locale for paywall content (e.g., "es_ES", "de_DE")
+    /// When nil, uses device's current locale. Changing this requires calling refreshProfile().
+    public var localeIdentifier: String?
+
+    /// Debug mode - when true, bypasses flow cache for fresh fetches
+    /// Useful for testing locale changes and flow updates during development
+    public var isDebugMode: Bool = false
+
     /// Plugin settings
     public var enablePlugins: Bool = true
     public var plugins: [NuxiePlugin] = []

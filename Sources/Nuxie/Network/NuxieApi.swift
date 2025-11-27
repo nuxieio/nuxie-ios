@@ -236,20 +236,20 @@ public actor NuxieApi: NuxieApiProtocol {
 extension NuxieApi {
     
     // MARK: - Profile
-    
-    /// Fetch user profile
-    public func fetchProfile(for distinctId: String) async throws -> ProfileResponse {
-        let request = ProfileRequest(distinctId: distinctId)
+
+    /// Fetch user profile with locale for server-side content resolution
+    public func fetchProfile(for distinctId: String, locale: String? = nil) async throws -> ProfileResponse {
+        let request = ProfileRequest(distinctId: distinctId, locale: locale)
         return try await self.request(
             endpoint: .profile(request),
             body: request,
             responseType: ProfileResponse.self
         )
     }
-    
+
     /// Fetch user profile with custom timeout (for fast cache checks)
-    public func fetchProfileWithTimeout(for distinctId: String, timeout: TimeInterval) async throws -> ProfileResponse {
-        let request = ProfileRequest(distinctId: distinctId)
+    public func fetchProfileWithTimeout(for distinctId: String, locale: String? = nil, timeout: TimeInterval) async throws -> ProfileResponse {
+        let request = ProfileRequest(distinctId: distinctId, locale: locale)
         return try await self.requestWithTimeout(
             endpoint: .profile(request),
             body: request,
