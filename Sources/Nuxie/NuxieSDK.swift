@@ -493,6 +493,22 @@ public final class NuxieSDK {
     try await flowPresentationService.presentFlow(flowId, from: nil)
   }
 
+  // MARK: - Profile Management
+
+  /// Refresh the user profile from the server
+  /// Call this after changing `configuration.localeIdentifier` to fetch locale-specific content
+  /// - Returns: The refreshed profile response
+  /// - Throws: NuxieError if SDK not configured or network request fails
+  @discardableResult
+  public func refreshProfile() async throws -> ProfileResponse {
+    guard isSetup else {
+      throw NuxieError.notConfigured
+    }
+
+    let profileService = container.profileService()
+    return try await profileService.refetchProfile()
+  }
+
   // MARK: - Event System Public API
 
   /// Manually flush the network queue

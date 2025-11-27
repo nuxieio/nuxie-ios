@@ -79,17 +79,20 @@ public struct BatchEventItem: Codable {
 
 struct ProfileRequest: Codable {
     let distinctId: String
+    let locale: String?
     let groups: [String: AnyCodable]?
     let version: Int?
-    
-    init(distinctId: String, groups: [String: Any]? = nil, version: Int = 1) {
+
+    init(distinctId: String, locale: String? = nil, groups: [String: Any]? = nil, version: Int = 1) {
         self.distinctId = distinctId
+        self.locale = locale
         self.groups = groups?.mapValues { AnyCodable($0) }
         self.version = version
     }
-    
+
     enum CodingKeys: String, CodingKey {
         case distinctId = "distinct_id"
+        case locale
         case groups
         case version
     }

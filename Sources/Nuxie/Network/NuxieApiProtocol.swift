@@ -4,16 +4,16 @@ import Foundation
 public protocol NuxieApiProtocol: AnyObject {
     /// Send batch of events
     func sendBatch(events: [BatchEventItem]) async throws -> BatchResponse
-    
-    /// Fetch user profile
-    func fetchProfile(for distinctId: String) async throws -> ProfileResponse
-    
+
+    /// Fetch user profile with optional locale for server-side content resolution
+    func fetchProfile(for distinctId: String, locale: String?) async throws -> ProfileResponse
+
     /// Fetch user profile with custom timeout
-    func fetchProfileWithTimeout(for distinctId: String, timeout: TimeInterval) async throws -> ProfileResponse
-    
+    func fetchProfileWithTimeout(for distinctId: String, locale: String?, timeout: TimeInterval) async throws -> ProfileResponse
+
     /// Fetch flow by ID
     func fetchFlow(flowId: String) async throws -> RemoteFlow
-    
+
     /// Track a single event
     func trackEvent(
         event: String,
