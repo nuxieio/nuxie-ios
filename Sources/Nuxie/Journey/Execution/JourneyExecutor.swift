@@ -32,6 +32,7 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
   @Injected(\.eventService) private var eventService: EventServiceProtocol
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
+  @Injected(\.profileService) private var profileService: ProfileServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.irRuntime) private var irRuntime: IRRuntime
   @Injected(\.outcomeBroker) private var outcomeBroker: OutcomeBrokerProtocol
@@ -194,8 +195,8 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
 
     // Check for experiment mode (A/B testing)
     if let experiment = showFlowNode.data.experiment {
-      // Assign variant using stable hash (same user always gets same variant)
-      let variant = assignExperimentVariant(
+      // Resolve variant: server assignment first, fallback to local hash
+      let variant = await resolveExperimentVariant(
         distinctId: journey.distinctId,
         experiment: experiment
       )
@@ -275,9 +276,44 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
 
   // MARK: - Experiment Helpers
 
-  /// Assign a variant to a user using a deterministic hash
-  /// This ensures the same user always gets the same variant across sessions
-  private func assignExperimentVariant(
+  /// Resolve experiment variant: server assignment first, fallback to local hash
+  /// Server is source of truth; local hash used for offline/cache scenarios
+  private func resolveExperimentVariant(
+    distinctId: String,
+    experiment: ExperimentConfig
+  ) async -> ExperimentVariant {
+    // Try server assignment first (from cached profile)
+    if let assignment = await getServerAssignment(
+      distinctId: distinctId,
+      experimentId: experiment.id
+    ) {
+      // Find the variant matching the server's assignment
+      if let variant = experiment.variants.first(where: { $0.id == assignment.variantId }) {
+        LogDebug("Using server-assigned variant '\(variant.id)' for experiment '\(experiment.id)'")
+        return variant
+      }
+      LogWarning("Server assigned variant '\(assignment.variantId)' not found in experiment config, falling back to local hash")
+    }
+
+    // Fallback to local deterministic hash (for offline/old cache)
+    LogDebug("Using local hash for experiment '\(experiment.id)' (no server assignment)")
+    return computeVariantLocally(distinctId: distinctId, experiment: experiment)
+  }
+
+  /// Get server-computed experiment assignment from cached profile
+  private func getServerAssignment(
+    distinctId: String,
+    experimentId: String
+  ) async -> ExperimentAssignment? {
+    guard let profile = await profileService.getCachedProfile(distinctId: distinctId) else {
+      return nil
+    }
+    return profile.experimentAssignments?[experimentId]
+  }
+
+  /// Compute variant locally using deterministic FNV-1a hash
+  /// Used as fallback when server assignment isn't available
+  private func computeVariantLocally(
     distinctId: String,
     experiment: ExperimentConfig
   ) -> ExperimentVariant {
