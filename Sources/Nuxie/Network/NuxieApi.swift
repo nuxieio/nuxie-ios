@@ -346,7 +346,7 @@ extension NuxieApi {
     }
     
     // MARK: - Event Tracking
-    
+
     /// Track a single event
     public func trackEvent(
         event: String,
@@ -362,11 +362,34 @@ extension NuxieApi {
             idempotencyKey: UUID.v7().uuidString,
             value: value
         )
-        
+
         return try await self.request(
             endpoint: .event(request),
             body: request,
             responseType: EventResponse.self
+        )
+    }
+
+    // MARK: - Feature Check
+
+    /// Check if a customer has access to a feature (real-time server check)
+    public func checkFeature(
+        customerId: String,
+        featureId: String,
+        requiredBalance: Int? = nil,
+        entityId: String? = nil
+    ) async throws -> FeatureCheckResult {
+        let request = FeatureCheckRequest(
+            customerId: customerId,
+            featureId: featureId,
+            requiredBalance: requiredBalance,
+            entityId: entityId
+        )
+
+        return try await self.request(
+            endpoint: .checkFeature(request),
+            body: request,
+            responseType: FeatureCheckResult.self
         )
     }
 }

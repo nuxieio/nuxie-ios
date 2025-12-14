@@ -198,14 +198,18 @@ public final class NuxieSDK {
         // ProfileService handles its own cache transition
         let profileService = container.profileService()
         await profileService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
-        
+
         // SegmentService needs to handle identity transition
         let segmentService = container.segmentService()
         await segmentService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
-        
+
         // JourneyService needs to cancel old journeys and load new ones
         let journeyService = container.journeyService()
         await journeyService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
+
+        // FeatureService needs to clear cache for new user
+        let featureService = container.featureService()
+        await featureService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
       }
     }
     
@@ -259,18 +263,22 @@ public final class NuxieSDK {
     Task {
       let profileService = container.profileService()
       await profileService.clearCache(distinctId: previousDistinctId)
-      
+
       // Get the new distinct ID (will be anonymous ID after reset)
       let newDistinctId = identityService.getDistinctId()
-      
+
       // Clear segment data for the previous user and handle user change
       let segmentService = container.segmentService()
       await segmentService.clearSegments(for: previousDistinctId)
       await segmentService.handleUserChange(from: previousDistinctId, to: newDistinctId)
-      
+
       // Handle user change in JourneyService (cancel old journeys, load new)
       let journeyService = container.journeyService()
       await journeyService.handleUserChange(from: previousDistinctId, to: newDistinctId)
+
+      // Clear feature cache for the previous user
+      let featureService = container.featureService()
+      await featureService.clearCache()
     }
 
     // Start new session on reset
@@ -540,6 +548,116 @@ public final class NuxieSDK {
     guard isSetup else { return }
     let eventService = container.eventService()
     await eventService.resumeEventQueue()
+  }
+
+  // MARK: - Feature Access
+
+  /// Check if user has access to a feature (cache-first)
+  /// For boolean features, returns whether the user has access.
+  /// For metered features, returns whether the user has sufficient balance.
+  /// - Parameter featureId: The feature identifier (extId from dashboard)
+  /// - Returns: FeatureAccess with access information
+  /// - Throws: NuxieError if SDK not configured or check fails
+  public func hasFeature(_ featureId: String) async throws -> FeatureAccess {
+    guard isSetup else {
+      throw NuxieError.notConfigured
+    }
+
+    let featureService = container.featureService()
+    return try await featureService.checkWithCache(
+      featureId: featureId,
+      requiredBalance: nil,
+      entityId: nil,
+      forceRefresh: false
+    )
+  }
+
+  /// Check if user has sufficient balance for a metered feature (cache-first)
+  /// - Parameters:
+  ///   - featureId: The feature identifier
+  ///   - requiredBalance: Amount to check against (default: 1)
+  ///   - entityId: Optional entity ID for entity-based balances (per-project limits, etc.)
+  /// - Returns: FeatureAccess with balance information
+  /// - Throws: NuxieError if SDK not configured or check fails
+  public func hasFeature(
+    _ featureId: String,
+    requiredBalance: Int = 1,
+    entityId: String? = nil
+  ) async throws -> FeatureAccess {
+    guard isSetup else {
+      throw NuxieError.notConfigured
+    }
+
+    let featureService = container.featureService()
+    return try await featureService.checkWithCache(
+      featureId: featureId,
+      requiredBalance: requiredBalance,
+      entityId: entityId,
+      forceRefresh: false
+    )
+  }
+
+  /// Get cached feature access status (instant, non-blocking)
+  /// Returns nil if the feature is not in cache.
+  /// - Parameters:
+  ///   - featureId: The feature identifier
+  ///   - entityId: Optional entity ID for entity-based balances
+  /// - Returns: FeatureAccess if cached, nil otherwise
+  public func getCachedFeature(_ featureId: String, entityId: String? = nil) async -> FeatureAccess? {
+    guard isSetup else { return nil }
+
+    let featureService = container.featureService()
+    return await featureService.getCached(featureId: featureId, entityId: entityId)
+  }
+
+  /// Check feature access in real-time (always makes network call)
+  /// Use this when you need authoritative server state for critical operations.
+  /// - Parameters:
+  ///   - featureId: The feature identifier
+  ///   - requiredBalance: Optional amount to check against
+  ///   - entityId: Optional entity ID for entity-based balances
+  /// - Returns: FeatureCheckResult from server
+  /// - Throws: NuxieError if SDK not configured or network fails
+  public func checkFeature(
+    _ featureId: String,
+    requiredBalance: Int? = nil,
+    entityId: String? = nil
+  ) async throws -> FeatureCheckResult {
+    guard isSetup else {
+      throw NuxieError.notConfigured
+    }
+
+    let featureService = container.featureService()
+    return try await featureService.check(
+      featureId: featureId,
+      requiredBalance: requiredBalance,
+      entityId: entityId
+    )
+  }
+
+  /// Force refresh feature access from server
+  /// - Parameters:
+  ///   - featureId: The feature identifier
+  ///   - requiredBalance: Optional amount to check against
+  ///   - entityId: Optional entity ID for entity-based balances
+  /// - Returns: Fresh FeatureCheckResult from server
+  /// - Throws: NuxieError if SDK not configured or network fails
+  @discardableResult
+  public func refreshFeature(
+    _ featureId: String,
+    requiredBalance: Int? = nil,
+    entityId: String? = nil
+  ) async throws -> FeatureCheckResult {
+    guard isSetup else {
+      throw NuxieError.notConfigured
+    }
+
+    let featureService = container.featureService()
+    return try await featureService.check(
+      featureId: featureId,
+      requiredBalance: requiredBalance,
+      entityId: entityId
+    )
   }
 
 }

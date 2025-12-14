@@ -25,6 +25,41 @@ public struct ProfileResponse: Codable {
     public let userProperties: [String: AnyCodable]?
     /// Server-computed experiment variant assignments (experimentId -> assignment)
     public let experimentAssignments: [String: ExperimentAssignment]?
+    /// Customer's feature access (from active subscriptions)
+    public let features: [Feature]?
+}
+
+// MARK: - Feature Models
+
+/// The type of feature
+public enum FeatureType: String, Codable, Sendable {
+    case boolean
+    case metered
+    case creditSystem
+}
+
+/// Balance information for entity-based features (per-project limits, etc.)
+public struct EntityBalance: Codable, Sendable {
+    public let balance: Int
+}
+
+/// Feature access state returned from server
+/// Represents what features a customer has access to based on their subscriptions
+public struct Feature: Codable, Sendable {
+    /// External feature ID
+    public let id: String
+    /// Feature type (boolean, metered, creditSystem)
+    public let type: FeatureType
+    /// Current balance (nil if unlimited or boolean)
+    public let balance: Int?
+    /// Whether this feature has unlimited access
+    public let unlimited: Bool
+    /// When the balance resets (Unix timestamp ms, nil if no reset)
+    public let nextResetAt: Int?
+    /// Reset interval (minute, hour, day, week, month, etc.)
+    public let interval: String?
+    /// Entity-based balances for per-entity limits (optional)
+    public let entities: [String: EntityBalance]?
 }
 
 /// Pre-computed experiment variant assignment from server
