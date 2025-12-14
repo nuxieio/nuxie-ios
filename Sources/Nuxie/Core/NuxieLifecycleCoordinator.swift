@@ -12,6 +12,7 @@ final class NuxieLifecycleCoordinator {
   @Injected(\.profileService) private var profileService: ProfileServiceProtocol
   @Injected(\.flowPresentationService) private var flowPresentationService: FlowPresentationServiceProtocol
   @Injected(\.pluginService) private var pluginService: PluginService
+  @Injected(\.featureService) private var featureService: FeatureServiceProtocol
 
   func start() {
     let nc = NotificationCenter.default
@@ -59,6 +60,8 @@ final class NuxieLifecycleCoordinator {
           self.sessionService.onAppBecameActive()
           await self.eventService.onAppBecameActive()
           await self.profileService.onAppBecameActive()
+          // Sync FeatureInfo after profile refresh (for SwiftUI reactivity)
+          await self.featureService.syncFeatureInfo()
           await self.journeyService.onAppBecameActive()
           // Notify plugins after all services are ready
           self.pluginService.onAppBecameActive()
