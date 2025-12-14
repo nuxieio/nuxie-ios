@@ -73,6 +73,11 @@ extension Container {
       .scope(.sdk)
   }
 
+  var featureService: Factory<FeatureServiceProtocol> {
+    self { FeatureService() }
+      .scope(.sdk)
+  }
+
   var flowPresentationService: Factory<FlowPresentationServiceProtocol> {
     self { @MainActor in FlowPresentationService(windowProvider: nil) }
       .scope(.sdk)

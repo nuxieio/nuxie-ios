@@ -21,4 +21,12 @@ public protocol NuxieApiProtocol: AnyObject {
         properties: [String: Any]?,
         value: Double?
     ) async throws -> EventResponse
+
+    /// Check feature access for a customer
+    func checkFeature(
+        customerId: String,
+        featureId: String,
+        requiredBalance: Int?,
+        entityId: String?
+    ) async throws -> FeatureCheckResult
 }

@@ -5,7 +5,8 @@ enum APIEndpoint {
     case event(EventRequest)
     case batch(BatchRequest)
     case flow(String) // flowId
-    
+    case checkFeature(FeatureCheckRequest)
+
     var path: String {
         switch self {
         case .profile:
@@ -16,21 +17,23 @@ enum APIEndpoint {
             return "/api/i/batch"
         case .flow(let flowId):
             return "/api/i/flows/\(flowId)"
+        case .checkFeature:
+            return "/api/i/entitled"
         }
     }
-    
+
     var method: HTTPMethod {
         switch self {
-        case .profile, .event, .batch:
+        case .profile, .event, .batch, .checkFeature:
             return .POST
         case .flow:
             return .GET
         }
     }
-    
+
     var authMethod: AuthMethod {
         switch self {
-        case .profile, .event, .batch:
+        case .profile, .event, .batch, .checkFeature:
             return .apiKeyInBody
         case .flow:
             return .apiKeyInQuery
