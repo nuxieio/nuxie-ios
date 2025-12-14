@@ -6,6 +6,9 @@ protocol FeatureServiceProtocol: AnyObject {
     /// Check feature access from cache (instant, non-blocking)
     func getCached(featureId: String, entityId: String?) async -> FeatureAccess?
 
+    /// Get all cached features from profile
+    func getAllCached() async -> [String: FeatureAccess]
+
     /// Check feature access via real-time API call
     func check(
         featureId: String,
@@ -26,6 +29,9 @@ protocol FeatureServiceProtocol: AnyObject {
 
     /// Handle user identity change
     func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async
+
+    /// Sync FeatureInfo from profile cache (call after profile refresh)
+    func syncFeatureInfo() async
 }
 
 /// Manages feature access checking with caching
@@ -42,6 +48,7 @@ internal actor FeatureService: FeatureServiceProtocol {
     @Injected(\.profileService) private var profileService: ProfileServiceProtocol
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     @Injected(\.sdkConfiguration) private var config: NuxieConfiguration
+    @Injected(\.featureInfo) private var featureInfo: FeatureInfo
 
     // Cache TTL for real-time results (from configuration)
     private var realTimeCacheTTL: TimeInterval {
@@ -98,6 +105,22 @@ internal actor FeatureService: FeatureServiceProtocol {
         return nil
     }
 
+    /// Get all cached features from profile
+    func getAllCached() async -> [String: FeatureAccess] {
+        let distinctId = identityService.getDistinctId()
+
+        guard let profile = await profileService.getCachedProfile(distinctId: distinctId),
+              let features = profile.features else {
+            return [:]
+        }
+
+        var result: [String: FeatureAccess] = [:]
+        for feature in features {
+            result[feature.id] = FeatureAccess(from: feature)
+        }
+        return result
+    }
+
     /// Check feature via real-time API (always fresh)
     func check(
         featureId: String,
@@ -116,6 +139,9 @@ internal actor FeatureService: FeatureServiceProtocol {
         // Cache the result
         let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
         realTimeCache[cacheKey] = (result: result, cachedAt: dateProvider.now())
+
+        // Update FeatureInfo for SwiftUI reactivity
+        await notifyFeatureInfoUpdate(featureId: featureId, access: FeatureAccess(from: result))
 
         return result
     }
@@ -164,7 +190,13 @@ internal actor FeatureService: FeatureServiceProtocol {
     /// Handle user identity change
     func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {
         await clearCache()
+        await notifyFeatureInfoUpdate()
         LogInfo("Feature cache cleared due to user change")
+    }
+
+    /// Sync FeatureInfo from profile cache (call after profile refresh)
+    func syncFeatureInfo() async {
+        await notifyFeatureInfoUpdate()
     }
 
     // MARK: - Private Methods
@@ -174,5 +206,20 @@ internal actor FeatureService: FeatureServiceProtocol {
             return "\(featureId):\(entityId)"
         }
         return featureId
+    }
+
+    /// Update FeatureInfo with current cached features (for SwiftUI reactivity)
+    private func notifyFeatureInfoUpdate() async {
+        let allFeatures = await getAllCached()
+        await MainActor.run {
+            featureInfo.update(allFeatures)
+        }
+    }
+
+    /// Update FeatureInfo with a single feature (after real-time check)
+    private func notifyFeatureInfoUpdate(featureId: String, access: FeatureAccess) async {
+        await MainActor.run {
+            featureInfo.update(featureId, access: access)
+        }
     }
 }

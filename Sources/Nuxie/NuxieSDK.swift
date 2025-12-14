@@ -18,6 +18,9 @@ public final class NuxieSDK {
   /// Current configuration (nil if not configured)
   private(set) public var configuration: NuxieConfiguration?
 
+  /// Delegate for receiving SDK callbacks
+  public weak var delegate: NuxieDelegate?
+
   /// Whether the SDK has been configured
   public var isSetup: Bool {
     if configuration == nil {
@@ -107,9 +110,20 @@ public final class NuxieSDK {
       LogDebug("Plugin system setup complete")
     }
 
-    // Fetch initial profile data
+    // Wire up FeatureInfo delegate callback
+    Task { @MainActor in
+      let featureInfo = container.featureInfo()
+      featureInfo.onFeatureChange = { [weak self] featureId, oldValue, newValue in
+        self?.delegate?.featureAccessDidChange(featureId, from: oldValue, to: newValue)
+      }
+    }
+
+    // Fetch initial profile data and sync feature info
     Task {
-      do { _ = try await Container.shared.profileService().refetchProfile() }
+      do {
+        _ = try await Container.shared.profileService().refetchProfile()
+        await Container.shared.featureService().syncFeatureInfo()
+      }
       catch { LogWarning("Profile fetch failed: \(error)") }
     }
 
@@ -297,6 +311,25 @@ public final class NuxieSDK {
   /// Get current SDK version
   public var version: String {
     SDKVersion.current
+  }
+
+  /// Observable feature info for SwiftUI
+  ///
+  /// Use this in SwiftUI views for reactive updates when features change:
+  /// ```swift
+  /// struct MyView: View {
+  ///     @ObservedObject var features = NuxieSDK.shared.features
+  ///
+  ///     var body: some View {
+  ///         if features.isAllowed("premium_feature") {
+  ///             PremiumContent()
+  ///         }
+  ///     }
+  /// }
+  /// ```
+  @MainActor
+  public var features: FeatureInfo {
+    container.featureInfo()
   }
 
 
