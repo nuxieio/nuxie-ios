@@ -41,9 +41,12 @@ internal actor FeatureService: FeatureServiceProtocol {
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
     @Injected(\.profileService) private var profileService: ProfileServiceProtocol
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
+    @Injected(\.sdkConfiguration) private var config: NuxieConfiguration
 
-    // Cache TTL for real-time results
-    private let realTimeCacheTTL: TimeInterval = 5 * 60 // 5 minutes
+    // Cache TTL for real-time results (from configuration)
+    private var realTimeCacheTTL: TimeInterval {
+        config.featureCacheTTL
+    }
 
     // MARK: - Init
 
@@ -75,8 +78,10 @@ internal actor FeatureService: FeatureServiceProtocol {
                         )
                     )
                 }
-                // Entity not found in cache
-                return nil
+                // Entity not in cache - return denied instead of nil
+                // This allows callers to distinguish "feature exists but entity denied"
+                // from "not cached at all"
+                return FeatureAccess.notFound
             }
             return FeatureAccess(from: feature)
         }

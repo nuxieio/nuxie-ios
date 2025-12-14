@@ -50,12 +50,7 @@ public struct FeatureAccess: Sendable {
         self.allowed = result.allowed
         self.unlimited = result.unlimited
         self.balance = result.balance
-        // Infer type from response characteristics
-        if result.unlimited || result.balance != nil {
-            self.type = .metered
-        } else {
-            self.type = .boolean
-        }
+        self.type = result.type
     }
 
     /// Create a "not found" result
@@ -82,6 +77,7 @@ public struct FeatureCheckResult: Codable, Sendable {
     public let allowed: Bool
     public let unlimited: Bool
     public let balance: Int?
+    public let type: FeatureType
     public let preview: AnyCodable?
 }
 

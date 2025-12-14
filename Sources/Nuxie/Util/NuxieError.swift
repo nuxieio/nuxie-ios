@@ -19,6 +19,10 @@ public enum NuxieError: LocalizedError {
     case flowManagerNotInitialized
     case flowError(String)
     case configurationError(String)
+
+    // Feature-specific errors
+    case featureNotFound(String)
+    case featureCheckFailed(String, Error)
     
     public var errorDescription: String? {
         switch self {
@@ -54,6 +58,10 @@ public enum NuxieError: LocalizedError {
             return "Flow error: \(message)"
         case .configurationError(let message):
             return "Configuration error: \(message)"
+        case .featureNotFound(let featureId):
+            return "Feature not found: \(featureId)"
+        case .featureCheckFailed(let featureId, let error):
+            return "Feature check failed for \(featureId): \(error.localizedDescription)"
         }
     }
 }
