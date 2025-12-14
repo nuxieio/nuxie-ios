@@ -117,11 +117,14 @@ public struct TimeWindowNode: WorkflowNode {
     public let type = NodeType.timeWindow
     public let next: [String]
     public let data: TimeWindowData
-    
+
     public struct TimeWindowData: Codable {
-        public let startTime: Date // ISO 8601 datetime
-        public let endTime: Date // ISO 8601 datetime
-        public let useUTC: Bool // true = UTC times, false = local device time
+        /// Start time in "HH:mm" format (24-hour), e.g., "09:00"
+        public let startTime: String
+        /// End time in "HH:mm" format (24-hour), e.g., "17:00"
+        public let endTime: String
+        /// IANA timezone identifier (e.g., "America/New_York", "UTC") or nil for device local time
+        public let timezone: String?
         /// Days of week to execute (iOS Calendar weekday format)
         /// 1 = Sunday, 2 = Monday, 3 = Tuesday, 4 = Wednesday, 5 = Thursday, 6 = Friday, 7 = Saturday
         /// Example: [2,3,4,5,6] = Mon-Fri (business days)

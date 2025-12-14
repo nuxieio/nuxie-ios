@@ -602,18 +602,19 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     LogInfo("Evaluating time window for journey \(journey.id)")
 
     let now = dateProvider.now()
-    let tz = data.useUTC ? TimeZone(identifier: "UTC")! : TimeZone.current
+
+    // Resolve timezone: nil = device local, otherwise IANA identifier
+    let tz = data.timezone.flatMap { TimeZone(identifier: $0) } ?? .current
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = tz
 
-    // 1) Extract start/end H:M in the correct timezone
-    let startHM = cal.dateComponents([.hour, .minute], from: data.startTime)
-    let endHM = cal.dateComponents([.hour, .minute], from: data.endTime)
-
-    guard let sh = startHM.hour, let sm = startHM.minute,
+    // 1) Parse start/end HH:mm strings
+    guard let startHM = parseTime(data.startTime),
+      let endHM = parseTime(data.endTime),
+      let sh = startHM.hour, let sm = startHM.minute,
       let eh = endHM.hour, let em = endHM.minute
     else {
-      LogError("Invalid time window times")
+      LogError("Invalid time window times: start=\(data.startTime), end=\(data.endTime)")
       return .skip(node.next.first)
     }
 
@@ -886,14 +887,15 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
   }
 
   private func calculateNextWindowOpen(
-    from date: Date, startTime: Date, timezone: TimeZone, validDays: [Int]?
+    from date: Date, startTime: String, timezone: TimeZone, validDays: [Int]?
   ) -> Date {
     var cal = Calendar(identifier: .gregorian)
     cal.timeZone = timezone
 
-    // Extract H:M of the configured start in the correct tz
-    let startHM = cal.dateComponents([.hour, .minute], from: startTime)
-    guard let sh = startHM.hour, let sm = startHM.minute else { return date }
+    // Parse H:M from startTime string (HH:mm format)
+    guard let startHM = parseTime(startTime),
+      let sh = startHM.hour, let sm = startHM.minute
+    else { return date }
 
     // Build "today at sh:sm" in tz
     var today = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
