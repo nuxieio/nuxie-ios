@@ -39,16 +39,9 @@ final class TimeWindowIntegrationTests: AsyncSpec {
         return (comps.hour ?? 0, comps.minute ?? 0)
       }
 
-      func makeUTCDate(hour: Int, minute: Int) -> Date {
-        var comps = DateComponents()
-        comps.year = 2000
-        comps.month = 1
-        comps.day = 1
-        comps.hour = hour
-        comps.minute = minute
-        comps.second = 0
-        comps.timeZone = TimeZone(secondsFromGMT: 0)
-        return Calendar(identifier: .gregorian).date(from: comps)!
+      /// Format hour and minute as "HH:mm" string
+      func formatTime(hour: Int, minute: Int) -> String {
+        String(format: "%02d:%02d", hour, minute)
       }
 
       func wrap24(_ v: Int) -> Int { (v % 24 + 24) % 24 }
@@ -101,8 +94,8 @@ final class TimeWindowIntegrationTests: AsyncSpec {
         let utc = TimeZone(secondsFromGMT: 0)!
 
         let (h, m) = hourMinute(now, tz: utc)
-        let start = makeUTCDate(hour: wrap24(h - 1), minute: m)
-        let end = makeUTCDate(hour: wrap24(h + 1), minute: m)
+        let startTime = formatTime(hour: wrap24(h - 1), minute: m)
+        let endTime = formatTime(hour: wrap24(h + 1), minute: m)
 
         let campaign = TestCampaignBuilder()
           .withId("tw-in-window")
@@ -113,9 +106,9 @@ final class TimeWindowIntegrationTests: AsyncSpec {
                 id: "window",
                 next: ["show"],
                 data: TimeWindowNode.TimeWindowData(
-                  startTime: start,
-                  endTime: end,
-                  useUTC: true,
+                  startTime: startTime,
+                  endTime: endTime,
+                  timezone: "UTC",
                   daysOfWeek: nil
                 )
               )),
@@ -151,8 +144,8 @@ final class TimeWindowIntegrationTests: AsyncSpec {
 
         let startH = wrap24(h + 1)
         let endH = wrap24(h + 2)
-        let start = makeUTCDate(hour: startH, minute: m)
-        let end = makeUTCDate(hour: endH, minute: m)
+        let startTime = formatTime(hour: startH, minute: m)
+        let endTime = formatTime(hour: endH, minute: m)
 
         let campaign = TestCampaignBuilder()
           .withId("tw-out-window")
@@ -163,9 +156,9 @@ final class TimeWindowIntegrationTests: AsyncSpec {
                 id: "window",
                 next: ["show"],
                 data: TimeWindowNode.TimeWindowData(
-                  startTime: start,
-                  endTime: end,
-                  useUTC: true,
+                  startTime: startTime,
+                  endTime: endTime,
+                  timezone: "UTC",
                   daysOfWeek: nil
                 )
               )),
@@ -216,8 +209,8 @@ final class TimeWindowIntegrationTests: AsyncSpec {
         let (h, m) = hourMinute(now, tz: utc)
 
         // Overnight that includes now: start = h-1, end = h-2
-        let start = makeUTCDate(hour: wrap24(h - 1), minute: m)
-        let end = makeUTCDate(hour: wrap24(h - 2), minute: m)
+        let startTime = formatTime(hour: wrap24(h - 1), minute: m)
+        let endTime = formatTime(hour: wrap24(h - 2), minute: m)
 
         let campaign = TestCampaignBuilder()
           .withId("tw-overnight-in")
@@ -228,9 +221,9 @@ final class TimeWindowIntegrationTests: AsyncSpec {
                 id: "window",
                 next: ["show"],
                 data: TimeWindowNode.TimeWindowData(
-                  startTime: start,
-                  endTime: end,
-                  useUTC: true,
+                  startTime: startTime,
+                  endTime: endTime,
+                  timezone: "UTC",
                   daysOfWeek: nil
                 )
               )),
@@ -271,8 +264,8 @@ final class TimeWindowIntegrationTests: AsyncSpec {
 
         let (h, m) = hourMinute(now, tz: utc)
         // Choose a broad window around now, but disallow today via daysOfWeek
-        let start = makeUTCDate(hour: wrap24(h - 1), minute: m)
-        let end = makeUTCDate(hour: wrap24(h + 1), minute: m)
+        let startTime = formatTime(hour: wrap24(h - 1), minute: m)
+        let endTime = formatTime(hour: wrap24(h + 1), minute: m)
 
         let campaign = TestCampaignBuilder()
           .withId("tw-days-filter")
@@ -283,9 +276,9 @@ final class TimeWindowIntegrationTests: AsyncSpec {
                 id: "window",
                 next: ["show"],
                 data: TimeWindowNode.TimeWindowData(
-                  startTime: start,
-                  endTime: end,
-                  useUTC: true,
+                  startTime: startTime,
+                  endTime: endTime,
+                  timezone: "UTC",
                   daysOfWeek: [onlyNextDay]  // excludes today
                 )
               )),
