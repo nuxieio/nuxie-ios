@@ -82,6 +82,10 @@ public class NuxieConfiguration {
     public var cacheExpiration: TimeInterval = 7 * 24 * 3600 // 7 days
     public var enableEncryption: Bool = true
     public var customStoragePath: URL?
+
+    /// Feature cache settings
+    /// TTL for real-time feature check results (default: 5 minutes)
+    public var featureCacheTTL: TimeInterval = 5 * 60
     
     /// Behavior settings
     public var defaultPaywallTimeout: TimeInterval = 10
