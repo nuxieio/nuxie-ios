@@ -127,6 +127,15 @@ public final class NuxieSDK {
       catch { LogWarning("Profile fetch failed: \(error)") }
     }
 
+    // Start transaction listener for background updates (renewals, cancellations)
+    // Only when using built-in purchasing (no delegate configured)
+    if configuration.purchaseDelegate == nil {
+      Task {
+        let listener = container.transactionListener()
+        await listener.startListening()
+      }
+    }
+
     LogInfo("Setup completed with API key: \(NuxieLogger.shared.logAPIKey(configuration.apiKey))")
   }
 
@@ -135,9 +144,14 @@ public final class NuxieSDK {
   public func shutdown() async {
     guard isSetup else { return }
 
+    // Stop transaction listener if using built-in purchasing
+    if configuration?.purchaseDelegate == nil {
+      await container.transactionListener().stopListening()
+    }
+
     // Clean up plugins first
     container.pluginService().cleanup()
-    
+
     await container.journeyService().shutdown()
     await container.eventService().close()
     await container.profileService().cleanupExpired()

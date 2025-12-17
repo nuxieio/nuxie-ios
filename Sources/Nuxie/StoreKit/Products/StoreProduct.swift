@@ -41,11 +41,16 @@ public protocol StoreProductProtocol {
     var isFamilyShareable: Bool { get }
     var productType: StoreProductType { get }
     var subscriptionPeriod: SubscriptionPeriod? { get }
+
+    /// The underlying StoreKit Product, if available
+    var storeKitProduct: Product? { get }
 }
 
 // MARK: - StoreKit.Product Extension
 
 extension Product: StoreProductProtocol {
+    public var storeKitProduct: Product? { self }
+
     public var productType: StoreProductType {
         switch self.type {
         case .consumable:
@@ -96,6 +101,9 @@ public struct MockStoreProduct: StoreProductProtocol {
     public let isFamilyShareable: Bool
     public let productType: StoreProductType
     public let subscriptionPeriod: SubscriptionPeriod?
+
+    /// Mock products don't have a real StoreKit Product
+    public var storeKitProduct: Product? { nil }
     
     public init(
         id: String,
