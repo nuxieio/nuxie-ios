@@ -69,7 +69,6 @@ class TestProfileResponseBuilder {
         journeys?.append(journey)
         return self
     }
-
     func build() -> ProfileResponse {
         return ProfileResponse(
             campaigns: campaigns,

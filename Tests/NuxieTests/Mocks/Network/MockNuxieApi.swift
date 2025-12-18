@@ -102,7 +102,9 @@ public actor MockNuxieApi: NuxieApiProtocol {
             campaigns: [campaign],
             segments: [segment],
             flows: [flow],
-            userProperties: nil
+            userProperties: nil,
+            experimentAssignments: nil,
+            features: nil
         )
     }
     
@@ -220,6 +222,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
             throw NuxieNetworkError.httpError(statusCode: 500, message: "Mock tracking error")
         }
 
+        return EventResponse(
         return trackEventResponse ?? EventResponse(
             status: "success",
             payload: nil,
@@ -263,7 +266,6 @@ public actor MockNuxieApi: NuxieApiProtocol {
             error: nil
         )
     }
-
     // Test helpers
     public func reset() {
         shouldFailProfile = false

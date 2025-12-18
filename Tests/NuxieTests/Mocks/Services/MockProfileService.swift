@@ -68,7 +68,9 @@ public class MockProfileService: ProfileServiceProtocol {
             campaigns: [campaign],
             segments: [segment],
             flows: [flow],
-            userProperties: nil
+            userProperties: nil,
+            experimentAssignments: nil,
+            features: nil
         )
     }
     
@@ -138,12 +140,14 @@ public class MockProfileService: ProfileServiceProtocol {
     
     // Test helper method to set campaigns
     public func setCampaigns(_ campaigns: [Campaign]) {
-        guard var response = profileResponse else { return }
+        guard let response = profileResponse else { return }
         profileResponse = ProfileResponse(
             campaigns: campaigns,
             segments: response.segments,
             flows: response.flows,
-            userProperties: response.userProperties
+            userProperties: response.userProperties,
+            experimentAssignments: response.experimentAssignments,
+            features: response.features
         )
     }
     
