@@ -48,8 +48,8 @@ public class SpyJourneyExecutor: JourneyExecutorProtocol {
         
         // Special handling for Show Flow nodes to record flow display attempts
         if nodeType == .showFlow,
-           let showFlowNode = node as? ShowFlowNode {
-            let flowId = showFlowNode.data.flowId
+           let showFlowNode = node as? ShowFlowNode,
+           let flowId = showFlowNode.data.flowId {
             spy.recordFlowDisplay(
                 flowId: flowId,
                 journeyId: journeyId,

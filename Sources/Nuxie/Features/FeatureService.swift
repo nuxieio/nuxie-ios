@@ -211,15 +211,17 @@ internal actor FeatureService: FeatureServiceProtocol {
     /// Update FeatureInfo with current cached features (for SwiftUI reactivity)
     private func notifyFeatureInfoUpdate() async {
         let allFeatures = await getAllCached()
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(allFeatures)
+            info.update(allFeatures)
         }
     }
 
     /// Update FeatureInfo with a single feature (after real-time check)
     private func notifyFeatureInfoUpdate(featureId: String, access: FeatureAccess) async {
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(featureId, access: access)
+            info.update(featureId, access: access)
         }
     }
 }

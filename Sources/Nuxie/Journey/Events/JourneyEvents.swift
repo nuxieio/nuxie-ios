@@ -23,10 +23,31 @@ public class JourneyEvents {
     public static let nodeWaitCompleted = "$node_wait_completed"
     public static let nodeErrored = "$node_errored"
     
-    /// Flow events
+    /// Flow events (generic)
     public static let flowShown = "$flow_shown"
     public static let flowCompleted = "$flow_completed"
     public static let flowDismissed = "$flow_dismissed"
+
+    /// Paywall events
+    public static let paywallShown = "$paywall_shown"
+    public static let paywallClosed = "$paywall_closed"
+    public static let paywallDeclined = "$paywall_declined"
+
+    /// Transaction events
+    public static let transactionStart = "$transaction_start"
+    public static let transactionComplete = "$transaction_complete"
+    public static let transactionFail = "$transaction_fail"
+    public static let transactionAbandon = "$transaction_abandon"
+
+    /// Restore events
+    public static let restoreStart = "$restore_start"
+    public static let restoreComplete = "$restore_complete"
+    public static let restoreFail = "$restore_fail"
+
+    /// Subscription events
+    public static let subscriptionStart = "$subscription_start"
+    public static let freeTrialStart = "$free_trial_start"
+    public static let nonRecurringProductPurchase = "$non_recurring_product_purchase"
     
     /// Customer events
     public static let customerUpdated = "$customer_updated"
@@ -331,6 +352,355 @@ public class JourneyEvents {
             "journey_id": journey.id,
             "node_id": nodeId
         ]
+    }
+
+    // MARK: - Paywall Event Properties
+
+    /// Build properties for paywall_shown event
+    public static func paywallShownProperties(
+        journey: Journey,
+        nodeId: String,
+        flowId: String,
+        experimentId: String? = nil,
+        variantId: String? = nil,
+        products: [String]? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "node_id": nodeId,
+            "flow_id": flowId
+        ]
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        if let products = products {
+            properties["products"] = products
+        }
+
+        return properties
+    }
+
+    /// Close reason for paywall_closed event
+    public enum PaywallCloseReason: String {
+        case purchased
+        case restored
+        case dismissed
+    }
+
+    /// Build properties for paywall_closed event
+    public static func paywallClosedProperties(
+        journey: Journey,
+        flowId: String,
+        reason: PaywallCloseReason,
+        experimentId: String? = nil,
+        variantId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "reason": reason.rawValue
+        ]
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        return properties
+    }
+
+    /// Build properties for paywall_declined event
+    public static func paywallDeclinedProperties(
+        journey: Journey,
+        flowId: String,
+        experimentId: String? = nil,
+        variantId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId
+        ]
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        return properties
+    }
+
+    // MARK: - Transaction Event Properties
+
+    /// Build properties for transaction_start event
+    public static func transactionStartProperties(
+        journey: Journey,
+        flowId: String,
+        productId: String,
+        experimentId: String? = nil,
+        variantId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "product_id": productId
+        ]
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        return properties
+    }
+
+    /// Build properties for transaction_complete event
+    public static func transactionCompleteProperties(
+        journey: Journey,
+        flowId: String,
+        productId: String,
+        revenue: Decimal,
+        currency: String,
+        transactionId: String,
+        experimentId: String? = nil,
+        variantId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "product_id": productId,
+            "revenue": NSDecimalNumber(decimal: revenue).doubleValue,
+            "currency": currency,
+            "transaction_id": transactionId
+        ]
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        return properties
+    }
+
+    /// Build properties for transaction_fail event
+    public static func transactionFailProperties(
+        journey: Journey,
+        flowId: String,
+        productId: String,
+        error: String,
+        errorCode: String? = nil,
+        experimentId: String? = nil,
+        variantId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "product_id": productId,
+            "error": error
+        ]
+
+        if let errorCode = errorCode {
+            properties["error_code"] = errorCode
+        }
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        return properties
+    }
+
+    /// Build properties for transaction_abandon event
+    public static func transactionAbandonProperties(
+        journey: Journey,
+        flowId: String,
+        productId: String,
+        experimentId: String? = nil,
+        variantId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "product_id": productId
+        ]
+
+        if let experimentId = experimentId {
+            properties["experiment_id"] = experimentId
+        }
+
+        if let variantId = variantId {
+            properties["variant_id"] = variantId
+        }
+
+        return properties
+    }
+
+    // MARK: - Restore Event Properties
+
+    /// Build properties for restore_start event
+    public static func restoreStartProperties(
+        journey: Journey,
+        flowId: String
+    ) -> [String: Any] {
+        return [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId
+        ]
+    }
+
+    /// Build properties for restore_complete event
+    public static func restoreCompleteProperties(
+        journey: Journey,
+        flowId: String,
+        restoredProductIds: [String]
+    ) -> [String: Any] {
+        return [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "restored_product_ids": restoredProductIds
+        ]
+    }
+
+    /// Build properties for restore_fail event
+    public static func restoreFailProperties(
+        journey: Journey,
+        flowId: String,
+        error: String,
+        errorCode: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "flow_id": flowId,
+            "error": error
+        ]
+
+        if let errorCode = errorCode {
+            properties["error_code"] = errorCode
+        }
+
+        return properties
+    }
+
+    // MARK: - Subscription Event Properties
+
+    /// Subscription type for categorizing purchases
+    public enum SubscriptionType: String {
+        case subscription
+        case freeTrialStart = "free_trial"
+        case nonRecurring = "non_recurring"
+    }
+
+    /// Build properties for subscription_start event
+    public static func subscriptionStartProperties(
+        productId: String,
+        revenue: Decimal,
+        currency: String,
+        transactionId: String,
+        journey: Journey? = nil,
+        flowId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "product_id": productId,
+            "revenue": NSDecimalNumber(decimal: revenue).doubleValue,
+            "currency": currency,
+            "transaction_id": transactionId
+        ]
+
+        if let journey = journey {
+            properties["journey_id"] = journey.id
+            properties["campaign_id"] = journey.campaignId
+        }
+
+        if let flowId = flowId {
+            properties["flow_id"] = flowId
+        }
+
+        return properties
+    }
+
+    /// Build properties for free_trial_start event
+    public static func freeTrialStartProperties(
+        productId: String,
+        offerType: String,
+        transactionId: String,
+        journey: Journey? = nil,
+        flowId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "product_id": productId,
+            "offer_type": offerType,
+            "transaction_id": transactionId
+        ]
+
+        if let journey = journey {
+            properties["journey_id"] = journey.id
+            properties["campaign_id"] = journey.campaignId
+        }
+
+        if let flowId = flowId {
+            properties["flow_id"] = flowId
+        }
+
+        return properties
+    }
+
+    /// Build properties for non_recurring_product_purchase event
+    public static func nonRecurringProductPurchaseProperties(
+        productId: String,
+        revenue: Decimal,
+        currency: String,
+        transactionId: String,
+        journey: Journey? = nil,
+        flowId: String? = nil
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "product_id": productId,
+            "revenue": NSDecimalNumber(decimal: revenue).doubleValue,
+            "currency": currency,
+            "transaction_id": transactionId
+        ]
+
+        if let journey = journey {
+            properties["journey_id"] = journey.id
+            properties["campaign_id"] = journey.campaignId
+        }
+
+        if let flowId = flowId {
+            properties["flow_id"] = flowId
+        }
+
+        return properties
     }
 }
 

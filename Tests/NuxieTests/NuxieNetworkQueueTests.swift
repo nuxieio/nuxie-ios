@@ -53,18 +53,18 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
         )
     }
     
-    func fetchProfile(for distinctId: String) async throws -> ProfileResponse {
-        return ProfileResponse(campaigns: [], segments: [], flows: [], userProperties: nil)
+    func fetchProfile(for distinctId: String, locale: String?) async throws -> ProfileResponse {
+        return ProfileResponse(campaigns: [], segments: [], flows: [], userProperties: nil, experimentAssignments: nil, features: nil)
     }
-    
-    func fetchProfileWithTimeout(for distinctId: String, timeout: TimeInterval) async throws -> ProfileResponse {
-        return ProfileResponse(campaigns: [], segments: [], flows: [], userProperties: nil)
+
+    func fetchProfileWithTimeout(for distinctId: String, locale: String?, timeout: TimeInterval) async throws -> ProfileResponse {
+        return ProfileResponse(campaigns: [], segments: [], flows: [], userProperties: nil, experimentAssignments: nil, features: nil)
     }
-    
+
     func fetchFlow(flowId: String) async throws -> RemoteFlow {
         fatalError("Not implemented for tests")
     }
-    
+
     func trackEvent(event: String, distinctId: String, properties: [String: Any]?, value: Double?) async throws -> EventResponse {
         return EventResponse(
             status: "success",
@@ -74,6 +74,20 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
             message: nil,
             featuresMatched: nil,
             usage: nil
+        )
+    }
+
+    func checkFeature(customerId: String, featureId: String, requiredBalance: Int?, entityId: String?) async throws -> FeatureCheckResult {
+        return FeatureCheckResult(
+            customerId: customerId,
+            featureId: featureId,
+            requiredBalance: requiredBalance ?? 1,
+            code: "granted",
+            allowed: true,
+            unlimited: false,
+            balance: 100,
+            type: .boolean,
+            preview: nil
         )
     }
     
