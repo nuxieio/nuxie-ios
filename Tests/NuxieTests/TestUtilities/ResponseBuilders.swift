@@ -10,13 +10,17 @@ struct ResponseBuilders {
         campaigns: [Campaign] = [],
         segments: [Segment] = [],
         flows: [RemoteFlow] = [],
-        userProperties: [String: AnyCodable]? = nil
+        userProperties: [String: AnyCodable]? = nil,
+        experimentAssignments: [String: ExperimentAssignment]? = nil,
+        features: [Feature]? = nil
     ) -> ProfileResponse {
         return ProfileResponse(
             campaigns: campaigns,
             segments: segments,
             flows: flows,
-            userProperties: userProperties
+            userProperties: userProperties,
+            experimentAssignments: experimentAssignments,
+            features: features
         )
     }
     

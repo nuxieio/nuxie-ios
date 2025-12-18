@@ -141,7 +141,9 @@ class ProfileServiceTests: AsyncSpec {
                             campaigns: [ResponseBuilders.buildCampaign(id: "new-campaign", name: "New Campaign")],
                             segments: [],
                             flows: [],
-                            userProperties: nil
+                            userProperties: nil,
+                            experimentAssignments: nil,
+                            features: nil
                         )
                         await mocks.nuxieApi.setProfileResponse(newResponse)
                         
@@ -209,7 +211,9 @@ class ProfileServiceTests: AsyncSpec {
                             campaigns: [],
                             segments: [],
                             flows: [existingFlow, newFlow],
-                            userProperties: nil
+                            userProperties: nil,
+                            experimentAssignments: nil,
+                            features: nil
                         ))
                         
                         // Clear cache to force network fetch
@@ -244,7 +248,9 @@ class ProfileServiceTests: AsyncSpec {
                             campaigns: [],
                             segments: [],
                             flows: [updatedFlow],
-                            userProperties: nil
+                            userProperties: nil,
+                            experimentAssignments: nil,
+                            features: nil
                         ))
                         
                         // Clear cache to force network fetch
@@ -265,7 +271,9 @@ class ProfileServiceTests: AsyncSpec {
                             campaigns: [],
                             segments: [],
                             flows: [],
-                            userProperties: nil
+                            userProperties: nil,
+                            experimentAssignments: nil,
+                            features: nil
                         ))
                         
                         // Clear cache to force network fetch
@@ -413,7 +421,9 @@ class ProfileServiceTests: AsyncSpec {
                             campaigns: [ResponseBuilders.buildCampaign(id: "new-user-campaign", name: "New User")],
                             segments: [],
                             flows: [],
-                            userProperties: nil
+                            userProperties: nil,
+                            experimentAssignments: nil,
+                            features: nil
                         )
                         try await cache.store(
                             CachedProfile(response: newUserProfile, distinctId: "new-user", cachedAt: mocks.dateProvider.now()),
@@ -477,7 +487,9 @@ class ProfileServiceTests: AsyncSpec {
                         campaigns: [ResponseBuilders.buildCampaign(id: "disk-campaign", name: "From Disk")],
                         segments: [],
                         flows: [],
-                        userProperties: nil
+                        userProperties: nil,
+                        experimentAssignments: nil,
+                        features: nil
                     )
                     try await cache.store(
                         CachedProfile(response: diskProfile, distinctId: distinctId, cachedAt: mocks.dateProvider.now()),
