@@ -103,8 +103,9 @@ public actor MockNuxieApi: NuxieApiProtocol {
             segments: [segment],
             flows: [flow],
             userProperties: nil,
-            experimentAssignments: nil,
-            features: nil
+            experiments: nil,
+            features: nil,
+            journeys: nil
         )
     }
     
