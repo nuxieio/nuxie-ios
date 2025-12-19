@@ -12,23 +12,24 @@ public enum NodeType: String, Codable {
     // Trigger nodes (not part of workflow, handled by campaign trigger)
     case eventTrigger = "event_trigger"
     case segmentTrigger = "segment_trigger"
-    
+
     // Action nodes
     case showFlow = "show_flow"
+    case showPaywall = "show_paywall"
     case updateCustomer = "update_customer"
     case sendEvent = "send_event"
     case callDelegate = "call_delegate"
-    
+
     // Delay nodes
     case timeDelay = "time_delay"
     case timeWindow = "time_window"
     case waitUntil = "wait_until"
-    
+
     // Branch nodes
     case branch = "branch"
     case multiBranch = "multi_branch"
     case randomBranch = "random_branch"
-    
+
     // Control nodes
     case exit = "exit"
 }
@@ -73,6 +74,26 @@ public struct ShowFlowNode: WorkflowNode {
     public let data: ShowFlowData
 
     public struct ShowFlowData: Codable {
+        // Single flow mode
+        public let flowId: String?
+        // Experiment mode (A/B testing)
+        public let experiment: ExperimentConfig?
+
+        public init(flowId: String? = nil, experiment: ExperimentConfig? = nil) {
+            self.flowId = flowId
+            self.experiment = experiment
+        }
+    }
+}
+
+/// Show a paywall to the user (emits paywall-specific events)
+public struct ShowPaywallNode: WorkflowNode {
+    public let id: String
+    public let type = NodeType.showPaywall
+    public let next: [String]
+    public let data: ShowPaywallData
+
+    public struct ShowPaywallData: Codable {
         // Single flow mode
         public let flowId: String?
         // Experiment mode (A/B testing)
@@ -263,6 +284,8 @@ public struct AnyWorkflowNode: Codable {
         switch type {
         case "show_flow":
             self.node = try ShowFlowNode(from: decoder)
+        case "show_paywall":
+            self.node = try ShowPaywallNode(from: decoder)
         case "time_delay":
             self.node = try TimeDelayNode(from: decoder)
         case "exit":

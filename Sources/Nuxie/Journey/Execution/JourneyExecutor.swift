@@ -143,6 +143,9 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     case .showFlow:
       return try await executeShowFlow(node, journey: journey)
 
+    case .showPaywall:
+      return try await executeShowPaywall(node, journey: journey)
+
     case .timeDelay:
       return executeTimeDelay(node, journey: journey)
 
@@ -304,6 +307,135 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
 
     // Continue to next node immediately (fire-and-forget pattern)
     LogDebug("[JourneyExecutor] ShowFlow returning continue to nodes: \(node.next)")
+    return .continue(node.next)
+  }
+
+  /// Execute a show_paywall node (paywall-specific events)
+  private func executeShowPaywall(_ node: WorkflowNode, journey: Journey) async throws
+    -> NodeExecutionResult
+  {
+    LogDebug("[JourneyExecutor] executeShowPaywall called for node \(node.id)")
+    guard let showPaywallNode = node as? ShowPaywallNode else {
+      LogDebug("[JourneyExecutor] ERROR: Node is not a ShowPaywallNode!")
+      throw JourneyError.invalidNodeType
+    }
+
+    var flowId: String? = nil
+    var experimentContext: (experimentId: String, variantId: String, isHoldout: Bool)? = nil
+
+    // Check for experiment mode (A/B testing)
+    if let experiment = showPaywallNode.data.experiment {
+      // Resolve variant: server assignment first, fallback to local hash
+      let variant = await resolveExperimentVariant(
+        distinctId: journey.distinctId,
+        experiment: experiment
+      )
+      flowId = variant.flowId  // May be nil for holdout variants
+      let isHoldout = variant.flowId == nil
+      experimentContext = (experiment.id, variant.id, isHoldout)
+
+      LogInfo(
+        "Paywall Experiment '\(experiment.name ?? experiment.id)': assigned variant '\(variant.name ?? variant.id)' (holdout: \(isHoldout)) to user \(journey.distinctId)"
+      )
+
+      // Track experiment assignment event
+      var assignmentProps = JourneyEvents.experimentVariantAssignedProperties(
+        journey: journey,
+        nodeId: node.id,
+        experiment: experiment,
+        variant: variant
+      )
+      assignmentProps["is_holdout"] = isHoldout
+      eventService.track(
+        JourneyEvents.experimentVariantAssigned,
+        properties: assignmentProps,
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
+
+      // Store experiment context in journey for attribution on downstream events
+      journey.setContext("_experiment_id", value: experiment.id)
+      journey.setContext("_variant_id", value: variant.id)
+      journey.setContext("_is_holdout", value: isHoldout)
+    } else if let singleFlowId = showPaywallNode.data.flowId {
+      // Single flow mode (existing behavior)
+      flowId = singleFlowId
+    } else {
+      LogError("ShowPaywallNode has neither flowId nor experiment configured")
+      return .skip(node.next.first)
+    }
+
+    // Handle holdout variant - track exposure but don't show any paywall
+    if flowId == nil {
+      LogInfo("Holdout variant assigned for journey \(journey.id) - skipping paywall presentation")
+
+      // Track holdout exposure for analytics
+      if let expCtx = experimentContext {
+        eventService.track(
+          "$experiment_holdout_exposure",
+          properties: [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "node_id": node.id,
+            "experiment_id": expCtx.experimentId,
+            "variant_id": expCtx.variantId,
+          ],
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
+        )
+      }
+
+      // Continue to next node without showing a paywall
+      return .continue(node.next)
+    }
+
+    // Non-holdout path: show the paywall
+    let resolvedFlowId = flowId!
+
+    LogInfo("Showing paywall \(resolvedFlowId) for journey \(journey.id)")
+    LogDebug("[JourneyExecutor] ShowPaywall node \(node.id): flowId=\(resolvedFlowId), next=\(node.next)")
+
+    // Bind the journey/flow to the originating event for outcome tracking
+    if let originEventId = journey.getContext("_origin_event_id") as? String {
+      await outcomeBroker.bind(eventId: originEventId, journeyId: journey.id, flowId: resolvedFlowId)
+    }
+
+    // Present flow using FlowPresentationService (fire-and-forget)
+    // Mark this as a paywall presentation for paywall-specific close events
+    Task { @MainActor [weak self] in
+      guard let self = self else { return }
+      do {
+        // TODO: Pass isPaywall flag to presentation service for paywall-specific close events
+        try await self.flowPresentationService.presentFlow(resolvedFlowId, from: journey)
+        LogInfo("Successfully presented paywall \(resolvedFlowId) for journey \(journey.id)")
+      } catch {
+        LogError("Failed to present paywall \(resolvedFlowId): \(error)")
+      }
+    }
+
+    // Track paywall shown event (paywall-specific instead of generic flow_shown)
+    var paywallShownProps = JourneyEvents.paywallShownProperties(
+      journey: journey,
+      nodeId: node.id,
+      flowId: resolvedFlowId
+    )
+    if let expCtx = experimentContext {
+      paywallShownProps["experiment_id"] = expCtx.experimentId
+      paywallShownProps["variant_id"] = expCtx.variantId
+      paywallShownProps["is_holdout"] = expCtx.isHoldout
+    }
+    eventService.track(
+      JourneyEvents.paywallShown,
+      properties: paywallShownProps,
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
+
+    // Continue to next node immediately (fire-and-forget pattern)
+    LogDebug("[JourneyExecutor] ShowPaywall returning continue to nodes: \(node.next)")
     return .continue(node.next)
   }
 

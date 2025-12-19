@@ -331,19 +331,92 @@ extension FlowViewController {
         LogDebug("FlowViewController: Bridge purchase for product: \(productId)")
         let transactionService = Container.shared.transactionService()
         let productService = Container.shared.productService()
+        let eventService = Container.shared.eventService()
+
+        // Track transaction start
+        eventService.track(
+            JourneyEvents.transactionStart,
+            properties: JourneyEvents.transactionStartProperties(
+                flowId: flow.id,
+                productId: productId
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil,
+            completion: nil
+        )
 
         Task { @MainActor in
             do {
                 let products = try await productService.fetchProducts(for: [productId])
                 guard let product = products.first else {
-                    self.flowWebView.sendBridgeMessage(type: "purchase_error", payload: ["error": "Product not found"])            
+                    // Track transaction fail - product not found
+                    eventService.track(
+                        JourneyEvents.transactionFail,
+                        properties: JourneyEvents.transactionFailProperties(
+                            flowId: self.flow.id,
+                            productId: productId,
+                            error: "Product not found"
+                        ),
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil,
+                        completion: nil
+                    )
+                    self.flowWebView.sendBridgeMessage(type: "purchase_error", payload: ["error": "Product not found"])
                     return
                 }
+
+                // Purchase the product - TransactionService throws on failure/cancel
                 try await transactionService.purchase(product)
+
+                // Track transaction complete
+                // Note: TransactionService doesn't return transaction details yet
+                // TODO: Enhance TransactionService to return transactionId, price, currency
+                eventService.track(
+                    JourneyEvents.transactionComplete,
+                    properties: JourneyEvents.transactionCompleteProperties(
+                        flowId: self.flow.id,
+                        productId: productId,
+                        transactionId: nil,  // Not available from current API
+                        revenue: product.price,
+                        currency: nil  // Not available from current API
+                    ),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
+
                 self.flowWebView.sendBridgeMessage(type: "purchase_success", payload: ["productId": productId])
+
+                // Dismiss with purchase completed - pass product details
+                self.dismiss(animated: true) {
+                    self.onClose?(.purchaseCompleted(productId: productId, transactionId: nil))
+                }
             } catch StoreKitError.purchaseCancelled {
+                // Track transaction abandon
+                eventService.track(
+                    JourneyEvents.transactionAbandon,
+                    properties: JourneyEvents.transactionAbandonProperties(
+                        flowId: self.flow.id,
+                        productId: productId
+                    ),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
                 self.flowWebView.sendBridgeMessage(type: "purchase_cancelled", payload: [:])
             } catch {
+                // Track transaction fail
+                eventService.track(
+                    JourneyEvents.transactionFail,
+                    properties: JourneyEvents.transactionFailProperties(
+                        flowId: self.flow.id,
+                        productId: productId,
+                        error: error.localizedDescription
+                    ),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
                 self.flowWebView.sendBridgeMessage(type: "purchase_error", payload: ["error": error.localizedDescription])
             }
         }
@@ -352,11 +425,54 @@ extension FlowViewController {
     fileprivate func handleBridgeRestore(requestId: String?) {
         LogDebug("FlowViewController: Bridge restore purchases")
         let transactionService = Container.shared.transactionService()
+        let eventService = Container.shared.eventService()
+
+        // Track restore start
+        eventService.track(
+            JourneyEvents.restoreStart,
+            properties: JourneyEvents.restoreStartProperties(flowId: flow.id),
+            userProperties: nil,
+            userPropertiesSetOnce: nil,
+            completion: nil
+        )
+
         Task { @MainActor in
             do {
+                // Restore purchases - TransactionService throws on failure
                 try await transactionService.restore()
+
+                // Track restore complete
+                // Note: TransactionService doesn't return restored product IDs yet
+                // TODO: Enhance TransactionService to return list of restored product IDs
+                eventService.track(
+                    JourneyEvents.restoreComplete,
+                    properties: JourneyEvents.restoreCompleteProperties(
+                        flowId: self.flow.id,
+                        restoredProductIds: []  // Not available from current API
+                    ),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
+
                 self.flowWebView.sendBridgeMessage(type: "restore_success", payload: [:])
+
+                // Dismiss with restore completed
+                self.dismiss(animated: true) {
+                    self.onClose?(.restored(productIds: []))
+                }
             } catch {
+                // Track restore fail
+                eventService.track(
+                    JourneyEvents.restoreFail,
+                    properties: JourneyEvents.restoreFailProperties(
+                        flowId: self.flow.id,
+                        error: error.localizedDescription
+                    ),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
                 self.flowWebView.sendBridgeMessage(type: "restore_error", payload: ["error": error.localizedDescription])
             }
         }

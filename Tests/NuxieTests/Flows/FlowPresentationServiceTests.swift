@@ -300,7 +300,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
                 let window = mockWindowProvider.createdWindows.first
                 
                 // Simulate dismissal
-                await mockVC.onClose?(.purchaseCompleted)
+                await mockVC.onClose?(.purchaseCompleted(productId: "test_product", transactionId: nil))
                 
                 // Wait for cleanup
                 await expect { await service.isFlowPresented }

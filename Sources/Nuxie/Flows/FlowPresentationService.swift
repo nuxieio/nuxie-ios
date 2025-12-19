@@ -137,9 +137,9 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     private func handleFlowDismissal(reason: CloseReason) async {
         let flowId = currentFlowId ?? "unknown"
         let journey = currentJourney
-        
+
         LogInfo("FlowPresentationService: Flow \(flowId) dismissed with reason: \(reason)")
-        
+
         // Track flow completion event with detailed properties
         if let journey = journey {
             let completionType = mapCloseReasonToCompletionType(reason)
@@ -148,32 +148,39 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                 journey: journey,
                 completionType: completionType
             )
-            
+
             // Add additional properties based on reason
             switch reason {
-            case .purchaseCompleted:
-                // In a real implementation, we'd get these from the purchase flow
-                // For now, we'll leave them unset and let the purchase delegate handle it
-                break
-            case .error(let error):
-                properties["error_message"] = error.localizedDescription
+            case .purchaseCompleted(let productId, let transactionId):
+                properties["product_id"] = productId
+                if let transactionId = transactionId {
+                    properties["transaction_id"] = transactionId
+                }
+            case .restored(let productIds):
+                properties["restored_product_ids"] = productIds
+            case .error(let message):
+                if let message = message {
+                    properties["error_message"] = message
+                }
             default:
                 break
             }
-            
+
             eventService.track(JourneyEvents.flowCompleted, properties: properties, userProperties: nil, userPropertiesSetOnce: nil, completion: nil)
         }
-        
+
         // Clean up
         await cleanupPresentation()
     }
-    
+
     private func mapCloseReasonToCompletionType(_ reason: CloseReason) -> String {
         switch reason {
         case .userDismissed:
             return "dismissed"
         case .purchaseCompleted:
             return "purchase"
+        case .restored:
+            return "restore"
         case .timeout:
             return "timeout"
         case .error:

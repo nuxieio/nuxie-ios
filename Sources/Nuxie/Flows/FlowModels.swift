@@ -65,21 +65,30 @@ public enum PresentationState: Equatable {
 
 public enum CloseReason: Equatable {
     case userDismissed
-    case purchaseCompleted
+    case purchaseCompleted(productId: String, transactionId: String?)
+    case restored(productIds: [String])
     case timeout
-    case error(Error)
-    
+    case error(message: String?)
+
     public static func == (lhs: CloseReason, rhs: CloseReason) -> Bool {
         switch (lhs, rhs) {
         case (.userDismissed, .userDismissed),
-             (.purchaseCompleted, .purchaseCompleted),
              (.timeout, .timeout):
             return true
-        case let (.error(e1), .error(e2)):
-            return (e1 as NSError) == (e2 as NSError)
+        case let (.purchaseCompleted(p1, t1), .purchaseCompleted(p2, t2)):
+            return p1 == p2 && t1 == t2
+        case let (.restored(ids1), .restored(ids2)):
+            return ids1 == ids2
+        case let (.error(m1), .error(m2)):
+            return m1 == m2
         default:
             return false
         }
+    }
+
+    /// Convenience for backward compatibility - purchase without product details
+    public static var purchaseCompletedUnknown: CloseReason {
+        return .purchaseCompleted(productId: "unknown", transactionId: nil)
     }
 }
 
