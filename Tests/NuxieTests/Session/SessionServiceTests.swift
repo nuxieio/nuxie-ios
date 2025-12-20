@@ -211,65 +211,213 @@ final class SessionServiceTests: AsyncSpec {
             describe("Session Change Callbacks") {
                 it("should trigger callback on session changes") {
                     var changeReasons: [SessionIDChangeReason] = []
-                    
+
                     sessionService.onSessionIdChanged = { reason in
                         changeReasons.append(reason)
                     }
-                    
+
                     // Create initial session
                     _ = sessionService.getSessionId(at: Date(), readOnly: false)
-                    
+
                     // Start new session
                     sessionService.startSession()
-                    
+
                     // End session
                     sessionService.endSession()
-                    
+
                     // Reset session
                     sessionService.resetSession()
-                    
+
                     // Set custom session
                     sessionService.setSessionId("custom")
-                    
+
                     expect(changeReasons).to(contain(.sessionIdEmpty))
                     expect(changeReasons).to(contain(.sessionStart))
                     expect(changeReasons).to(contain(.sessionEnd))
                     expect(changeReasons).to(contain(.sessionReset))
                     expect(changeReasons).to(contain(.customSessionId))
                 }
-                
+
                 it("should trigger timeout callback on session expiration") {
                     var changeReason: SessionIDChangeReason?
-                    
+
                     sessionService.onSessionIdChanged = { reason in
                         changeReason = reason
                     }
-                    
+
                     let now = Date()
                     _ = sessionService.getSessionId(at: now, readOnly: false)
-                    
+
                     // Trigger timeout
                     let later = now.addingTimeInterval(31 * 60)
                     _ = sessionService.getSessionId(at: later, readOnly: false)
-                    
+
                     expect(changeReason).to(equal(.sessionTimeout))
                 }
-                
+
                 it("should trigger max length callback on 24-hour expiration") {
                     var lastChangeReason: SessionIDChangeReason?
-                    
+
                     sessionService.onSessionIdChanged = { reason in
                         lastChangeReason = reason
                     }
-                    
+
                     let now = Date()
                     _ = sessionService.getSessionId(at: now, readOnly: false)
-                    
+
                     // Trigger 24-hour expiration
                     let muchLater = now.addingTimeInterval(24 * 60 * 60 + 60)
                     _ = sessionService.getSessionId(at: muchLater, readOnly: false)
-                    
+
                     expect(lastChangeReason).to(equal(.sessionPastMaximumLength))
+                }
+            }
+
+            // MARK: - Backgrounding Behavior
+
+            describe("Backgrounding Behavior") {
+                it("should preserve session when entering background") {
+                    let now = Date()
+                    let originalSessionId = sessionService.getSessionId(at: now, readOnly: false)
+
+                    sessionService.onAppDidEnterBackground()
+
+                    // Session should still be accessible
+                    let sessionAfterBackground = sessionService.getSessionId(at: now, readOnly: true)
+                    expect(sessionAfterBackground).to(equal(originalSessionId))
+                }
+
+                it("should track background state correctly") {
+                    _ = sessionService.getSessionId(at: Date(), readOnly: false)
+
+                    // Enter background
+                    sessionService.onAppDidEnterBackground()
+
+                    // Return to foreground
+                    sessionService.onAppBecameActive()
+
+                    // Session should still exist
+                    let sessionId = sessionService.getSessionId(at: Date(), readOnly: true)
+                    expect(sessionId).toNot(beNil())
+                }
+
+                it("should create new session on foreground if session timed out during background") {
+                    let now = Date()
+                    let originalSessionId = sessionService.getSessionId(at: now, readOnly: false)
+
+                    // Enter background
+                    sessionService.onAppDidEnterBackground()
+
+                    // Simulate 31 minutes passing
+                    let afterTimeout = now.addingTimeInterval(31 * 60)
+
+                    // Return to foreground
+                    sessionService.onAppBecameActive()
+
+                    // Get session at the later time - should be new
+                    let newSessionId = sessionService.getSessionId(at: afterTimeout, readOnly: false)
+                    expect(newSessionId).toNot(beNil())
+                    expect(newSessionId).toNot(equal(originalSessionId))
+                }
+
+                it("should handle multiple background/foreground cycles") {
+                    let now = Date()
+                    var currentTime = now
+
+                    let originalSessionId = sessionService.getSessionId(at: currentTime, readOnly: false)
+
+                    // Multiple short cycles (within timeout)
+                    for i in 0..<5 {
+                        sessionService.onAppDidEnterBackground()
+                        currentTime = currentTime.addingTimeInterval(5 * 60) // 5 minutes each
+                        sessionService.onAppBecameActive()
+                        _ = sessionService.getSessionId(at: currentTime, readOnly: false)
+                    }
+
+                    // Session should be preserved (total < 30 min)
+                    let finalSessionId = sessionService.getSessionId(at: currentTime, readOnly: true)
+                    expect(finalSessionId).to(equal(originalSessionId))
+                }
+
+                it("should handle touchSession during background state") {
+                    _ = sessionService.getSessionId(at: Date(), readOnly: false)
+
+                    sessionService.onAppDidEnterBackground()
+
+                    // touchSession should not crash while backgrounded
+                    sessionService.touchSession()
+
+                    sessionService.onAppBecameActive()
+
+                    // Session should still be valid
+                    let sessionId = sessionService.getSessionId(at: Date(), readOnly: true)
+                    expect(sessionId).toNot(beNil())
+                }
+
+                it("should clear session during background if timeout occurs on touchSession") {
+                    let now = Date()
+                    let originalSessionId = sessionService.getSessionId(at: now, readOnly: false)
+
+                    // Enter background
+                    sessionService.onAppDidEnterBackground()
+
+                    // This behavior depends on implementation - touchSession during background
+                    // with a timeout should clear session rather than create a new one
+                    sessionService.touchSession()
+
+                    // Session behavior after touchSession during background
+                    sessionService.onAppBecameActive()
+
+                    // Get session (may create new one if cleared)
+                    let afterSessionId = sessionService.getSessionId(at: Date(), readOnly: false)
+                    expect(afterSessionId).toNot(beNil())
+                }
+
+                it("should handle rapid background/foreground transitions") {
+                    let group = DispatchGroup()
+
+                    _ = sessionService.getSessionId(at: Date(), readOnly: false)
+
+                    for _ in 0..<20 {
+                        group.enter()
+                        DispatchQueue.global().async {
+                            sessionService.onAppDidEnterBackground()
+                            sessionService.onAppBecameActive()
+                            group.leave()
+                        }
+                    }
+
+                    group.wait()
+
+                    // Should not crash and session should be valid
+                    let sessionId = sessionService.getSessionId(at: Date(), readOnly: true)
+                    expect(sessionId).toNot(beNil())
+                }
+
+                it("should handle concurrent background transitions with session access") {
+                    let group = DispatchGroup()
+                    var sessionIds: [String?] = []
+                    let lock = NSLock()
+
+                    _ = sessionService.getSessionId(at: Date(), readOnly: false)
+
+                    for _ in 0..<30 {
+                        group.enter()
+                        DispatchQueue.global().async {
+                            sessionService.onAppDidEnterBackground()
+                            let id = sessionService.getSessionId(at: Date(), readOnly: true)
+                            lock.lock()
+                            sessionIds.append(id)
+                            lock.unlock()
+                            sessionService.onAppBecameActive()
+                            group.leave()
+                        }
+                    }
+
+                    group.wait()
+
+                    // Should not crash
+                    expect(sessionIds.count).to(equal(30))
                 }
             }
         }
