@@ -67,6 +67,7 @@ public actor JourneyService: JourneyServiceProtocol {
   @Injected(\.profileService) private var profileService: ProfileServiceProtocol
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
+  @Injected(\.featureService) private var featureService: FeatureServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
   @Injected(\.goalEvaluator) private var goalEvaluator: GoalEvaluatorProtocol
@@ -863,12 +864,14 @@ public actor JourneyService: JourneyServiceProtocol {
     let userAdapter = IRUserPropsAdapter(identityService: identityService)
     let eventsAdapter = IREventQueriesAdapter(eventService: Container.shared.eventService())
     let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: segmentService)
+    let featuresAdapter = IRFeatureQueriesAdapter(featureService: featureService)
 
     let config = IRRuntime.Config(
       event: event,
       user: userAdapter,
       events: eventsAdapter,
-      segments: segmentsAdapter
+      segments: segmentsAdapter,
+      features: featuresAdapter
     )
 
     return await irRuntime.eval(envelope, config)

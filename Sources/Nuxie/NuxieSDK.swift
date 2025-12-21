@@ -127,6 +127,11 @@ public final class NuxieSDK {
       catch { LogWarning("Profile fetch failed: \(error)") }
     }
 
+    // Start transaction observer to sync StoreKit 2 purchases with backend
+    Task {
+      await container.transactionObserver().startListening()
+    }
+
     LogInfo("Setup completed with API key: \(NuxieLogger.shared.logAPIKey(configuration.apiKey))")
   }
 
@@ -135,9 +140,12 @@ public final class NuxieSDK {
   public func shutdown() async {
     guard isSetup else { return }
 
+    // Stop transaction observer
+    await container.transactionObserver().stopListening()
+
     // Clean up plugins first
     container.pluginService().cleanup()
-    
+
     await container.journeyService().shutdown()
     await container.eventService().close()
     await container.profileService().cleanupExpired()

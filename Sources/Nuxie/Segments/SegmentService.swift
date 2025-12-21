@@ -110,6 +110,7 @@ public actor SegmentService: SegmentServiceProtocol {
     // Dependencies
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
+    @Injected(\.featureService) private var featureService: FeatureServiceProtocol
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
     @Injected(\.irRuntime) private var irRuntime: IRRuntime
@@ -475,12 +476,14 @@ public actor SegmentService: SegmentServiceProtocol {
         let userAdapter = IRUserPropsAdapter(identityService: identityService)
         let eventsAdapter = IREventQueriesAdapter(eventService: Container.shared.eventService())
         let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: self)
-        
+        let featuresAdapter = IRFeatureQueriesAdapter(featureService: featureService)
+
         let cfg = IRRuntime.Config(
             now: context.currentDate,
             user: userAdapter,
             events: eventsAdapter,
-            segments: segmentsAdapter
+            segments: segmentsAdapter,
+            features: featuresAdapter
         )
         
         do {

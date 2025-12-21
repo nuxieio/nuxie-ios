@@ -17,28 +17,33 @@ final class IRRuntime {
 
     /// Provide event for predicate evaluation (e.g., trigger context)
     var event: NuxieEvent? = nil
-    
+
     /// User property adapter
     var user: IRUserProps? = nil
-    
+
     /// Event queries adapter
     var events: IREventQueries? = nil
-    
+
     /// Segment queries adapter
     var segments: IRSegmentQueries? = nil
+
+    /// Feature queries adapter
+    var features: IRFeatureQueries? = nil
 
     init(
       now: Date? = nil,
       event: NuxieEvent? = nil,
       user: IRUserProps? = nil,
       events: IREventQueries? = nil,
-      segments: IRSegmentQueries? = nil
+      segments: IRSegmentQueries? = nil,
+      features: IRFeatureQueries? = nil
     ) {
       self.now = now
       self.event = event
       self.user = user
       self.events = events
       self.segments = segments
+      self.features = features
     }
   }
 
@@ -51,6 +56,7 @@ final class IRRuntime {
       user: cfg.user,
       events: cfg.events,
       segments: cfg.segments,
+      features: cfg.features,
       event: cfg.event
     )
   }
@@ -89,7 +95,12 @@ extension IRRuntime.Config {
   }
   
   /// Create config with adapters
-  static func withAdapters(user: IRUserProps? = nil, events: IREventQueries? = nil, segments: IRSegmentQueries? = nil) -> Self {
-    .init(user: user, events: events, segments: segments)
+  static func withAdapters(
+    user: IRUserProps? = nil,
+    events: IREventQueries? = nil,
+    segments: IRSegmentQueries? = nil,
+    features: IRFeatureQueries? = nil
+  ) -> Self {
+    .init(user: user, events: events, segments: segments, features: features)
   }
 }

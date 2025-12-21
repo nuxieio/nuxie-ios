@@ -32,6 +32,7 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
   @Injected(\.eventService) private var eventService: EventServiceProtocol
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
+  @Injected(\.featureService) private var featureService: FeatureServiceProtocol
   @Injected(\.profileService) private var profileService: ProfileServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.irRuntime) private var irRuntime: IRRuntime
@@ -1004,14 +1005,16 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     let userAdapter = IRUserPropsAdapter(identityService: identityService)
     let eventsAdapter = IREventQueriesAdapter(eventService: eventService)
     let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: segmentService)
-    
+    let featuresAdapter = IRFeatureQueriesAdapter(featureService: featureService)
+
     let config = IRRuntime.Config(
       event: event,
       user: userAdapter,
       events: eventsAdapter,
-      segments: segmentsAdapter
+      segments: segmentsAdapter,
+      features: featuresAdapter
     )
-    
+
     return await irRuntime.eval(envelope, config)
   }
 

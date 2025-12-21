@@ -45,7 +45,10 @@ public indirect enum IRExpr: Codable {
     
     // Segment membership
     case segment(op: String, id: String, within: IRExpr?)
-    
+
+    // Feature access (entitlements)
+    case feature(op: String, id: String, value: IRExpr?)
+
     // Predicates over event properties
     case pred(op: String, key: String, value: IRExpr?)
     case predAnd([IRExpr])
@@ -162,7 +165,14 @@ public indirect enum IRExpr: Codable {
             let id = try segmentContainer.decode(String.self, forKey: .id)
             let within = try segmentContainer.decodeIfPresent(IRExpr.self, forKey: .within)
             self = .segment(op: op, id: id, within: within)
-            
+
+        case "Feature":
+            let featureContainer = try decoder.container(keyedBy: FeatureCodingKeys.self)
+            let op = try featureContainer.decode(String.self, forKey: .op)
+            let id = try featureContainer.decode(String.self, forKey: .id)
+            let value = try featureContainer.decodeIfPresent(IRExpr.self, forKey: .value)
+            self = .feature(op: op, id: id, value: value)
+
         case "Pred":
             let predContainer = try decoder.container(keyedBy: PredCodingKeys.self)
             let op = try predContainer.decode(String.self, forKey: .op)
@@ -314,7 +324,11 @@ public indirect enum IRExpr: Codable {
     private enum SegmentCodingKeys: String, CodingKey {
         case op, id, within
     }
-    
+
+    private enum FeatureCodingKeys: String, CodingKey {
+        case op, id, value
+    }
+
     private enum PredCodingKeys: String, CodingKey {
         case op, key, value
     }
