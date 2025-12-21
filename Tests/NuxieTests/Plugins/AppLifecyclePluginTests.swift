@@ -44,40 +44,84 @@ final class AppLifecyclePluginTests: AsyncSpec {
                     expect(plugin.pluginId).to(equal("app-lifecycle"))
                 }
 
+                it("should not start if not installed") {
+                    // Starting without install should be safe (no-op)
+                    // sdk is nil so track calls are no-ops
+                    plugin.start()
+
+                    // Lifecycle events should not track anything (sdk is nil)
+                    plugin.onAppDidEnterBackground()
+
+                    // No crash expected
+                }
+            }
+
+            describe("plugin lifecycle with SDK") {
+                var config: NuxieConfiguration!
+                var dbPath: String!
+                var mockApi: MockNuxieApi!
+
+                beforeEach {
+                    mockApi = MockNuxieApi()
+                    Container.shared.nuxieApi.register { mockApi }
+
+                    await NuxieSDK.shared.shutdown()
+
+                    let testId = UUID().uuidString
+                    let tempDir = NSTemporaryDirectory()
+                    let testDirPath = "\(tempDir)test_plugin_lifecycle_\(testId)"
+                    try FileManager.default.createDirectory(atPath: testDirPath, withIntermediateDirectories: true)
+                    dbPath = testDirPath
+
+                    config = NuxieConfiguration(apiKey: "test-key-\(testId)")
+                    config.customStoragePath = URL(fileURLWithPath: dbPath)
+                    config.environment = .development
+                    config.enablePlugins = false
+
+                    try NuxieSDK.shared.setup(with: config)
+                }
+
+                afterEach {
+                    await NuxieSDK.shared.shutdown()
+                    if let dbPath = dbPath {
+                        try? FileManager.default.removeItem(atPath: dbPath)
+                    }
+                    Container.shared.reset()
+                }
+
                 it("should handle install/uninstall cycle") {
-                    plugin.install(sdk: NuxieSDK.shared)
-                    plugin.uninstall()
+                    let lifecyclePlugin = AppLifecyclePlugin()
+                    lifecyclePlugin.install(sdk: NuxieSDK.shared)
+                    lifecyclePlugin.uninstall()
 
                     // Should not crash and should be in clean state
                 }
 
                 it("should handle start/stop cycle") {
-                    plugin.install(sdk: NuxieSDK.shared)
-                    plugin.start()
-                    plugin.stop()
-                    plugin.uninstall()
+                    let lifecyclePlugin = AppLifecyclePlugin()
+                    lifecyclePlugin.install(sdk: NuxieSDK.shared)
+                    lifecyclePlugin.start()
+                    lifecyclePlugin.stop()
+                    lifecyclePlugin.uninstall()
 
                     // Should not crash
                 }
 
-                it("should not start if not installed") {
-                    // Starting without install should be safe (no-op)
-                    plugin.start()
-
-                    // Lifecycle events should not track anything
-                    plugin.onAppDidEnterBackground()
-
-                    // No crash expected
-                }
-
                 it("should ignore lifecycle events when stopped") {
-                    plugin.install(sdk: NuxieSDK.shared)
-                    plugin.start()
-                    plugin.stop()
+                    let lifecyclePlugin = AppLifecyclePlugin()
+                    lifecyclePlugin.install(sdk: NuxieSDK.shared)
+                    lifecyclePlugin.start()
+
+                    // Give time for launch events to be processed
+                    try await Task.sleep(nanoseconds: 100_000_000)
+
+                    lifecyclePlugin.stop()
 
                     // Lifecycle events should be ignored when stopped
-                    plugin.onAppDidEnterBackground()
-                    plugin.onAppWillEnterForeground()
+                    lifecyclePlugin.onAppDidEnterBackground()
+                    lifecyclePlugin.onAppWillEnterForeground()
+
+                    lifecyclePlugin.uninstall()
 
                     // No crash expected
                 }
