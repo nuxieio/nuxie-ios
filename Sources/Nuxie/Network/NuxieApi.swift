@@ -392,5 +392,25 @@ extension NuxieApi {
             responseType: FeatureCheckResult.self
         )
     }
+
+    // MARK: - Transaction Sync
+
+    /// Sync an App Store transaction with the backend
+    /// Called after StoreKit 2 purchase completes to provision entitlements
+    public func syncTransaction(
+        transactionJwt: String,
+        distinctId: String
+    ) async throws -> PurchaseResponse {
+        let request = PurchaseRequest(
+            transactionJwt: transactionJwt,
+            distinctId: distinctId
+        )
+
+        return try await self.request(
+            endpoint: .purchase(request),
+            body: request,
+            responseType: PurchaseResponse.self
+        )
+    }
 }
 

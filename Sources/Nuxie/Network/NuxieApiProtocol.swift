@@ -29,4 +29,14 @@ public protocol NuxieApiProtocol: AnyObject {
         requiredBalance: Int?,
         entityId: String?
     ) async throws -> FeatureCheckResult
+
+    /// Sync an App Store transaction with the backend
+    /// - Parameters:
+    ///   - transactionJwt: The signed transaction JWT from StoreKit 2
+    ///   - distinctId: The user's distinct ID
+    /// - Returns: PurchaseResponse with updated features
+    func syncTransaction(
+        transactionJwt: String,
+        distinctId: String
+    ) async throws -> PurchaseResponse
 }

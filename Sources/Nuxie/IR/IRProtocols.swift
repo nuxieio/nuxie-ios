@@ -42,9 +42,21 @@ public protocol IREventQueries {
 public protocol IRSegmentQueries {
     /// Check if user is member of segment
     func isMember(_ segmentId: String) async -> Bool
-    
+
     /// Get when user entered segment
     func enteredAt(_ segmentId: String) async -> Date?
+}
+
+/// Adapter protocol for feature access queries (entitlements)
+public protocol IRFeatureQueries {
+    /// Check if user has access to feature (boolean or has remaining balance)
+    func has(_ featureId: String) async -> Bool
+
+    /// Check if feature is unlimited
+    func isUnlimited(_ featureId: String) async -> Bool
+
+    /// Get current balance for metered/credit features
+    func getBalance(_ featureId: String) async -> Int?
 }
 
 // MARK: - Supporting Types
@@ -97,30 +109,35 @@ public enum Period: String {
 public struct EvalContext {
     /// Current date/time
     public let now: Date
-    
+
     /// User property adapter (optional)
     public let user: IRUserProps?
-    
-    /// Event queries adapter (optional) 
+
+    /// Event queries adapter (optional)
     public let events: IREventQueries?
-    
+
     /// Segment queries adapter (optional)
     public let segments: IRSegmentQueries?
-    
+
+    /// Feature queries adapter (optional)
+    public let features: IRFeatureQueries?
+
     /// Event for predicate evaluation (when evaluating trigger conditions)
     public let event: NuxieEvent?
-    
+
     public init(
         now: Date,
         user: IRUserProps? = nil,
         events: IREventQueries? = nil,
         segments: IRSegmentQueries? = nil,
+        features: IRFeatureQueries? = nil,
         event: NuxieEvent? = nil
     ) {
         self.now = now
         self.user = user
         self.events = events
         self.segments = segments
+        self.features = features
         self.event = event
     }
 }
