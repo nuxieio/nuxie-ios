@@ -118,6 +118,11 @@ extension Container {
       .scope(.sdk)
   }
 
+  var transactionObserver: Factory<TransactionObserver> {
+    self { TransactionObserver() }
+      .scope(.sdk)
+  }
+
   // MARK: - Journey Services
 
   var journeyService: Factory<JourneyServiceProtocol> {

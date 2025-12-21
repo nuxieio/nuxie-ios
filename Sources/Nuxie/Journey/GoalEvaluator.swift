@@ -22,6 +22,7 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
 
   @Injected(\.eventService) private var eventService: EventServiceProtocol
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
+  @Injected(\.featureService) private var featureService: FeatureServiceProtocol
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.irRuntime) private var irRuntime: IRRuntime
@@ -198,11 +199,13 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     let userAdapter = IRUserPropsAdapter(identityService: identityService)
     let eventsAdapter = IREventQueriesAdapter(eventService: eventService)
     let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: segmentService)
+    let featuresAdapter = IRFeatureQueriesAdapter(featureService: featureService)
 
     let config = IRRuntime.Config(
       user: userAdapter,
       events: eventsAdapter,
-      segments: segmentsAdapter
+      segments: segmentsAdapter,
+      features: featuresAdapter
     )
 
     LogDebug("[GoalEvaluator] Evaluating IR expression: \(attributeExpr)")

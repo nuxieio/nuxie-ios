@@ -53,6 +53,14 @@ public struct FeatureAccess: Sendable {
         self.type = result.type
     }
 
+    /// Create from a PurchaseFeature (from purchase sync response)
+    init(from purchase: PurchaseFeature) {
+        self.allowed = purchase.allowed
+        self.unlimited = purchase.unlimited
+        self.balance = purchase.balance
+        self.type = purchase.type
+    }
+
     /// Create a "not found" result
     static var notFound: FeatureAccess {
         FeatureAccess(allowed: false, unlimited: false, balance: nil, type: .boolean)
@@ -89,4 +97,64 @@ struct FeatureCheckRequest: Codable {
     let featureId: String
     let requiredBalance: Int?
     let entityId: String?
+}
+
+// MARK: - Purchase Request
+
+/// Request for syncing App Store transactions
+struct PurchaseRequest: Codable {
+    /// Signed transaction JWT from StoreKit 2
+    let transactionJwt: String
+    /// User's distinct ID for customer lookup
+    let distinctId: String
+
+    enum CodingKeys: String, CodingKey {
+        case transactionJwt = "transaction_jwt"
+        case distinctId = "distinct_id"
+    }
+}
+
+// MARK: - Purchase Response
+
+/// Response from the /purchase endpoint after syncing an App Store transaction
+public struct PurchaseResponse: Codable, Sendable {
+    /// Whether the transaction was processed successfully
+    public let success: Bool
+    /// Customer ID (if successful)
+    public let customerId: String?
+    /// Updated feature access list
+    public let features: [PurchaseFeature]?
+    /// Error message (if failed)
+    public let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case success
+        case customerId = "customer_id"
+        case features
+        case error
+    }
+}
+
+/// Feature access from purchase response
+public struct PurchaseFeature: Codable, Sendable {
+    public let id: String
+    public let extId: String?
+    public let type: FeatureType
+    public let allowed: Bool
+    public let balance: Int?
+    public let unlimited: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case extId = "ext_id"
+        case type
+        case allowed
+        case balance
+        case unlimited
+    }
+
+    /// Convert to FeatureAccess for cache update
+    var toFeatureAccess: FeatureAccess {
+        FeatureAccess(from: self)
+    }
 }

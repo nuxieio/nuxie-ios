@@ -58,7 +58,7 @@ public final class IRInterpreter {
             guard let segments = ctx.segments else {
                 return false
             }
-            
+
             switch op {
             case "is_member", "in":
                 return await segments.isMember(id)
@@ -72,7 +72,10 @@ public final class IRInterpreter {
             default:
                 return false
             }
-            
+
+        case .feature(let op, let id, let value):
+            return try await evalFeature(op: op, id: id, value: value)
+
         case .eventsExists(let name, let since, let until, let within, let where_):
             guard let events = ctx.events else { return false }
             let (s, u) = try await window(since: since, until: until, within: within)
@@ -598,7 +601,42 @@ public final class IRInterpreter {
             return false
         }
     }
-    
+
+    /// Evaluate Feature node (entitlement access checks)
+    private func evalFeature(op: String, id: String, value: IRExpr?) async throws -> Bool {
+        guard let features = ctx.features else { return false }
+
+        switch op {
+        case "has":
+            return await features.has(id)
+
+        case "not_has":
+            return await !features.has(id)
+
+        case "is_unlimited":
+            return await features.isUnlimited(id)
+
+        case "credits_eq", "credits_neq", "credits_gt", "credits_gte", "credits_lt", "credits_lte":
+            guard let value = value else { return false }
+            let target = try await evalValue(value)
+            guard case .number(let n) = target else { return false }
+            guard let balance = await features.getBalance(id) else { return false }
+            let targetInt = Int(n)
+            switch op {
+            case "credits_eq": return balance == targetInt
+            case "credits_neq": return balance != targetInt
+            case "credits_gt": return balance > targetInt
+            case "credits_gte": return balance >= targetInt
+            case "credits_lt": return balance < targetInt
+            case "credits_lte": return balance <= targetInt
+            default: return false
+            }
+
+        default:
+            return false
+        }
+    }
+
     /// Evaluate Event node (same operators as User, but source is ctx.event)
     private func evalEvent(op: String, key: String, value: IRExpr?, event: NuxieEvent) async throws -> Bool {
         let raw = resolveEventValue(for: key, in: event)

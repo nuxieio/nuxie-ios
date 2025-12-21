@@ -32,6 +32,9 @@ protocol FeatureServiceProtocol: AnyObject {
 
     /// Sync FeatureInfo from profile cache (call after profile refresh)
     func syncFeatureInfo() async
+
+    /// Update feature cache from purchase response
+    func updateFromPurchase(_ features: [PurchaseFeature]) async
 }
 
 /// Manages feature access checking with caching
@@ -221,5 +224,23 @@ internal actor FeatureService: FeatureServiceProtocol {
         await MainActor.run {
             featureInfo.update(featureId, access: access)
         }
+    }
+
+    /// Update feature cache from purchase response
+    /// Called after a successful transaction sync to immediately reflect new entitlements
+    func updateFromPurchase(_ features: [PurchaseFeature]) async {
+        LogInfo("Updating feature cache from purchase response with \(features.count) features")
+
+        // Update FeatureInfo for SwiftUI reactivity
+        var accessMap: [String: FeatureAccess] = [:]
+        for purchaseFeature in features {
+            accessMap[purchaseFeature.id] = purchaseFeature.toFeatureAccess
+        }
+
+        await MainActor.run {
+            featureInfo.update(accessMap)
+        }
+
+        LogInfo("Feature cache updated from purchase")
     }
 }
