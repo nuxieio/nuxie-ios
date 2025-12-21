@@ -24,9 +24,25 @@ public struct ProfileResponse: Codable {
     public let flows: [RemoteFlow]
     public let userProperties: [String: AnyCodable]?
     /// Server-computed experiment variant assignments (experimentId -> assignment)
-    public let experimentAssignments: [String: ExperimentAssignment]?
+    public let experiments: [String: ExperimentAssignment]?
     /// Customer's feature access (from active subscriptions)
     public let features: [Feature]?
+
+    public init(
+        campaigns: [Campaign],
+        segments: [Segment],
+        flows: [RemoteFlow],
+        userProperties: [String: AnyCodable]? = nil,
+        experiments: [String: ExperimentAssignment]? = nil,
+        features: [Feature]? = nil
+    ) {
+        self.campaigns = campaigns
+        self.segments = segments
+        self.flows = flows
+        self.userProperties = userProperties
+        self.experiments = experiments
+        self.features = features
+    }
 }
 
 // MARK: - Feature Models

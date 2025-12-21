@@ -342,7 +342,7 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     guard let profile = await profileService.getCachedProfile(distinctId: distinctId) else {
       return nil
     }
-    return profile.experimentAssignments?[experimentId]
+    return profile.experiments?[experimentId]
   }
 
   /// Compute variant locally using deterministic FNV-1a hash
