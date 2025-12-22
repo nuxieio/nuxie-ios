@@ -19,7 +19,8 @@ public protocol NuxieApiProtocol: AnyObject {
         event: String,
         distinctId: String,
         properties: [String: Any]?,
-        value: Double?
+        value: Double?,
+        entityId: String?
     ) async throws -> EventResponse
 
     /// Check feature access for a customer

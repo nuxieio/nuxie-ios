@@ -8,7 +8,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
     public var shouldFailBatch = false
     public var shouldFailFlow = false
     public var shouldFailTrackEvent = false
-    
+    public var trackEventError: Error?
+
     public var profileDelay: TimeInterval = 0
     public var profileResponse: ProfileResponse?
     public var batchResponse: BatchResponse = BatchResponse(
@@ -18,18 +19,28 @@ public actor MockNuxieApi: NuxieApiProtocol {
         total: 0,
         errors: nil
     )
-    
+    public var trackEventResponse: EventResponse?
+
     // Call tracking
     public var fetchProfileCallCount = 0
     public var fetchProfileWithTimeoutCallCount = 0
     public var sendBatchCallCount = 0
     public var fetchFlowCallCount = 0
     public var trackEventCallCount = 0
-    
+
     public var lastTimeoutUsed: TimeInterval?
-    
+
     // Track sent events for test assertions
     public private(set) var sentEvents: [NuxieEvent] = []
+
+    // Track last trackEvent call details
+    public private(set) var lastTrackEventCall: (
+        event: String,
+        distinctId: String,
+        properties: [String: Any]?,
+        value: Double?,
+        entityId: String?
+    )?
     
     public init() {
         setupDefaultProfileResponse()
@@ -145,30 +156,30 @@ public actor MockNuxieApi: NuxieApiProtocol {
         )
     }
     
-    public func fetchProfile(for distinctId: String) async throws -> ProfileResponse {
+    public func fetchProfile(for distinctId: String, locale: String?) async throws -> ProfileResponse {
         fetchProfileCallCount += 1
-        
+
         if profileDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(profileDelay * 1_000_000_000))
         }
-        
+
         if shouldFailProfile {
             throw NuxieNetworkError.httpError(statusCode: 500, message: "Mock server error")
         }
-        
+
         return profileResponse!
     }
-    
-    public func fetchProfileWithTimeout(for distinctId: String, timeout: TimeInterval) async throws -> ProfileResponse {
+
+    public func fetchProfileWithTimeout(for distinctId: String, locale: String?, timeout: TimeInterval) async throws -> ProfileResponse {
         fetchProfileWithTimeoutCallCount += 1
         lastTimeoutUsed = timeout
-        
+
         // Simulate timeout if delay is longer than requested timeout
         if profileDelay > timeout {
             throw NuxieNetworkError.timeout
         }
-        
-        return try await fetchProfile(for: distinctId)
+
+        return try await fetchProfile(for: distinctId, locale: locale)
     }
     
     public func fetchFlow(flowId: String) async throws -> RemoteFlow {
@@ -196,15 +207,20 @@ public actor MockNuxieApi: NuxieApiProtocol {
         event: String,
         distinctId: String,
         properties: [String: Any]?,
-        value: Double?
+        value: Double?,
+        entityId: String?
     ) async throws -> EventResponse {
         trackEventCallCount += 1
-        
+        lastTrackEventCall = (event, distinctId, properties, value, entityId)
+
         if shouldFailTrackEvent {
+            if let error = trackEventError {
+                throw error
+            }
             throw NuxieNetworkError.httpError(statusCode: 500, message: "Mock tracking error")
         }
-        
-        return EventResponse(
+
+        return trackEventResponse ?? EventResponse(
             status: "success",
             payload: nil,
             customer: nil,
@@ -214,13 +230,46 @@ public actor MockNuxieApi: NuxieApiProtocol {
             usage: nil
         )
     }
-    
+
+    public func checkFeature(
+        customerId: String,
+        featureId: String,
+        requiredBalance: Int?,
+        entityId: String?
+    ) async throws -> FeatureCheckResult {
+        return FeatureCheckResult(
+            customerId: customerId,
+            featureId: featureId,
+            requiredBalance: requiredBalance ?? 1,
+            code: "allowed",
+            allowed: true,
+            unlimited: false,
+            balance: 100,
+            type: .boolean,
+            preview: nil
+        )
+    }
+
+    public func syncTransaction(
+        transactionJwt: String,
+        distinctId: String
+    ) async throws -> PurchaseResponse {
+        return PurchaseResponse(
+            success: true,
+            customerId: distinctId,
+            features: nil,
+            error: nil
+        )
+    }
+
     // Test helpers
     public func reset() {
         shouldFailProfile = false
         shouldFailBatch = false
         shouldFailFlow = false
         shouldFailTrackEvent = false
+        trackEventError = nil
+        trackEventResponse = nil
         profileDelay = 0
         fetchProfileCallCount = 0
         fetchProfileWithTimeoutCallCount = 0
@@ -229,8 +278,31 @@ public actor MockNuxieApi: NuxieApiProtocol {
         trackEventCallCount = 0
         lastTimeoutUsed = nil
         sentEvents.removeAll()
-        
+        lastTrackEventCall = nil
+
         // Reset profileResponse to default
         setupDefaultProfileResponse()
+    }
+
+    // Configuration helpers for tests
+    public func configureTrackEventResponse(
+        status: String = "ok",
+        message: String? = nil,
+        usage: EventResponse.Usage? = nil
+    ) {
+        trackEventResponse = EventResponse(
+            status: status,
+            payload: nil,
+            customer: nil,
+            event: nil,
+            message: message,
+            featuresMatched: nil,
+            usage: usage
+        )
+    }
+
+    public func configureTrackEventFailure(error: Error? = nil) {
+        shouldFailTrackEvent = true
+        trackEventError = error
     }
 }

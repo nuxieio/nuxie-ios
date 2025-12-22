@@ -53,19 +53,19 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
         )
     }
     
-    func fetchProfile(for distinctId: String) async throws -> ProfileResponse {
+    func fetchProfile(for distinctId: String, locale: String?) async throws -> ProfileResponse {
         return ProfileResponse(campaigns: [], segments: [], flows: [], userProperties: nil)
     }
-    
-    func fetchProfileWithTimeout(for distinctId: String, timeout: TimeInterval) async throws -> ProfileResponse {
+
+    func fetchProfileWithTimeout(for distinctId: String, locale: String?, timeout: TimeInterval) async throws -> ProfileResponse {
         return ProfileResponse(campaigns: [], segments: [], flows: [], userProperties: nil)
     }
-    
+
     func fetchFlow(flowId: String) async throws -> RemoteFlow {
         fatalError("Not implemented for tests")
     }
-    
-    func trackEvent(event: String, distinctId: String, properties: [String: Any]?, value: Double?) async throws -> EventResponse {
+
+    func trackEvent(event: String, distinctId: String, properties: [String: Any]?, value: Double?, entityId: String?) async throws -> EventResponse {
         return EventResponse(
             status: "success",
             payload: nil,
@@ -76,7 +76,15 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
             usage: nil
         )
     }
-    
+
+    func checkFeature(customerId: String, featureId: String, requiredBalance: Int?, entityId: String?) async throws -> FeatureCheckResult {
+        fatalError("Not implemented for tests")
+    }
+
+    func syncTransaction(transactionJwt: String, distinctId: String) async throws -> PurchaseResponse {
+        return PurchaseResponse(success: true, customerId: distinctId, features: nil, error: nil)
+    }
+
     func reset() {
         sendBatchCalled = false
         sendBatchCallCount = 0

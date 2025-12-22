@@ -352,7 +352,8 @@ extension NuxieApi {
         event: String,
         distinctId: String,
         properties: [String: Any]? = nil,
-        value: Double? = nil
+        value: Double? = nil,
+        entityId: String? = nil
     ) async throws -> EventResponse {
         let request = EventRequest(
             event: event,
@@ -360,7 +361,8 @@ extension NuxieApi {
             timestamp: Date(),
             properties: properties,
             idempotencyKey: UUID.v7().uuidString,
-            value: value
+            value: value,
+            entityId: entityId
         )
 
         return try await self.request(

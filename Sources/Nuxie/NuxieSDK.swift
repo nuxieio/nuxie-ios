@@ -701,4 +701,86 @@ public final class NuxieSDK {
     )
   }
 
+  // MARK: - Feature Usage
+
+  /// Report usage of a metered feature, consuming balance from the user's entitlement.
+  ///
+  /// This method sends the usage directly to the server (synchronous) and returns the result,
+  /// including any updated balance information. Use this after the user has successfully
+  /// used a feature to decrement their balance.
+  ///
+  /// - Parameters:
+  ///   - featureId: The feature identifier (external ID configured in Nuxie dashboard)
+  ///   - amount: The amount to consume (default: 1)
+  ///   - entityId: Optional entity ID for entity-based limits (e.g., per-project usage)
+  ///   - setUsage: If true, sets the usage to the specified amount instead of decrementing (default: false)
+  ///   - metadata: Optional additional metadata to record with the usage event
+  /// - Returns: FeatureUsageResult with usage confirmation and updated balance
+  /// - Throws: NuxieError if SDK not configured or request fails
+  ///
+  /// - Example:
+  /// ```swift
+  /// // Consume 1 unit of "ai_generations" feature
+  /// let result = try await Nuxie.shared.useFeature("ai_generations")
+  ///
+  /// // Consume 5 credits for a premium export
+  /// let result = try await Nuxie.shared.useFeature("export_credits", amount: 5)
+  ///
+  /// // Track per-project usage
+  /// let result = try await Nuxie.shared.useFeature("api_calls", amount: 1, entityId: "project-123")
+  /// ```
+  @discardableResult
+  public func useFeature(
+    _ featureId: String,
+    amount: Double = 1,
+    entityId: String? = nil,
+    setUsage: Bool = false,
+    metadata: [String: Any]? = nil
+  ) async throws -> FeatureUsageResult {
+    guard isSetup else {
+      throw NuxieError.notConfigured
+    }
+
+    let identityService = container.identityService()
+    let distinctId = identityService.getDistinctId()
+
+    // Build properties for $feature_used event
+    var properties: [String: Any] = [
+      "feature_extId": featureId
+    ]
+
+    if setUsage {
+      properties["setUsage"] = true
+    }
+
+    if let metadata = metadata {
+      properties["metadata"] = metadata
+    }
+
+    // Send directly to /i/event endpoint for immediate confirmation
+    let api = container.nuxieApi()
+    let response = try await api.trackEvent(
+      event: "$feature_used",
+      distinctId: distinctId,
+      properties: properties,
+      value: amount,
+      entityId: entityId
+    )
+
+    // Build result from response
+    return FeatureUsageResult(
+      success: response.status == "ok" || response.status == "success",
+      featureId: featureId,
+      amountUsed: amount,
+      message: response.message,
+      usage: response.usage.map { usage in
+        FeatureUsageResult.UsageInfo(
+          current: usage.current,
+          limit: usage.limit,
+          remaining: usage.remaining
+        )
+      }
+    )
+  }
+
 }

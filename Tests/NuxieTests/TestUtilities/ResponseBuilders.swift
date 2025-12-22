@@ -79,7 +79,7 @@ struct ResponseBuilders {
     }
     
     // MARK: - Event Response
-    
+
     static func buildEventResponse(
         status: String = "success"
     ) -> EventResponse {
@@ -91,6 +91,28 @@ struct ResponseBuilders {
             message: nil,
             featuresMatched: nil,
             usage: nil
+        )
+    }
+
+    static func buildFeatureUsedResponse(
+        status: String = "ok",
+        message: String? = "Feature usage tracked successfully",
+        current: Double = 5,
+        limit: Double? = 100,
+        remaining: Double? = 95
+    ) -> EventResponse {
+        return EventResponse(
+            status: status,
+            payload: nil,
+            customer: nil,
+            event: nil,
+            message: message,
+            featuresMatched: nil,
+            usage: EventResponse.Usage(
+                current: current,
+                limit: limit,
+                remaining: remaining
+            )
         )
     }
     
