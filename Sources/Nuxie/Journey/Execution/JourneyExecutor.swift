@@ -679,6 +679,21 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     if waitState == nil {
       waitState = buildInitialWaitState(for: waitNode, now: now)
       saveWaitState(waitState!, into: journey)
+
+      // Track wait started event (only on initial creation)
+      let maxTimeout = waitNode.data.paths.compactMap { $0.maxTime }.max()
+      eventService.track(
+        JourneyEvents.nodeWaitStarted,
+        properties: JourneyEvents.waitStartedProperties(
+          journey: journey,
+          nodeId: waitNode.id,
+          pathCount: waitNode.data.paths.count,
+          timeoutSeconds: maxTimeout
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
     }
 
     // Helper to compute wait duration
