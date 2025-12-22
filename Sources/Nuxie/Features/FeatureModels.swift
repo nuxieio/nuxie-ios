@@ -103,12 +103,15 @@ struct FeatureCheckRequest: Codable {
 
 /// Request for syncing App Store transactions
 struct PurchaseRequest: Codable {
+    /// Purchase type discriminator - always "appstore" for iOS SDK
+    let type: String = "appstore"
     /// Signed transaction JWT from StoreKit 2
     let transactionJwt: String
     /// User's distinct ID for customer lookup
     let distinctId: String
 
     enum CodingKeys: String, CodingKey {
+        case type
         case transactionJwt = "transaction_jwt"
         case distinctId = "distinct_id"
     }
@@ -156,5 +159,55 @@ public struct PurchaseFeature: Codable, Sendable {
     /// Convert to FeatureAccess for cache update
     var toFeatureAccess: FeatureAccess {
         FeatureAccess(from: self)
+    }
+}
+
+// MARK: - Feature Usage Result
+
+/// Result of a feature usage report
+public struct FeatureUsageResult: Sendable {
+    /// Whether the usage was recorded successfully
+    public let success: Bool
+
+    /// The feature ID that was used
+    public let featureId: String
+
+    /// The amount that was consumed
+    public let amountUsed: Double
+
+    /// Optional message from the server
+    public let message: String?
+
+    /// Updated usage information (if available)
+    public let usage: UsageInfo?
+
+    /// Usage information from the server
+    public struct UsageInfo: Sendable {
+        /// Current usage amount
+        public let current: Double
+        /// Usage limit (if set)
+        public let limit: Double?
+        /// Remaining balance (if available)
+        public let remaining: Double?
+
+        public init(current: Double, limit: Double?, remaining: Double?) {
+            self.current = current
+            self.limit = limit
+            self.remaining = remaining
+        }
+    }
+
+    public init(
+        success: Bool,
+        featureId: String,
+        amountUsed: Double,
+        message: String?,
+        usage: UsageInfo?
+    ) {
+        self.success = success
+        self.featureId = featureId
+        self.amountUsed = amountUsed
+        self.message = message
+        self.usage = usage
     }
 }
