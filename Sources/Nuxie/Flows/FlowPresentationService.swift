@@ -137,48 +137,52 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     private func handleFlowDismissal(reason: CloseReason) async {
         let flowId = currentFlowId ?? "unknown"
         let journey = currentJourney
-        
+
         LogInfo("FlowPresentationService: Flow \(flowId) dismissed with reason: \(reason)")
-        
-        // Track flow completion event with detailed properties
+
+        // Track specific flow event based on reason
         if let journey = journey {
-            let completionType = mapCloseReasonToCompletionType(reason)
-            var properties = JourneyEvents.flowCompletedProperties(
-                flowId: flowId,
-                journey: journey,
-                completionType: completionType
-            )
-            
-            // Add additional properties based on reason
             switch reason {
+            case .userDismissed:
+                eventService.track(
+                    JourneyEvents.flowDismissed,
+                    properties: JourneyEvents.flowDismissedProperties(flowId: flowId, journey: journey),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
+
             case .purchaseCompleted:
-                // In a real implementation, we'd get these from the purchase flow
-                // For now, we'll leave them unset and let the purchase delegate handle it
-                break
+                eventService.track(
+                    JourneyEvents.flowPurchased,
+                    properties: JourneyEvents.flowPurchasedProperties(flowId: flowId, journey: journey, productId: nil),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
+
+            case .timeout:
+                eventService.track(
+                    JourneyEvents.flowTimedOut,
+                    properties: JourneyEvents.flowTimedOutProperties(flowId: flowId, journey: journey),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
+
             case .error(let error):
-                properties["error_message"] = error.localizedDescription
-            default:
-                break
+                eventService.track(
+                    JourneyEvents.flowErrored,
+                    properties: JourneyEvents.flowErroredProperties(flowId: flowId, journey: journey, errorMessage: error.localizedDescription),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil,
+                    completion: nil
+                )
             }
-            
-            eventService.track(JourneyEvents.flowCompleted, properties: properties, userProperties: nil, userPropertiesSetOnce: nil, completion: nil)
         }
-        
+
         // Clean up
         await cleanupPresentation()
-    }
-    
-    private func mapCloseReasonToCompletionType(_ reason: CloseReason) -> String {
-        switch reason {
-        case .userDismissed:
-            return "dismissed"
-        case .purchaseCompleted:
-            return "purchase"
-        case .timeout:
-            return "timeout"
-        case .error:
-            return "error"
-        }
     }
     
     private func cleanupPresentation() async {

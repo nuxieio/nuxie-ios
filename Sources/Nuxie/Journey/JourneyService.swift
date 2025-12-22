@@ -230,6 +230,19 @@ public actor JourneyService: JourneyServiceProtocol {
       "[JourneyService] Stored journey \(journey.id) in registry. Total journeys: \(inMemoryJourneysById.count)"
     )
 
+    // Track journey started event
+    Container.shared.eventService().track(
+      JourneyEvents.journeyStarted,
+      properties: JourneyEvents.journeyStartedProperties(
+        journey: journey,
+        campaign: campaign,
+        triggerEvent: nil
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
+
     // Execute journey
     await executeJourney(journey, campaign: campaign, reason: .start)
 
@@ -257,6 +270,19 @@ public actor JourneyService: JourneyServiceProtocol {
 
     canonical.resume()
     inMemoryJourneysById[canonical.id] = canonical
+
+    // Track journey resumed event
+    Container.shared.eventService().track(
+      JourneyEvents.journeyResumed,
+      properties: JourneyEvents.journeyResumedProperties(
+        journey: canonical,
+        nodeId: canonical.currentNodeId,
+        resumeReason: "timer"
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
 
     // Continue execution (timer-based resume)
     await executeJourney(canonical, campaign: campaign, reason: .timer)
@@ -631,6 +657,19 @@ public actor JourneyService: JourneyServiceProtocol {
         LogDebug("[JourneyService] Journey \(journey.id) status: \(journey.status)")
         persistJourney(journey)
 
+        // Track journey paused event
+        Container.shared.eventService().track(
+          JourneyEvents.journeyPaused,
+          properties: JourneyEvents.journeyPausedProperties(
+            journey: journey,
+            nodeId: currentNodeId,
+            resumeAt: resumeAt
+          ),
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
+        )
+
         // Schedule resume if there's a deadline
         if let resumeAt = resumeAt {
           scheduleResume(journey, at: resumeAt)
@@ -654,10 +693,25 @@ public actor JourneyService: JourneyServiceProtocol {
     LogInfo("Completing journey \(journey.id) with reason: \(reason)")
 
     journey.complete(reason: reason)
-    
+
     // Calculate journey duration
     let duration = journey.completedAt?.timeIntervalSince(journey.startedAt) ?? dateProvider.now().timeIntervalSince(journey.startedAt)
-    
+
+    // Track journey errored event if this is an error exit
+    if reason == .error {
+      Container.shared.eventService().track(
+        JourneyEvents.journeyErrored,
+        properties: JourneyEvents.journeyErroredProperties(
+          journey: journey,
+          nodeId: journey.currentNodeId,
+          errorMessage: nil
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
+    }
+
     // Track journey exit event for observability
     Container.shared.eventService().track(
       JourneyEvents.journeyExited,
@@ -977,6 +1031,21 @@ public actor JourneyService: JourneyServiceProtocol {
 
         // Pass the event-driven resume reason for this reactive re-evaluation
         let resumeReason: ResumeReason = event != nil ? .event(event!) : .segmentChange
+        let resumeReasonString = event != nil ? "event" : "segment_change"
+
+        // Track journey resumed event
+        Container.shared.eventService().track(
+          JourneyEvents.journeyResumed,
+          properties: JourneyEvents.journeyResumedProperties(
+            journey: journey,
+            nodeId: journey.currentNodeId,
+            resumeReason: resumeReasonString
+          ),
+          userProperties: nil,
+          userPropertiesSetOnce: nil,
+          completion: nil
+        )
+
         await executeJourney(journey, campaign: campaign, reason: resumeReason)
       }
     }

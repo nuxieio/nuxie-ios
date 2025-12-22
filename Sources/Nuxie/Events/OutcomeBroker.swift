@@ -80,18 +80,18 @@ public actor OutcomeBroker: OutcomeBrokerProtocol {
     
     /// Observe events to detect flow completions
     public func observe(event: NuxieEvent) {
-        // We only care about flow completion events
-        guard event.name == JourneyEvents.flowCompleted else {
+        // Check if this is a flow-ending event
+        guard isFlowEndingEvent(event.name) else {
             return
         }
-        
+
         let props = event.properties
         guard let journeyId = props["journey_id"] as? String,
               let flowId = props["flow_id"] as? String else {
-            LogDebug("Flow completed event missing journey_id or flow_id")
+            LogDebug("Flow event missing journey_id or flow_id")
             return
         }
-        
+
         // Find the originating event ID
         guard let eventId = journeyToEventId[journeyId],
               let pending = pendingByEventId[eventId],
@@ -100,12 +100,12 @@ public actor OutcomeBroker: OutcomeBrokerProtocol {
             LogDebug("No pending outcome for journey \(journeyId) flow \(flowId)")
             return
         }
-        
-        LogInfo("Flow \(flowId) completed for event \(eventId)")
-        
-        // Map the outcome from event properties
-        let outcome = mapOutcome(from: props)
-        
+
+        LogInfo("Flow \(flowId) ended for event \(eventId) with \(event.name)")
+
+        // Map the outcome from event name and properties
+        let outcome = mapOutcome(from: event.name, properties: props)
+
         // Call completion with flow result
         let flowCompletion = FlowCompletion(
             journeyId: journeyId,
@@ -113,9 +113,17 @@ public actor OutcomeBroker: OutcomeBrokerProtocol {
             outcome: outcome
         )
         pending.completion(.flow(flowCompletion))
-        
+
         // Clean up
         cleanup(eventId: eventId, journeyId: journeyId)
+    }
+
+    /// Check if an event name represents a flow ending
+    private func isFlowEndingEvent(_ eventName: String) -> Bool {
+        return eventName == JourneyEvents.flowDismissed ||
+               eventName == JourneyEvents.flowPurchased ||
+               eventName == JourneyEvents.flowTimedOut ||
+               eventName == JourneyEvents.flowErrored
     }
     
     // MARK: - Private Methods
@@ -142,33 +150,24 @@ public actor OutcomeBroker: OutcomeBrokerProtocol {
         }
     }
     
-    private func mapOutcome(from properties: [String: Any]) -> FlowOutcome {
-        let completionType = (properties["completion_type"] as? String)?.lowercased()
-        
-        switch completionType {
-        case "purchase", "purchased":
+    private func mapOutcome(from eventName: String, properties: [String: Any]) -> FlowOutcome {
+        switch eventName {
+        case JourneyEvents.flowPurchased:
             return .purchased(
                 productId: properties["product_id"] as? String,
                 transactionId: properties["transaction_id"] as? String
             )
-            
-        case "trial", "trial_started":
-            return .trialStarted(productId: properties["product_id"] as? String)
-            
-        case "restore", "restored":
-            return .restored
-            
-        case "dismiss", "dismissed", "close", "closed":
+
+        case JourneyEvents.flowDismissed:
             return .dismissed
-            
-        case "skip", "skipped":
-            return .skipped
-            
-        case "error":
+
+        case JourneyEvents.flowTimedOut:
+            return .dismissed  // Treat timeout as dismissed
+
+        case JourneyEvents.flowErrored:
             return .error(message: properties["error_message"] as? String)
-            
+
         default:
-            // Default to dismissed if we don't recognize the type
             return .dismissed
         }
     }

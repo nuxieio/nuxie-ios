@@ -129,21 +129,20 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
           let journey = flowPresentationService.lastPresentedJourney!
 
           // Simulate flow completion with purchase
-          let flowCompleted = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+          let flowPurchased = NuxieEvent(
+            name: JourneyEvents.flowPurchased,
             distinctId: identityService.getDistinctId(),
             properties: [
               "journey_id": journey.id,
               "flow_id": "premium-flow",
-              "completion_type": "purchase",
               "product_id": "premium.monthly",
               "transaction_id": "txn_123",
             ]
           )
 
           eventService.track(
-            flowCompleted.name,
-            properties: flowCompleted.properties,
+            flowPurchased.name,
+            properties: flowPurchased.properties,
             userProperties: nil,
             userPropertiesSetOnce: nil,
             completion: nil
@@ -203,19 +202,18 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
           let journey = flowPresentationService.lastPresentedJourney!
 
           // Simulate dismissal
-          let flowCompleted = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+          let flowDismissed = NuxieEvent(
+            name: JourneyEvents.flowDismissed,
             distinctId: identityService.getDistinctId(),
             properties: [
               "journey_id": journey.id,
               "flow_id": "dismissable-flow",
-              "completion_type": "dismissed",
             ]
           )
 
           eventService.track(
-            flowCompleted.name,
-            properties: flowCompleted.properties,
+            flowDismissed.name,
+            properties: flowDismissed.properties,
             userProperties: nil,
             userPropertiesSetOnce: nil,
             completion: nil
@@ -376,20 +374,19 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
           let journey = flowPresentationService.lastPresentedJourney!
 
           // Simulate error completion
-          let flowCompleted = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+          let flowErrored = NuxieEvent(
+            name: JourneyEvents.flowErrored,
             distinctId: identityService.getDistinctId(),
             properties: [
               "journey_id": journey.id,
               "flow_id": "error-flow",
-              "completion_type": "error",
               "error_message": "Network connection failed",
             ]
           )
 
           eventService.track(
-            flowCompleted.name,
-            properties: flowCompleted.properties,
+            flowErrored.name,
+            properties: flowErrored.properties,
             userProperties: nil,
             userPropertiesSetOnce: nil,
             completion: nil

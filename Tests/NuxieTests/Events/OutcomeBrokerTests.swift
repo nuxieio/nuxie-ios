@@ -6,7 +6,7 @@ import Quick
 
 /// Contract under test:
 /// - Unbound registration: if no flow is shown within the window, complete with `.noInteraction`.
-/// - After bind (flow shown): do NOT time out; wait indefinitely for a matching `$flow_completed`.
+/// - After bind (flow shown): do NOT time out; wait indefinitely for a flow-ending event.
 /// - Non-terminal events (e.g., `$flow_shown`) and mismatched completions are ignored.
 final class OutcomeBrokerTests: AsyncSpec {
   override class func spec() {
@@ -75,12 +75,11 @@ final class OutcomeBrokerTests: AsyncSpec {
 
           // Finish deterministically with a terminal event
           let completionEvent = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowDismissed,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-1",
               "flow_id": "flow-1",
-              "completion_type": "dismissed",
             ]
           )
           await broker.observe(event: completionEvent)
@@ -107,12 +106,11 @@ final class OutcomeBrokerTests: AsyncSpec {
           )
 
           let completionEvent = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowDismissed,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-2",
               "flow_id": "flow-2",
-              "completion_type": "dismissed",
             ]
           )
 
@@ -145,12 +143,11 @@ final class OutcomeBrokerTests: AsyncSpec {
           )
 
           let completionEvent = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowPurchased,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-3",
               "flow_id": "flow-3",
-              "completion_type": "purchase",
               "product_id": "premium.monthly",
               "transaction_id": "txn_123",
             ]
@@ -186,12 +183,11 @@ final class OutcomeBrokerTests: AsyncSpec {
           )
 
           let completionEvent = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowErrored,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-4",
               "flow_id": "flow-4",
-              "completion_type": "error",
               "error_message": "Failed to load flow",
             ]
           )
@@ -231,12 +227,11 @@ final class OutcomeBrokerTests: AsyncSpec {
 
           // Send COMPLETION for a different journey (should be ignored)
           let wrongJourneyCompletion = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowDismissed,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-999",
               "flow_id": "flow-5",
-              "completion_type": "dismissed",
             ]
           )
           await broker.observe(event: wrongJourneyCompletion)
@@ -250,12 +245,11 @@ final class OutcomeBrokerTests: AsyncSpec {
 
           // Now send the correct completion to finish deterministically
           let correctCompletion = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowDismissed,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-5",
               "flow_id": "flow-5",
-              "completion_type": "dismissed",
             ]
           )
           await broker.observe(event: correctCompletion)
@@ -306,12 +300,11 @@ final class OutcomeBrokerTests: AsyncSpec {
           )
 
           let completionEvent = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowDismissed,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-cleanup",
               "flow_id": "flow-cleanup",
-              "completion_type": "dismissed",
             ]
           )
 
@@ -329,7 +322,7 @@ final class OutcomeBrokerTests: AsyncSpec {
           expect(capturedResult).to(beNil())
         }
 
-        it("ignores non-flow-completed events and waits until a terminal completion arrives") {
+        it("ignores non-flow-ending events and waits until a terminal completion arrives") {
           var capturedResult: EventResult?
 
           await broker.register(
@@ -364,12 +357,11 @@ final class OutcomeBrokerTests: AsyncSpec {
 
           // Now send a terminal completion to finish deterministically
           let completionEvent = NuxieEvent(
-            name: JourneyEvents.flowCompleted,
+            name: JourneyEvents.flowDismissed,
             distinctId: "test-user",
             properties: [
               "journey_id": "journey-ignore",
               "flow_id": "flow-ignore",
-              "completion_type": "dismissed",
             ]
           )
           await broker.observe(event: completionEvent)

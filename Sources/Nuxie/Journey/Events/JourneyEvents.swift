@@ -8,7 +8,6 @@ public class JourneyEvents {
     
     /// Journey lifecycle events
     public static let journeyStarted = "$journey_started"
-    public static let journeyCompleted = "$journey_completed"
     public static let journeyPaused = "$journey_paused"
     public static let journeyResumed = "$journey_resumed"
     public static let journeyErrored = "$journey_errored"
@@ -25,8 +24,10 @@ public class JourneyEvents {
     
     /// Flow events
     public static let flowShown = "$flow_shown"
-    public static let flowCompleted = "$flow_completed"
     public static let flowDismissed = "$flow_dismissed"
+    public static let flowPurchased = "$flow_purchased"
+    public static let flowTimedOut = "$flow_timed_out"
+    public static let flowErrored = "$flow_errored"
     
     /// Customer events
     public static let customerUpdated = "$customer_updated"
@@ -69,24 +70,66 @@ public class JourneyEvents {
         return properties
     }
     
-    /// Build properties for journey.completed event
-    public static func journeyCompletedProperties(
+    /// Build properties for journey.paused event
+    public static func journeyPausedProperties(
         journey: Journey,
-        campaign: Campaign,
-        exitReason: JourneyExitReason,
-        nodesExecuted: Int = 0
+        nodeId: String,
+        resumeAt: Date?
     ) -> [String: Any] {
-        let duration = journey.completedAt?.timeIntervalSince(journey.startedAt) ?? 0
-        
-        return [
+        var properties: [String: Any] = [
             "journey_id": journey.id,
-            "campaign_id": campaign.id,
-            "exit_reason": exitReason.rawValue,
-            "duration_seconds": Int(duration),
-            "nodes_executed": nodesExecuted
+            "campaign_id": journey.campaignId,
+            "node_id": nodeId
         ]
+
+        if let resumeAt = resumeAt {
+            properties["resume_at"] = resumeAt.timeIntervalSince1970
+        }
+
+        return properties
     }
-    
+
+    /// Build properties for journey.resumed event
+    public static func journeyResumedProperties(
+        journey: Journey,
+        nodeId: String?,
+        resumeReason: String
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "resume_reason": resumeReason
+        ]
+
+        if let nodeId = nodeId {
+            properties["node_id"] = nodeId
+        }
+
+        return properties
+    }
+
+    /// Build properties for journey.errored event
+    public static func journeyErroredProperties(
+        journey: Journey,
+        nodeId: String?,
+        errorMessage: String?
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId
+        ]
+
+        if let nodeId = nodeId {
+            properties["node_id"] = nodeId
+        }
+
+        if let errorMessage = errorMessage {
+            properties["error_message"] = errorMessage
+        }
+
+        return properties
+    }
+
     /// Build properties for node.executed event
     public static func nodeExecutedProperties(
         journey: Journey,
@@ -211,24 +254,57 @@ public class JourneyEvents {
         ]
     }
     
-    /// Build properties for flow.completed event
-    public static func flowCompletedProperties(
+    /// Build base properties for flow events
+    private static func flowBaseProperties(
         flowId: String,
-        journey: Journey,
-        completionType: String,
-        productsShown: [String]? = nil
+        journey: Journey
     ) -> [String: Any] {
-        var properties: [String: Any] = [
+        return [
             "flow_id": flowId,
             "journey_id": journey.id,
-            "campaign_id": journey.campaignId,
-            "completion_type": completionType
+            "campaign_id": journey.campaignId
         ]
-        
-        if let products = productsShown {
-            properties["products_shown"] = products
+    }
+
+    /// Build properties for flow.dismissed event
+    public static func flowDismissedProperties(
+        flowId: String,
+        journey: Journey
+    ) -> [String: Any] {
+        return flowBaseProperties(flowId: flowId, journey: journey)
+    }
+
+    /// Build properties for flow.purchased event
+    public static func flowPurchasedProperties(
+        flowId: String,
+        journey: Journey,
+        productId: String? = nil
+    ) -> [String: Any] {
+        var properties = flowBaseProperties(flowId: flowId, journey: journey)
+        if let productId = productId {
+            properties["product_id"] = productId
         }
-        
+        return properties
+    }
+
+    /// Build properties for flow.timed_out event
+    public static func flowTimedOutProperties(
+        flowId: String,
+        journey: Journey
+    ) -> [String: Any] {
+        return flowBaseProperties(flowId: flowId, journey: journey)
+    }
+
+    /// Build properties for flow.errored event
+    public static func flowErroredProperties(
+        flowId: String,
+        journey: Journey,
+        errorMessage: String? = nil
+    ) -> [String: Any] {
+        var properties = flowBaseProperties(flowId: flowId, journey: journey)
+        if let errorMessage = errorMessage {
+            properties["error_message"] = errorMessage
+        }
         return properties
     }
     
