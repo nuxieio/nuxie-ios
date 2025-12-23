@@ -33,10 +33,10 @@ public class Journey: Codable {
     
     /// For async nodes, when to resume
     public var resumeAt: Date?
-    
+
     /// Journey expiration (optional)
     public var expiresAt: Date?
-    
+
     // MARK: - Goal and Conversion Tracking
     
     /// Snapshot of campaign goal at journey start
@@ -58,11 +58,16 @@ public class Journey: Codable {
     public var convertedAt: Date?
     
     /// Initialize a new journey
+    /// - Parameters:
+    ///   - id: Optional journey ID (for cross-device resume). If nil, generates a new UUID v7.
+    ///   - campaign: The campaign this journey belongs to
+    ///   - distinctId: The user identifier
     public init(
+        id: String? = nil,
         campaign: Campaign,
         distinctId: String
     ) {
-        self.id = UUID.v7().uuidString
+        self.id = id ?? UUID.v7().uuidString
         self.campaignId = campaign.id
         self.campaignVersionId = campaign.versionId
         self.campaignFrequencyPolicy = campaign.frequencyPolicy
@@ -70,25 +75,25 @@ public class Journey: Codable {
         self.status = .pending
         self.currentNodeId = campaign.entryNodeId
         self.context = [:]
-        
-        LogDebug("[Journey] Initialized journey \(id) for campaign \(campaign.id) with entryNodeId: \(campaign.entryNodeId ?? "nil")")
-        
+
+        LogDebug("[Journey] Initialized journey \(self.id) for campaign \(campaign.id) with entryNodeId: \(campaign.entryNodeId ?? "nil")")
+
         let dateProvider = Container.shared.dateProvider()
         let now = dateProvider.now()
         self.startedAt = now
         self.updatedAt = now
-        
+
         // Snapshot goal and exit policy
         self.goalSnapshot = campaign.goal
         self.exitPolicySnapshot = campaign.exitPolicy
-        
+
         // Set conversion window (use default if not specified)
         if let window = campaign.goal?.window {
             self.conversionWindow = window
         } else {
             self.conversionWindow = ConversionWindowDefaults.defaultWindow(for: campaign.campaignType)
         }
-        
+
         // Set conversion anchor (default to workflow_entry)
         self.conversionAnchor = ConversionAnchor(rawValue: campaign.conversionAnchor ?? "") ?? .workflowEntry
         self.conversionAnchorAt = now

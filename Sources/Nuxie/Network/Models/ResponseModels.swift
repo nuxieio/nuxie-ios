@@ -27,6 +27,8 @@ public struct ProfileResponse: Codable {
     public let experiments: [String: ExperimentAssignment]?
     /// Customer's feature access (from active subscriptions)
     public let features: [Feature]?
+    /// Active journeys for cross-device resume (server-assisted workflows)
+    public let journeys: [ActiveJourney]?
 
     public init(
         campaigns: [Campaign],
@@ -34,7 +36,8 @@ public struct ProfileResponse: Codable {
         flows: [RemoteFlow],
         userProperties: [String: AnyCodable]? = nil,
         experiments: [String: ExperimentAssignment]? = nil,
-        features: [Feature]? = nil
+        features: [Feature]? = nil,
+        journeys: [ActiveJourney]? = nil
     ) {
         self.campaigns = campaigns
         self.segments = segments
@@ -42,6 +45,27 @@ public struct ProfileResponse: Codable {
         self.userProperties = userProperties
         self.experiments = experiments
         self.features = features
+        self.journeys = journeys
+    }
+}
+
+/// Active journey for cross-device resume
+public struct ActiveJourney: Codable {
+    public let sessionId: String
+    public let campaignId: String
+    public let currentNodeId: String
+    public let context: [String: AnyCodable]
+
+    public init(
+        sessionId: String,
+        campaignId: String,
+        currentNodeId: String,
+        context: [String: AnyCodable]
+    ) {
+        self.sessionId = sessionId
+        self.campaignId = campaignId
+        self.currentNodeId = currentNodeId
+        self.context = context
     }
 }
 
@@ -215,28 +239,53 @@ public struct BuildFile: Codable, Equatable, Hashable {
 // MARK: - Event Response
 
 public struct EventResponse: Codable {
-    let status: String
-    let payload: [String: AnyCodable]?
-    let customer: Customer?
-    let event: EventInfo?
-    let message: String?
-    let featuresMatched: Int?
-    let usage: Usage?
-    
-    struct Customer: Codable {
-        let id: String
-        let properties: [String: AnyCodable]?
+    public let status: String
+    public let payload: [String: AnyCodable]?
+    public let customer: Customer?
+    public let event: EventInfo?
+    public let message: String?
+    public let featuresMatched: Int?
+    public let usage: Usage?
+
+    // Journey-specific response fields (for $journey_start, $journey_node_executed, $journey_completed)
+    public let journey: JourneyInfo?
+    public let execution: ExecutionResult?
+
+    public struct Customer: Codable {
+        public let id: String
+        public let properties: [String: AnyCodable]?
     }
-    
-    struct EventInfo: Codable {
-        let id: String
-        let processed: Bool
+
+    public struct EventInfo: Codable {
+        public let id: String
+        public let processed: Bool
     }
-    
-    struct Usage: Codable {
-        let current: Double
-        let limit: Double?
-        let remaining: Double?
+
+    public struct Usage: Codable {
+        public let current: Double
+        public let limit: Double?
+        public let remaining: Double?
+    }
+
+    /// Journey state returned from server (for cross-device tracking)
+    public struct JourneyInfo: Codable {
+        public let sessionId: String?
+        public let currentNodeId: String?
+        public let status: String?  // "active" or "completed"
+    }
+
+    /// Execution result for remote nodes
+    public struct ExecutionResult: Codable {
+        public let success: Bool
+        public let statusCode: Int?
+        public let error: ExecutionError?
+        public let contextUpdates: [String: AnyCodable]?
+
+        public struct ExecutionError: Codable {
+            public let message: String
+            public let retryable: Bool
+            public let retryAfter: Int?
+        }
     }
 }
 

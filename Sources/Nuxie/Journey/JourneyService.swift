@@ -29,6 +29,10 @@ public protocol JourneyServiceProtocol: AnyObject {
   /// Resume a paused journey
   func resumeJourney(_ journey: Journey) async
 
+  /// Resume journeys from server state (for cross-device resume)
+  /// Called after profile fetch to resume any journeys active on other devices
+  func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async
+
   /// Handle an event (may trigger or resume journeys)
   func handleEvent(_ event: NuxieEvent) async
 
@@ -52,7 +56,7 @@ public protocol JourneyServiceProtocol: AnyObject {
 
   /// Shutdown service
   func shutdown() async
-  
+
   /// Handle user change (identity transition)
   func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async
 }
@@ -68,6 +72,7 @@ public actor JourneyService: JourneyServiceProtocol {
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
   @Injected(\.featureService) private var featureService: FeatureServiceProtocol
+  @Injected(\.eventService) private var eventService: EventServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
   @Injected(\.goalEvaluator) private var goalEvaluator: GoalEvaluatorProtocol
@@ -230,8 +235,22 @@ public actor JourneyService: JourneyServiceProtocol {
       "[JourneyService] Stored journey \(journey.id) in registry. Total journeys: \(inMemoryJourneysById.count)"
     )
 
-    // Track journey started event
-    Container.shared.eventService().track(
+    // Send $journey_start to server for cross-device tracking (fire-and-forget)
+    eventService.track(
+      "$journey_start",
+      properties: [
+        "session_id": journey.id,
+        "campaign_id": campaign.id,
+        "campaign_version_id": campaign.versionId,
+        "entry_node_id": campaign.entryNodeId as Any,
+      ],
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
+
+    // Track local journey started event for telemetry
+    eventService.track(
       JourneyEvents.journeyStarted,
       properties: JourneyEvents.journeyStartedProperties(
         journey: journey,
@@ -272,7 +291,7 @@ public actor JourneyService: JourneyServiceProtocol {
     inMemoryJourneysById[canonical.id] = canonical
 
     // Track journey resumed event
-    Container.shared.eventService().track(
+    eventService.track(
       JourneyEvents.journeyResumed,
       properties: JourneyEvents.journeyResumedProperties(
         journey: canonical,
@@ -286,6 +305,59 @@ public actor JourneyService: JourneyServiceProtocol {
 
     // Continue execution (timer-based resume)
     await executeJourney(canonical, campaign: campaign, reason: .timer)
+  }
+
+  /// Resume journeys from server state (for cross-device resume)
+  /// Called after profile fetch to resume any journeys active on other devices
+  public func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {
+    guard !journeys.isEmpty else { return }
+
+    let distinctId = identityService.getDistinctId()
+    LogInfo("[JourneyService] Resuming \(journeys.count) journeys from server state")
+
+    for active in journeys {
+      // Skip if we already have this journey locally (by ID)
+      if inMemoryJourneysById[active.sessionId] != nil {
+        LogDebug("[JourneyService] Journey \(active.sessionId) already exists locally, skipping")
+        continue
+      }
+
+      // Find the campaign for this journey
+      guard let campaign = campaigns.first(where: { $0.id == active.campaignId }) else {
+        LogWarning("[JourneyService] Campaign \(active.campaignId) not found for server journey \(active.sessionId)")
+        continue
+      }
+
+      // Create journey with the server's session ID as the journey ID
+      let journey = Journey(id: active.sessionId, campaign: campaign, distinctId: distinctId)
+      journey.currentNodeId = active.currentNodeId
+      journey.status = .active
+
+      // Restore context from server
+      for (key, value) in active.context {
+        journey.context[key] = value
+      }
+
+      // Register in memory
+      inMemoryJourneysById[journey.id] = journey
+      LogInfo("[JourneyService] Restored journey from server: id=\(journey.id), node=\(active.currentNodeId)")
+
+      // Track cross-device resume event
+      eventService.track(
+        JourneyEvents.journeyResumed,
+        properties: JourneyEvents.journeyResumedProperties(
+          journey: journey,
+          nodeId: active.currentNodeId,
+          resumeReason: "cross_device"
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
+
+      // Continue execution from the current node
+      await executeJourney(journey, campaign: campaign, reason: .start)
+    }
   }
 
   /// Handle an event (may trigger or resume journeys)
@@ -513,7 +585,7 @@ public actor JourneyService: JourneyServiceProtocol {
       LogInfo("Journey \(journey.id) achieved goal at \(at)")
 
       // Track telemetry event
-      Container.shared.eventService().track(
+      eventService.track(
         JourneyEvents.journeyGoalMet,
         properties: [
           "journey_id": journey.id,
@@ -658,7 +730,7 @@ public actor JourneyService: JourneyServiceProtocol {
         persistJourney(journey)
 
         // Track journey paused event
-        Container.shared.eventService().track(
+        eventService.track(
           JourneyEvents.journeyPaused,
           properties: JourneyEvents.journeyPausedProperties(
             journey: journey,
@@ -697,9 +769,24 @@ public actor JourneyService: JourneyServiceProtocol {
     // Calculate journey duration
     let duration = journey.completedAt?.timeIntervalSince(journey.startedAt) ?? dateProvider.now().timeIntervalSince(journey.startedAt)
 
+    // Send $journey_completed to server for cross-device tracking (fire-and-forget)
+    eventService.track(
+      "$journey_completed",
+      properties: [
+        "session_id": journey.id,
+        "exit_reason": reason.rawValue,
+        "goal_met": journey.convertedAt != nil,
+        "goal_met_at": journey.convertedAt?.timeIntervalSince1970 as Any,
+        "duration_seconds": duration,
+      ],
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
+
     // Track journey errored event if this is an error exit
     if reason == .error {
-      Container.shared.eventService().track(
+      eventService.track(
         JourneyEvents.journeyErrored,
         properties: JourneyEvents.journeyErroredProperties(
           journey: journey,
@@ -713,7 +800,7 @@ public actor JourneyService: JourneyServiceProtocol {
     }
 
     // Track journey exit event for observability
-    Container.shared.eventService().track(
+    eventService.track(
       JourneyEvents.journeyExited,
       properties: JourneyEvents.journeyExitedProperties(
         journey: journey,
@@ -916,7 +1003,7 @@ public actor JourneyService: JourneyServiceProtocol {
     
     // Create adapters for the services
     let userAdapter = IRUserPropsAdapter(identityService: identityService)
-    let eventsAdapter = IREventQueriesAdapter(eventService: Container.shared.eventService())
+    let eventsAdapter = IREventQueriesAdapter(eventService: eventService)
     let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: segmentService)
     let featuresAdapter = IRFeatureQueriesAdapter(featureService: featureService)
 
@@ -1034,7 +1121,7 @@ public actor JourneyService: JourneyServiceProtocol {
         let resumeReasonString = event != nil ? "event" : "segment_change"
 
         // Track journey resumed event
-        Container.shared.eventService().track(
+        eventService.track(
           JourneyEvents.journeyResumed,
           properties: JourneyEvents.journeyResumedProperties(
             journey: journey,

@@ -174,6 +174,9 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
     case .callDelegate:
       return executeCallDelegate(node, journey: journey)
 
+    case .remote:
+      return try await executeRemote(node, journey: journey)
+
     default:
       LogWarning("Unsupported node type: \(node.type)")
       return .skip(node.next.first)
@@ -858,6 +861,102 @@ public final class JourneyExecutor: JourneyExecutorProtocol {
 
     LogInfo("Delegate called with message '\(delegateNode.data.message)'")
     return .continue(node.next)
+  }
+
+  // MARK: - Server-Assisted Node Executors
+
+  private func executeRemote(_ node: WorkflowNode, journey: Journey) async throws
+    -> NodeExecutionResult
+  {
+    guard let remoteNode = node as? RemoteNode else {
+      return .skip(node.next.first)
+    }
+
+    LogInfo(
+      "Executing remote node '\(remoteNode.data.action)' for journey \(journey.id)"
+    )
+
+    // If async mode, fire and forget
+    if remoteNode.data.async == true {
+      LogInfo("Remote node in async mode - firing and forgetting")
+      eventService.track(
+        "$journey_node_executed",
+        properties: [
+          "session_id": journey.id,
+          "node_id": node.id,
+          "node_data": [
+            "type": "remote",
+            "data": [
+              "action": remoteNode.data.action,
+              "payload": remoteNode.data.payload?.value as Any,
+              "async": true,
+            ],
+          ],
+          "context": journey.context.mapValues { $0.value },
+        ],
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
+      return .continue(node.next)
+    }
+
+    // Synchronous mode - send event and wait for response
+    do {
+      let response = try await eventService.trackWithResponse(
+        "$journey_node_executed",
+        properties: [
+          "session_id": journey.id,
+          "node_id": node.id,
+          "node_data": [
+            "type": "remote",
+            "data": [
+              "action": remoteNode.data.action,
+              "payload": remoteNode.data.payload?.value as Any,
+              "async": false,
+            ],
+          ],
+          "context": journey.context.mapValues { $0.value },
+        ]
+      )
+
+      // Check execution result
+      if let execution = response.execution {
+        if execution.success {
+          LogInfo("Remote node executed successfully")
+
+          // Apply any context updates from the server
+          if let updates = execution.contextUpdates {
+            for (key, value) in updates {
+              journey.setContext(key, value: value.value)
+            }
+            LogInfo("Applied \(updates.count) context updates from server")
+          }
+
+          return .continue(node.next)
+        } else if let error = execution.error {
+          if error.retryable {
+            let retryAfter = TimeInterval(error.retryAfter ?? 5)
+            LogWarning(
+              "Remote node failed with retryable error: \(error.message), retrying in \(retryAfter)s"
+            )
+            return .async(dateProvider.date(byAddingTimeInterval: retryAfter, to: dateProvider.now()))
+          } else {
+            LogError("Remote node failed with non-retryable error: \(error.message)")
+            return .complete(.error)
+          }
+        }
+      }
+
+      // No execution result - assume success and continue
+      LogInfo("Remote node completed (no execution result)")
+      return .continue(node.next)
+
+    } catch {
+      LogError("Remote node network error: \(error)")
+      // Network errors are typically retryable
+      return .async(dateProvider.date(byAddingTimeInterval: 5, to: dateProvider.now()))
+    }
   }
 
   // MARK: - Helper Methods
