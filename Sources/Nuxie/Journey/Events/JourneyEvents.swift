@@ -15,7 +15,7 @@ public class JourneyEvents {
     public static let journeyExited = "$journey_exited"
     
     /// Node execution events
-    public static let nodeExecuted = "$node_executed"
+    public static let nodeExecuted = "$journey_node_executed"
     public static let nodeBranchTaken = "$node_branch_taken"
     public static let nodeRandomBranchAssigned = "$node_random_branch_assigned"
     public static let nodeWaitStarted = "$node_wait_started"

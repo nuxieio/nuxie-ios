@@ -72,6 +72,18 @@ public protocol EventServiceProtocol {
     completion: ((EventResult) -> Void)?
   )
 
+  /// Track an event synchronously and wait for server response
+  /// Used for journey lifecycle events that need server-side state
+  /// - Parameters:
+  ///   - event: Event name
+  ///   - properties: Event properties
+  /// - Returns: Server response with journey state and execution results
+  /// - Throws: NuxieError if tracking fails
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?
+  ) async throws -> EventResponse
+
   /// Reassign events from one user to another (for anonymous → identified transitions)
   /// - Parameters:
   ///   - fromUserId: Old user ID (typically anonymous)
@@ -213,6 +225,7 @@ public class EventService: EventServiceProtocol {
   @Injected(\.sessionService) private var sessionService: SessionServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.outcomeBroker) private var outcomeBroker: OutcomeBrokerProtocol
+  @Injected(\.nuxieApi) private var apiClient: NuxieApiProtocol
 
   private var networkQueue: NuxieNetworkQueue?
   // Weak to avoid retain cycle with JourneyService (which @Injects EventService)
@@ -294,6 +307,67 @@ public class EventService: EventServiceProtocol {
           forcedDistinctId: idSnapshot,
           completion: completion
         )))
+  }
+
+  /// Track an event synchronously and wait for server response
+  /// Used for journey lifecycle events that need server-side state
+  /// - Parameters:
+  ///   - event: Event name
+  ///   - properties: Event properties
+  /// - Returns: Server response with journey state and execution results
+  /// - Throws: NuxieError if tracking fails
+  public func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]? = nil
+  ) async throws -> EventResponse {
+    guard !event.isEmpty else {
+      throw NuxieError.invalidConfiguration("Event name cannot be empty")
+    }
+
+    // Wait for initialization
+    await ready.wait()
+
+    // Flush pending events first to ensure ordering
+    // (any queued events should reach the server before this synchronous one)
+    _ = await flushEvents()
+
+    // Get current distinct ID
+    let distinctId = identityService.getDistinctId()
+
+    // Build enriched properties
+    var finalProperties = properties ?? [:]
+
+    // Add session ID if not present
+    if finalProperties["$session_id"] == nil {
+      if let sessionId = sessionService.getSessionId(at: Date(), readOnly: false) {
+        finalProperties["$session_id"] = sessionId
+        sessionService.touchSession()
+      }
+    }
+
+    // Apply enrichment
+    finalProperties = enrich(finalProperties)
+
+    // Store event locally (for history)
+    do {
+      try await eventStore.storeEvent(
+        name: event,
+        properties: finalProperties,
+        distinctId: distinctId
+      )
+    } catch {
+      LogWarning("Failed to store event locally: \(error)")
+      // Continue - server tracking is more important for journey events
+    }
+
+    // Send directly to API and return response
+    return try await apiClient.trackEvent(
+      event: event,
+      distinctId: distinctId,
+      properties: finalProperties,
+      value: finalProperties["value"] as? Double,
+      entityId: finalProperties["entityId"] as? String
+    )
   }
 
   /// Reassign events from one user to another (for anonymous → identified transitions)

@@ -12,23 +12,24 @@ public enum NodeType: String, Codable {
     // Trigger nodes (not part of workflow, handled by campaign trigger)
     case eventTrigger = "event_trigger"
     case segmentTrigger = "segment_trigger"
-    
+
     // Action nodes
     case showFlow = "show_flow"
     case updateCustomer = "update_customer"
     case sendEvent = "send_event"
     case callDelegate = "call_delegate"
-    
+    case remote = "remote"  // Generic server-executed node
+
     // Delay nodes
     case timeDelay = "time_delay"
     case timeWindow = "time_window"
     case waitUntil = "wait_until"
-    
+
     // Branch nodes
     case branch = "branch"
     case multiBranch = "multi_branch"
     case randomBranch = "random_branch"
-    
+
     // Control nodes
     case exit = "exit"
 }
@@ -235,10 +236,30 @@ public struct CallDelegateNode: WorkflowNode {
     public let type = NodeType.callDelegate
     public let next: [String]
     public let data: CallDelegateData
-    
+
     public struct CallDelegateData: Codable {
         public let message: String
         public let payload: AnyCodable?
+    }
+}
+
+// MARK: - Server-Assisted Workflow Nodes
+
+/// Generic server-executed node for remote actions (webhooks, integrations, etc.)
+/// The client doesn't need to understand the payload - it just sends to server and handles response
+public struct RemoteNode: WorkflowNode {
+    public let id: String
+    public let type = NodeType.remote
+    public let next: [String]
+    public let data: RemoteData
+
+    public struct RemoteData: Codable {
+        /// Action type (e.g., "webhook", "slack", "zapier")
+        public let action: String
+        /// Action-specific payload, opaque to client
+        public let payload: AnyCodable?
+        /// If true, fire-and-forget (don't wait for response)
+        public let async: Bool?
     }
 }
 
@@ -283,6 +304,8 @@ public struct AnyWorkflowNode: Codable {
             self.node = try RandomBranchNode(from: decoder)
         case "call_delegate":
             self.node = try CallDelegateNode(from: decoder)
+        case "remote":
+            self.node = try RemoteNode(from: decoder)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
