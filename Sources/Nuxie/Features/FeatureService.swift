@@ -214,15 +214,19 @@ internal actor FeatureService: FeatureServiceProtocol {
     /// Update FeatureInfo with current cached features (for SwiftUI reactivity)
     private func notifyFeatureInfoUpdate() async {
         let allFeatures = await getAllCached()
+        // Capture featureInfo before crossing actor boundary
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(allFeatures)
+            info.update(allFeatures)
         }
     }
 
     /// Update FeatureInfo with a single feature (after real-time check)
     private func notifyFeatureInfoUpdate(featureId: String, access: FeatureAccess) async {
+        // Capture featureInfo before crossing actor boundary
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(featureId, access: access)
+            info.update(featureId, access: access)
         }
     }
 
@@ -237,8 +241,10 @@ internal actor FeatureService: FeatureServiceProtocol {
             accessMap[purchaseFeature.id] = purchaseFeature.toFeatureAccess
         }
 
+        // Capture featureInfo before crossing actor boundary
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(accessMap)
+            info.update(accessMap)
         }
 
         LogInfo("Feature cache updated from purchase")

@@ -4,7 +4,7 @@ import Foundation
 public struct IRFeatureQueriesAdapter: IRFeatureQueries {
     private let featureService: FeatureServiceProtocol
 
-    public init(featureService: FeatureServiceProtocol) {
+    init(featureService: FeatureServiceProtocol) {
         self.featureService = featureService
     }
 
