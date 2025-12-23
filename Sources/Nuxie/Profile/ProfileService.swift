@@ -65,6 +65,7 @@ internal actor ProfileService: ProfileServiceProtocol {
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
     @Injected(\.flowService) private var flowService: FlowServiceProtocol
     @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
+    @Injected(\.journeyService) private var journeyService: JourneyServiceProtocol
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
 
@@ -421,6 +422,12 @@ internal actor ProfileService: ProfileServiceProtocol {
         if !profile.segments.isEmpty {
             await segmentService.updateSegments(profile.segments, for: distinctId)
             LogInfo("Updated \(profile.segments.count) segment definitions for user \(NuxieLogger.shared.logDistinctID(distinctId))")
+        }
+
+        // Resume active journeys from server (cross-device resume)
+        if let journeys = profile.journeys, !journeys.isEmpty {
+            LogInfo("Resuming \(journeys.count) active journey(s) from server")
+            await journeyService.resumeFromServerState(journeys, campaigns: profile.campaigns)
         }
 
         // Diff flows
