@@ -74,7 +74,8 @@ internal actor TransactionObserver {
     private func handleTransactionResult(_ result: VerificationResult<Transaction>) async {
         switch result {
         case .verified(let transaction):
-            await handleVerifiedTransaction(transaction)
+            let transactionJwt = result.jwsRepresentation
+            await handleVerifiedTransaction(transaction, jwsRepresentation: transactionJwt)
 
         case .unverified(let transaction, let error):
             LogError("TransactionObserver: Unverified transaction \(transaction.id): \(error)")
@@ -83,7 +84,7 @@ internal actor TransactionObserver {
     }
 
     /// Handle a verified transaction by syncing with backend
-    private func handleVerifiedTransaction(_ transaction: Transaction) async {
+    private func handleVerifiedTransaction(_ transaction: Transaction, jwsRepresentation transactionJwt: String) async {
         let transactionIdString = String(transaction.id)
 
         // Skip if already synced in this session
@@ -94,13 +95,23 @@ internal actor TransactionObserver {
 
         LogInfo("TransactionObserver: Processing verified transaction \(transaction.id) for product \(transaction.productID)")
 
-        // Get the JSON representation of the transaction
-        let jsonRepresentation = transaction.jsonRepresentation
-
-        // Convert Data to string
-        guard let transactionJson = String(data: jsonRepresentation, encoding: .utf8), !transactionJson.isEmpty else {
-            LogError("TransactionObserver: Failed to convert JSON for transaction \(transaction.id)")
+        // Skip revoked transactions (refunded or removed from Family Sharing)
+        if transaction.revocationDate != nil {
+            LogDebug("TransactionObserver: Skipping revoked transaction \(transaction.id)")
             await transaction.finish()
+            return
+        }
+
+        // Skip upgraded subscriptions (user has a higher tier now)
+        if transaction.isUpgraded {
+            LogDebug("TransactionObserver: Skipping upgraded transaction \(transaction.id)")
+            await transaction.finish()
+            return
+        }
+
+        guard !transactionJwt.isEmpty else {
+            LogError("TransactionObserver: Empty JWS for transaction \(transaction.id)")
+            // Don't finish - let StoreKit retry
             return
         }
 
@@ -110,7 +121,7 @@ internal actor TransactionObserver {
         do {
             // Sync with backend
             let response = try await api.syncTransaction(
-                transactionJwt: transactionJson,
+                transactionJwt: transactionJwt,
                 distinctId: distinctId
             )
 
@@ -131,16 +142,18 @@ internal actor TransactionObserver {
                     "product_id": transaction.productID,
                     "customer_id": response.customerId ?? ""
                 ])
+
+                // Only finish the transaction AFTER backend confirms success
+                await transaction.finish()
+                LogDebug("TransactionObserver: Transaction \(transaction.id) finished")
             } else {
                 LogError("TransactionObserver: Backend sync failed for transaction \(transaction.id): \(response.error ?? "Unknown error")")
+                // Don't finish - will retry on next app launch via Transaction.unfinished
             }
         } catch {
             LogError("TransactionObserver: Failed to sync transaction \(transaction.id): \(error)")
-            // Don't mark as synced - will retry on next app launch
+            // Don't finish - will retry on next app launch via Transaction.unfinished
         }
-
-        // Always finish the transaction so StoreKit knows we've handled it
-        await transaction.finish()
     }
 
     // MARK: - Manual Sync
