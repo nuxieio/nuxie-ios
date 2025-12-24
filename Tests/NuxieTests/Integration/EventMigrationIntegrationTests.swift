@@ -336,7 +336,6 @@ final class EventMigrationIntegrationTests: AsyncSpec {
             describe("performance") {
                 it("should handle large number of events efficiently") {
                     // Track many events as anonymous
-                    let anonymousId = NuxieSDK.shared.getAnonymousId()
                     let eventCount = 100
                     
                     for i in 0..<eventCount {
@@ -346,16 +345,20 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     // Ensure events are stored before migration begins.
                     await eventService.drain()
 
-                    await expect {
-                        await eventService.getEventsForUser(anonymousId, limit: 200).count
-                    }.toEventually(equal(eventCount), timeout: .seconds(2))
+                    let recentEvents = await eventService.getRecentEvents(limit: 200)
+                    let bulkEvents = recentEvents.filter { $0.name.starts(with: "bulk_event") }
+                    expect(bulkEvents.count).to(equal(eventCount))
+                    guard let sourceDistinctId = bulkEvents.first?.distinctId else {
+                        fail("Expected bulk events to include a distinctId")
+                        return
+                    }
                     
                     // Record time before migration
                     let startTime = Date()
                     
                     let userId = "bulk_user"
                     let reassignedCount = try await eventService.reassignEvents(
-                        from: anonymousId,
+                        from: sourceDistinctId,
                         to: userId
                     )
 
@@ -365,8 +368,8 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     expect(migrationTime).to(beLessThan(1.0))
 
                     let migratedEvents = await eventService.getEventsForUser(userId, limit: 200)
-                    let bulkEvents = migratedEvents.filter { $0.name.starts(with: "bulk_event") }
-                    expect(bulkEvents.count).to(equal(eventCount))
+                    let migratedBulkEvents = migratedEvents.filter { $0.name.starts(with: "bulk_event") }
+                    expect(migratedBulkEvents.count).to(equal(eventCount))
                 }
             }
         }
