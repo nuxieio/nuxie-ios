@@ -47,6 +47,11 @@ final class TimeWindowIntegrationTests: AsyncSpec {
       func wrap24(_ v: Int) -> Int { (v % 24 + 24) % 24 }
 
       beforeEach {
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
+
         spy = JourneyTestSpy()
 
         identityService = MockIdentityService()
@@ -87,7 +92,12 @@ final class TimeWindowIntegrationTests: AsyncSpec {
         await journeyService.initialize()
       }
 
-      afterEach { Container.shared.reset() }
+      // Don't reset container in afterEach - let beforeEach handle it
+      // to avoid race conditions with background tasks accessing services
+      afterEach {
+        await journeyService.shutdown()
+        sleepProvider.reset()
+      }
 
       it("continues immediately when now is inside the (UTC) window") {
         let now = dateProvider.now()

@@ -31,6 +31,11 @@ final class GoalAdditionalTests: AsyncSpec {
       var mockProductService: MockProductService!
 
       beforeEach {
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
+
         // Fresh mocks
         mockIdentityService = MockIdentityService()
         mockSegmentService = MockSegmentService()
@@ -74,7 +79,8 @@ final class GoalAdditionalTests: AsyncSpec {
       }
 
       afterEach {
-        Container.shared.reset()
+        await journeyService.shutdown()
+        mockSleepProvider.reset()
       }
 
       // -------------------------------------------------------------

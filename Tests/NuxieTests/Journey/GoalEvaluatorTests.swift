@@ -16,9 +16,11 @@ final class GoalEvaluatorTests: AsyncSpec {
             var campaign: Campaign!
             
             beforeEach {
-                // Reset container and singletons to ensure clean slate
-                Container.shared.reset()
-                
+
+                // Register test configuration (required for any services that depend on sdkConfiguration)
+                let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+                Container.shared.sdkConfiguration.register { testConfig }
+
                 // Set up mocks
                 mockEventService = MockEventService()
                 mockSegmentService = MockSegmentService()

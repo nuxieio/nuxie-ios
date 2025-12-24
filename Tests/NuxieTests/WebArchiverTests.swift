@@ -11,7 +11,6 @@ final class WebArchiverTests: AsyncSpec {
             
             beforeEach {
                 // Reset protocol handlers
-                TestURLSessionProvider.reset()
                 
                 // Create test session
                 session = TestURLSessionProvider.createTestSession()
@@ -21,7 +20,6 @@ final class WebArchiverTests: AsyncSpec {
             }
             
             afterEach {
-                TestURLSessionProvider.reset()
                 webArchiver = nil
                 session = nil
             }

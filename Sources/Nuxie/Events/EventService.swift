@@ -112,6 +112,10 @@ public protocol EventServiceProtocol {
   /// Close the event service and its underlying storage
   func close() async
 
+  /// Wait until all previously enqueued commands are processed.
+  /// Useful in tests for determinism and ensuring events are stored before querying.
+  func drain() async
+
   // MARK: - Event History Access
 
   /// Get recent events for analysis
@@ -559,8 +563,8 @@ public class EventService: EventServiceProtocol {
   // MARK: - Test helper (optional)
 
   /// Wait until all previously enqueued commands are processed.
-  /// Not part of the public protocol; useful in tests for determinism.
-  internal func drain() async {
+  /// Useful in tests for determinism and ensuring events are stored before querying.
+  public func drain() async {
     await withCheckedContinuation { cont in
       continuation.yield(.barrier(cont))
     }

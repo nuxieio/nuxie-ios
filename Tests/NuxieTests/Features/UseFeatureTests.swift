@@ -13,7 +13,6 @@ final class UseFeatureTests: AsyncSpec {
 
             beforeEach {
                 // Reset protocol handlers
-                TestURLSessionProvider.reset()
 
                 // Create test session
                 session = TestURLSessionProvider.createNuxieTestSession()
@@ -28,7 +27,6 @@ final class UseFeatureTests: AsyncSpec {
             }
 
             afterEach {
-                TestURLSessionProvider.reset()
                 api = nil
                 session = nil
             }

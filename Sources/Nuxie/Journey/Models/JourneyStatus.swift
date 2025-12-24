@@ -68,16 +68,16 @@ public enum JourneyExitReason: String, Codable {
 }
 
 /// Result of executing a node
-public enum NodeExecutionResult {
+public enum NodeExecutionResult: Equatable {
     /// Continue to the next node(s)
     case `continue`([String])
-    
+
     /// Enter async wait state (with optional deadline)
     case async(Date?)
-    
+
     /// Skip this node and continue
     case skip(String?)
-    
+
     /// Journey complete
     case complete(JourneyExitReason)
 }

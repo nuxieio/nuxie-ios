@@ -17,8 +17,11 @@ class ProfileServiceTests: AsyncSpec {
             
             beforeEach {
                 // Set up dependency injection with Factory
-                Container.shared.reset()
-                
+
+                // Register test configuration (required for any services that depend on sdkConfiguration)
+                let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+                Container.shared.sdkConfiguration.register { testConfig }
+
                 // Create mocks
                 mocks = MockFactory.shared
                 cache = InMemoryCachedProfileStore()
@@ -32,11 +35,9 @@ class ProfileServiceTests: AsyncSpec {
             
             afterEach {
                 // Clean up
-                Task {
-                    await sut.clearAllCache()
-                }
-                await mocks.resetAll()
-                mocks.resetAllFactories()
+                await sut.clearAllCache()
+                // Don't call resetAllFactories() here - let beforeEach handle container reset
+                // to avoid race conditions with background tasks accessing services
             }
             
             describe("fetchProfile") {

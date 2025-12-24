@@ -45,6 +45,11 @@ final class RandomBranchNodeIntegrationTests: AsyncSpec {
       }
 
       beforeEach {
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
+
         Container.shared.identityService.register { MockIdentityService() }
         Container.shared.segmentService.register { MockSegmentService() }
         Container.shared.profileService.register { MockProfileService() }
@@ -78,7 +83,8 @@ final class RandomBranchNodeIntegrationTests: AsyncSpec {
 
       afterEach {
         await Container.shared.journeyService().shutdown()
-        Container.shared.reset()
+        // Don't reset container here - let beforeEach handle it
+        // to avoid race conditions with background tasks accessing services
       }
 
       it("follows the single 100% branch and completes") {

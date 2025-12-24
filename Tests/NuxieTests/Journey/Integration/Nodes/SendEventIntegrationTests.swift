@@ -45,6 +45,11 @@ final class SendEventNodeIntegrationTests: AsyncSpec {
       }
 
       beforeEach {
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
+
         Container.shared.identityService.register { MockIdentityService() }
         Container.shared.segmentService.register { MockSegmentService() }
         Container.shared.profileService.register { MockProfileService() }
@@ -79,7 +84,8 @@ final class SendEventNodeIntegrationTests: AsyncSpec {
       afterEach {
         await Container.shared.journeyService().shutdown()
         eventService.reset()
-        Container.shared.reset()
+        // Don't reset container here - let beforeEach handle it
+        // to avoid race conditions with background tasks accessing services
       }
 
       it("tracks the custom event and completes") {

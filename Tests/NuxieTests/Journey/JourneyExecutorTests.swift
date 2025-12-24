@@ -182,6 +182,9 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
         lastEvent = nil
         routedEvents.removeAll()
         trackedEvents.removeAll()
+        trackWithResponseResult = nil
+        trackWithResponseError = nil
+        trackWithResponseCalls.removeAll()
     }
     
     func reassignEvents(from fromUserId: String, to toUserId: String) async throws -> Int {
@@ -197,9 +200,42 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
     func onAppDidEnterBackground() async {
         // Mock implementation - no-op for tests
     }
-    
+
     func onAppBecameActive() async {
         // Mock implementation - no-op for tests
+    }
+
+    func drain() async {
+        // Mock implementation - no-op since mock events are stored synchronously
+    }
+
+    // MARK: - trackWithResponse (for remote node testing)
+
+    var trackWithResponseResult: EventResponse?
+    var trackWithResponseError: Error?
+    private(set) var trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
+
+    func trackWithResponse(
+        _ event: String,
+        properties: [String: Any]?
+    ) async throws -> EventResponse {
+        trackWithResponseCalls.append((event: event, properties: properties))
+
+        if let error = trackWithResponseError {
+            throw error
+        }
+
+        return trackWithResponseResult ?? EventResponse(
+            status: "ok",
+            payload: nil,
+            customer: nil,
+            event: nil,
+            message: nil,
+            featuresMatched: nil,
+            usage: nil,
+            journey: nil,
+            execution: nil
+        )
     }
 }
 
@@ -471,13 +507,18 @@ final class JourneyExecutorTests: AsyncSpec {
             var campaign: Campaign!
             
             beforeEach {
+
+                // Register test configuration (required for any services that depend on sdkConfiguration)
+                let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+                Container.shared.sdkConfiguration.register { testConfig }
+
                 // Create mock services
                 mockFlowService = JourneyExecutorTestFlowService()
                 mockEventService = JourneyExecutorTestEventService()
                 mockIdentityService = JourneyExecutorTestIdentityService()
                 mockEventStore = JourneyExecutorTestEventStore()
                 mockSegmentService = JourneyExecutorTestSegmentService()
-                
+
                 // Set up Factory container with mocks
                 Container.shared.flowService.register { mockFlowService }
                 Container.shared.segmentService.register { mockSegmentService }
@@ -546,7 +587,8 @@ final class JourneyExecutorTests: AsyncSpec {
                 mockIdentityService?.reset()
                 mockEventStore?.reset()
                 await mockSegmentService?.reset()
-                Container.shared.reset()
+                // Don't reset container here - let beforeEach handle it
+                // to avoid race conditions with background tasks accessing services
             }
             
             // MARK: - Node Finding Tests

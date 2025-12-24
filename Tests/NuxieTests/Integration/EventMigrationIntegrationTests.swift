@@ -14,14 +14,13 @@ final class EventMigrationIntegrationTests: AsyncSpec {
             
             beforeEach {
                 print("DEBUG: beforeEach starting")
-                
+
+
                 // Create and register mock API to prevent network calls
                 mockApi = MockNuxieApi()
                 Container.shared.nuxieApi.register { mockApi }
                 
                 print("DEBUG: Got SDK shared instance")
-                
-                await NuxieSDK.shared.shutdown()
 
                 // Create unique database directory for test isolation
                 let testId = UUID().uuidString
@@ -62,9 +61,6 @@ final class EventMigrationIntegrationTests: AsyncSpec {
             }
             
             afterEach {
-                // Clean up SDK properly
-                await NuxieSDK.shared.shutdown()
-                
                 // Clean up test database directory
                 if let dbPath = dbPath {
                     try? FileManager.default.removeItem(atPath: dbPath)
@@ -88,7 +84,11 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         NuxieSDK.shared.track("button_clicked", properties: ["button": "start"])
                         NuxieSDK.shared.track("page_viewed", properties: ["page": "home"])
                         print("DEBUG: Events tracked")
-                        
+
+                        // Wait for events to be processed (drain the event queue)
+                        await eventService.drain()
+                        print("DEBUG: Event queue drained")
+
                         // Verify events are stored with anonymous ID
                         print("DEBUG: Querying events for anonymous user")
                         await expect { await eventService.getEventsForUser(anonymousId, limit: 10).count }

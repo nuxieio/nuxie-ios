@@ -38,11 +38,6 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
             }
 
             beforeEach {
-                // Ensure clean SDK + container
-                waitUntil(timeout: .seconds(3)) { done in
-                    Task { await NuxieSDK.shared.shutdown(); done() }
-                }
-                Container.shared.reset()
                 mockProductService = MockProductService()
                 Container.shared.productService.register { mockProductService }
                 let config = NuxieConfiguration(apiKey: "test")
@@ -54,13 +49,6 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
             }
 
             afterEach {
-                // Properly cleanup SDK to avoid affecting subsequent tests
-                waitUntil(timeout: .seconds(3)) { done in
-                    Task { 
-                        await NuxieSDK.shared.shutdown()
-                        done()
-                    }
-                }
                 // Reset mocks
                 mockProductService = nil
                 mockDelegate = nil

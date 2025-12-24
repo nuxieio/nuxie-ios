@@ -109,6 +109,41 @@ public final class FeatureInfo: ObservableObject {
         all = [:]
     }
 
+    /// Decrement the balance for a feature (for local UI feedback after usage)
+    /// - Parameters:
+    ///   - featureId: The feature identifier
+    ///   - amount: The amount to decrement
+    internal func decrementBalance(_ featureId: String, amount: Int) {
+        guard let access = all[featureId], !access.unlimited else { return }
+
+        let currentBalance = access.balance ?? 0
+        let newBalance = max(0, currentBalance - amount)
+
+        let newAccess = FeatureAccess.withBalance(
+            newBalance,
+            unlimited: false,
+            type: access.type
+        )
+
+        update(featureId, access: newAccess)
+    }
+
+    /// Set the balance for a feature (after server confirmation)
+    /// - Parameters:
+    ///   - featureId: The feature identifier
+    ///   - balance: The new balance from server
+    internal func setBalance(_ featureId: String, balance: Int) {
+        guard let access = all[featureId] else { return }
+
+        let newAccess = FeatureAccess.withBalance(
+            balance,
+            unlimited: access.unlimited,
+            type: access.type
+        )
+
+        update(featureId, access: newAccess)
+    }
+
     // MARK: - Private Methods
 
     /// Compare two FeatureAccess values for equality

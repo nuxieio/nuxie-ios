@@ -17,6 +17,11 @@ final class EventServiceTests: AsyncSpec {
     var mockOutcomeBroker: MockOutcomeBroker!
 
     beforeEach {
+
+      // Register test configuration (required for any services that depend on sdkConfiguration)
+      let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+      Container.shared.sdkConfiguration.register { testConfig }
+
       mockFactory = MockFactory.shared
 
       // Create and register mock outcome broker FIRST (before EventService creation)
@@ -54,7 +59,8 @@ final class EventServiceTests: AsyncSpec {
       await mockOutcomeBroker?.reset()
       mockEventStore.resetMock()
       mockIdentityService.reset()
-      Container.shared.reset()
+      // Don't reset container here - let beforeEach handle it
+      // to avoid race conditions with background tasks accessing services
     }
 
     describe("EventService") {
@@ -601,6 +607,7 @@ final class EventServiceTests: AsyncSpec {
             -> Journey?
           { nil }
           func resumeJourney(_ journey: Journey) async {}
+          func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {}
           func handleEvent(_ event: NuxieEvent) async { handled.append(event) }
           func handleSegmentChange(distinctId: String, segments: Set<String>) async {}
           func getActiveJourneys(for distinctId: String) async -> [Journey] { [] }
