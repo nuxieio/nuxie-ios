@@ -13,7 +13,7 @@ final class TrackWithResponseTests: AsyncSpec {
         var mockIdentityService: MockIdentityService!
         var mockNetworkQueue: NuxieNetworkQueue!
         var mockNuxieApi: MockNuxieApi!
-        var mockSessionService: MockSessionService!
+        var mockSessionService: TrackWithResponseMockSessionService!
         var mockOutcomeBroker: MockOutcomeBroker!
 
         beforeEach {
@@ -26,7 +26,7 @@ final class TrackWithResponseTests: AsyncSpec {
             mockEventStore = MockEventStore()
             mockIdentityService = MockIdentityService()
             mockNuxieApi = MockNuxieApi()
-            mockSessionService = MockSessionService()
+            mockSessionService = TrackWithResponseMockSessionService()
             mockOutcomeBroker = MockOutcomeBroker()
 
             // Register mocks with DI container
@@ -296,7 +296,7 @@ final class TrackWithResponseTests: AsyncSpec {
 
 // MARK: - Mock Session Service
 
-class MockSessionService: SessionServiceProtocol {
+class TrackWithResponseMockSessionService: SessionServiceProtocol {
     var mockSessionId: String? = "mock-session"
     var touchCallCount = 0
 
