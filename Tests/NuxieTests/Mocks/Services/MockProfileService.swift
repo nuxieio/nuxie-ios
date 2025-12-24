@@ -69,8 +69,9 @@ public class MockProfileService: ProfileServiceProtocol {
             segments: [segment],
             flows: [flow],
             userProperties: nil,
-            experimentAssignments: nil,
-            features: nil
+            experiments: nil,
+            features: nil,
+            journeys: nil
         )
     }
     
@@ -146,8 +147,9 @@ public class MockProfileService: ProfileServiceProtocol {
             segments: response.segments,
             flows: response.flows,
             userProperties: response.userProperties,
-            experimentAssignments: response.experimentAssignments,
-            features: response.features
+            experiments: response.experiments,
+            features: response.features,
+            journeys: response.journeys
         )
     }
     

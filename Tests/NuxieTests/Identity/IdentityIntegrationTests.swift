@@ -9,42 +9,16 @@ import FactoryKit
 final class IdentityIntegrationTests: AsyncSpec {
     override class func spec() {
         describe("Identity Integration") {
-            var config: NuxieConfiguration!
-            var dbPath: String!
-            var mockApi: MockNuxieApi!
+            var harness: SDKTestHarness!
 
             beforeEach {
-                // Create and register mock API to prevent network calls
-                mockApi = MockNuxieApi()
-                Container.shared.nuxieApi.register { mockApi }
-
-                await NuxieSDK.shared.shutdown()
-
-                // Create unique database directory for test isolation
-                let testId = UUID().uuidString
-                let tempDir = NSTemporaryDirectory()
-                let testDirPath = "\(tempDir)test_identity_\(testId)"
-
-                try FileManager.default.createDirectory(atPath: testDirPath, withIntermediateDirectories: true)
-                dbPath = testDirPath
-
-                // Create configuration
-                config = NuxieConfiguration(apiKey: "test-key-\(testId)")
-                config.customStoragePath = URL(fileURLWithPath: dbPath)
-                config.environment = .development
-                config.enablePlugins = false // Disable plugins for faster tests
-
-                try NuxieSDK.shared.setup(with: config)
+                harness = try SDKTestHarness.make(prefix: "test_identity", enablePlugins: false)
+                try harness.setupSDK()
             }
 
             afterEach {
-                await NuxieSDK.shared.shutdown()
-
-                if let dbPath = dbPath {
-                    try? FileManager.default.removeItem(atPath: dbPath)
-                }
-
-                Container.shared.reset()
+                harness?.cleanup()
+                harness = nil
             }
 
             // MARK: - Basic Identity Flow
@@ -103,30 +77,59 @@ final class IdentityIntegrationTests: AsyncSpec {
                 it("should set user properties during identify") {
                     let userId = "user-with-props"
                     let properties = ["name": "John", "age": 30] as [String: Any]
+                    let eventService = Container.shared.eventService()
 
                     NuxieSDK.shared.identify(userId, userProperties: properties)
 
-                    // Give time for async operations
-                    try await Task.sleep(nanoseconds: 100_000_000)
+                    await expect {
+                        let events = await eventService.getEventsForUser(userId, limit: 10)
+                        return events.first { $0.name == "$identify" }
+                    }.toEventuallyNot(beNil(), timeout: .seconds(2))
 
                     expect(NuxieSDK.shared.isIdentified).to(beTrue())
                     expect(NuxieSDK.shared.getDistinctId()).to(equal(userId))
+
+                    let events = await eventService.getEventsForUser(userId, limit: 10)
+                    let identifyEvent = events.first { $0.name == "$identify" }
+                    let props = try? identifyEvent?.getProperties()
+                    let setProps = props?["$set"]?.value as? [String: Any]
+                    expect(setProps?["name"] as? String).to(equal("John"))
+                    expect(setProps?["age"] as? Int).to(equal(30))
                 }
 
-                it("should handle setOnce properties during identify") {
+                it("should include $set_once properties during identify") {
                     let userId = "user-setonce"
+                    let eventService = Container.shared.eventService()
 
                     // First identify with properties
                     NuxieSDK.shared.identify(userId, userPropertiesSetOnce: ["first_seen": "2024-01-01"])
 
-                    // Give time for async operations
-                    try await Task.sleep(nanoseconds: 100_000_000)
+                    await expect {
+                        let events = await eventService.getEventsForUser(userId, limit: 10)
+                        return events.first { $0.name == "$identify" }
+                    }.toEventuallyNot(beNil(), timeout: .seconds(2))
+
+                    let firstEvents = await eventService.getEventsForUser(userId, limit: 10)
+                    let firstIdentify = firstEvents.first { $0.name == "$identify" }
+                    let firstProps = try? firstIdentify?.getProperties()
+                    let firstSetOnce = firstProps?["$set_once"]?.value as? [String: Any]
+                    expect(firstSetOnce?["first_seen"] as? String).to(equal("2024-01-01"))
 
                     // Second identify with different setOnce properties
                     NuxieSDK.shared.identify(userId, userPropertiesSetOnce: ["first_seen": "2024-12-01"])
 
-                    // The original value should be preserved (setOnce semantics)
                     expect(NuxieSDK.shared.isIdentified).to(beTrue())
+
+                    await expect {
+                        let events = await eventService.getEventsForUser(userId, limit: 20)
+                        return events.first { $0.name == "$identify" }
+                    }.toEventuallyNot(beNil(), timeout: .seconds(2))
+
+                    let latestEvents = await eventService.getEventsForUser(userId, limit: 20)
+                    let latestIdentify = latestEvents.first { $0.name == "$identify" }
+                    let latestProps = try? latestIdentify?.getProperties()
+                    let latestSetOnce = latestProps?["$set_once"]?.value as? [String: Any]
+                    expect(latestSetOnce?["first_seen"] as? String).to(equal("2024-12-01"))
                 }
             }
 
@@ -161,6 +164,9 @@ final class IdentityIntegrationTests: AsyncSpec {
                     let identifyEvent = events.first { $0.name == "$identify" }
 
                     expect(identifyEvent).toNot(beNil())
+                    if let props = try? identifyEvent?.getProperties() {
+                        expect(props["distinct_id"]?.value as? String).to(equal(userId))
+                    }
                 }
             }
 
@@ -176,9 +182,6 @@ final class IdentityIntegrationTests: AsyncSpec {
 
                     // Identify should create new session
                     NuxieSDK.shared.identify("session-user")
-
-                    // Give time for session to be created
-                    try await Task.sleep(nanoseconds: 100_000_000)
 
                     let secondSessionId = sessionService.getSessionId(at: Date(), readOnly: true)
                     expect(secondSessionId).toNot(beNil())
@@ -343,16 +346,15 @@ final class IdentityIntegrationTests: AsyncSpec {
                     // Empty user ID should be handled gracefully
                     NuxieSDK.shared.identify("")
 
-                    // Behavior depends on implementation - either reject or accept
-                    // At minimum, should not crash
-                    expect(NuxieSDK.shared.getDistinctId()).toNot(beNil())
+                    expect(NuxieSDK.shared.getDistinctId()).to(equal(""))
+                    expect(NuxieSDK.shared.isIdentified).to(beTrue())
                 }
 
                 it("should handle whitespace-only user ID") {
                     NuxieSDK.shared.identify("   ")
 
-                    // Should not crash
-                    expect(NuxieSDK.shared.getDistinctId()).toNot(beNil())
+                    expect(NuxieSDK.shared.getDistinctId()).to(equal("   "))
+                    expect(NuxieSDK.shared.isIdentified).to(beTrue())
                 }
 
                 it("should handle special characters in user ID") {

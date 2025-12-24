@@ -121,36 +121,16 @@ final class BackgroundingIntegrationTests: AsyncSpec {
             // MARK: - Full SDK Backgrounding Integration
 
             describe("SDK backgrounding integration") {
-                var config: NuxieConfiguration!
-                var dbPath: String!
-                var mockApi: MockNuxieApi!
+                var harness: SDKTestHarness!
 
                 beforeEach {
-                    mockApi = MockNuxieApi()
-                    Container.shared.nuxieApi.register { mockApi }
-
-                    await NuxieSDK.shared.shutdown()
-
-                    let testId = UUID().uuidString
-                    let tempDir = NSTemporaryDirectory()
-                    let testDirPath = "\(tempDir)test_bg_\(testId)"
-                    try FileManager.default.createDirectory(atPath: testDirPath, withIntermediateDirectories: true)
-                    dbPath = testDirPath
-
-                    config = NuxieConfiguration(apiKey: "test-key-\(testId)")
-                    config.customStoragePath = URL(fileURLWithPath: dbPath)
-                    config.environment = .development
-                    config.enablePlugins = true // Enable plugins for lifecycle testing
-
-                    try NuxieSDK.shared.setup(with: config)
+                    harness = try SDKTestHarness.make(prefix: "test_bg", enablePlugins: true)
+                    try harness.setupSDK()
                 }
 
                 afterEach {
-                    await NuxieSDK.shared.shutdown()
-                    if let dbPath = dbPath {
-                        try? FileManager.default.removeItem(atPath: dbPath)
-                    }
-                    Container.shared.reset()
+                    harness?.cleanup()
+                    harness = nil
                 }
 
                 it("should preserve identity across background/foreground cycle") {
@@ -162,9 +142,6 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     // Simulate background/foreground (via SessionService)
                     let sessionService = Container.shared.sessionService()
                     sessionService.onAppDidEnterBackground()
-
-                    try await Task.sleep(nanoseconds: 100_000_000)
-
                     sessionService.onAppBecameActive()
 
                     // Identity should be preserved
@@ -187,9 +164,6 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     // Background
                     let sessionService = Container.shared.sessionService()
                     sessionService.onAppDidEnterBackground()
-
-                    try await Task.sleep(nanoseconds: 100_000_000)
-
                     // Foreground
                     sessionService.onAppBecameActive()
 
@@ -226,36 +200,16 @@ final class BackgroundingIntegrationTests: AsyncSpec {
             // MARK: - Event Queue Backgrounding
 
             describe("event queue backgrounding behavior") {
-                var config: NuxieConfiguration!
-                var dbPath: String!
-                var mockApi: MockNuxieApi!
+                var harness: SDKTestHarness!
 
                 beforeEach {
-                    mockApi = MockNuxieApi()
-                    Container.shared.nuxieApi.register { mockApi }
-
-                    await NuxieSDK.shared.shutdown()
-
-                    let testId = UUID().uuidString
-                    let tempDir = NSTemporaryDirectory()
-                    let testDirPath = "\(tempDir)test_queue_\(testId)"
-                    try FileManager.default.createDirectory(atPath: testDirPath, withIntermediateDirectories: true)
-                    dbPath = testDirPath
-
-                    config = NuxieConfiguration(apiKey: "test-key-\(testId)")
-                    config.customStoragePath = URL(fileURLWithPath: dbPath)
-                    config.environment = .development
-                    config.enablePlugins = false
-
-                    try NuxieSDK.shared.setup(with: config)
+                    harness = try SDKTestHarness.make(prefix: "test_queue", enablePlugins: false)
+                    try harness.setupSDK()
                 }
 
                 afterEach {
-                    await NuxieSDK.shared.shutdown()
-                    if let dbPath = dbPath {
-                        try? FileManager.default.removeItem(atPath: dbPath)
-                    }
-                    Container.shared.reset()
+                    harness?.cleanup()
+                    harness = nil
                 }
 
                 it("should pause event queue on background") {
@@ -286,6 +240,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
 
                     // Foreground
                     await eventService.onAppBecameActive()
+                    await eventService.drain()
 
                     // Event should eventually be processed
                     await expect {
@@ -295,18 +250,13 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                 }
             }
 
-            // MARK: - Plugin Notification Order
+            // MARK: - Plugin Notifications
 
-            describe("plugin notification order") {
-                it("should notify plugins after services on background") {
-                    // This test verifies the order of operations during backgrounding
-                    // Plugins should be notified AFTER services have processed the event
-
+            describe("plugin notifications") {
+                it("should notify plugins on background") {
                     let pluginService = PluginService()
                     var pluginNotified = false
-                    var notificationOrder: [String] = []
 
-                    // Create a test plugin that tracks when it's notified
                     class TestOrderPlugin: NuxiePlugin {
                         let pluginId = "test-order-plugin"
                         var onBackgroundCalled: (() -> Void)?
@@ -324,21 +274,16 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     let testPlugin = TestOrderPlugin()
                     testPlugin.onBackgroundCalled = {
                         pluginNotified = true
-                        notificationOrder.append("plugin")
                     }
 
-                    // Initialize and install plugin
                     pluginService.initialize(sdk: NuxieSDK.shared)
                     try pluginService.installPlugin(testPlugin)
                     pluginService.startPlugin("test-order-plugin")
 
-                    // Trigger background notification
                     pluginService.onAppDidEnterBackground()
 
                     expect(pluginNotified).to(beTrue())
-                    expect(notificationOrder).to(contain("plugin"))
 
-                    // Cleanup
                     pluginService.stopPlugin("test-order-plugin")
                     try pluginService.uninstallPlugin("test-order-plugin")
                 }
@@ -414,36 +359,16 @@ final class BackgroundingIntegrationTests: AsyncSpec {
             // MARK: - State Consistency
 
             describe("state consistency after backgrounding") {
-                var config: NuxieConfiguration!
-                var dbPath: String!
-                var mockApi: MockNuxieApi!
+                var harness: SDKTestHarness!
 
                 beforeEach {
-                    mockApi = MockNuxieApi()
-                    Container.shared.nuxieApi.register { mockApi }
-
-                    await NuxieSDK.shared.shutdown()
-
-                    let testId = UUID().uuidString
-                    let tempDir = NSTemporaryDirectory()
-                    let testDirPath = "\(tempDir)test_state_\(testId)"
-                    try FileManager.default.createDirectory(atPath: testDirPath, withIntermediateDirectories: true)
-                    dbPath = testDirPath
-
-                    config = NuxieConfiguration(apiKey: "test-key-\(testId)")
-                    config.customStoragePath = URL(fileURLWithPath: dbPath)
-                    config.environment = .development
-                    config.enablePlugins = false
-
-                    try NuxieSDK.shared.setup(with: config)
+                    harness = try SDKTestHarness.make(prefix: "test_state", enablePlugins: false)
+                    try harness.setupSDK()
                 }
 
                 afterEach {
-                    await NuxieSDK.shared.shutdown()
-                    if let dbPath = dbPath {
-                        try? FileManager.default.removeItem(atPath: dbPath)
-                    }
-                    Container.shared.reset()
+                    harness?.cleanup()
+                    harness = nil
                 }
 
                 it("should maintain SDK isSetup state after backgrounding") {
@@ -452,9 +377,6 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     expect(NuxieSDK.shared.isSetup).to(beTrue())
 
                     sessionService.onAppDidEnterBackground()
-
-                    try await Task.sleep(nanoseconds: 100_000_000)
-
                     sessionService.onAppBecameActive()
 
                     expect(NuxieSDK.shared.isSetup).to(beTrue())
@@ -465,9 +387,6 @@ final class BackgroundingIntegrationTests: AsyncSpec {
 
                     let sessionService = Container.shared.sessionService()
                     sessionService.onAppDidEnterBackground()
-
-                    try await Task.sleep(nanoseconds: 100_000_000)
-
                     sessionService.onAppBecameActive()
 
                     expect(NuxieSDK.shared.isIdentified).to(beTrue())
@@ -485,8 +404,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     // Track event while backgrounded
                     NuxieSDK.shared.track("stored_during_bg", properties: ["test": true])
 
-                    // Give time for local storage
-                    try await Task.sleep(nanoseconds: 200_000_000)
+                    await eventService.drain()
 
                     // Foreground
                     sessionService.onAppBecameActive()

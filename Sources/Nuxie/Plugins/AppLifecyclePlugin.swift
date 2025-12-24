@@ -14,6 +14,9 @@ public class AppLifecyclePlugin: NuxiePlugin {
     
     private weak var sdk: NuxieSDK?
     private var isStarted = false
+    private let userDefaults: UserDefaults
+    private let appVersionProvider: () -> String
+    private let dateProvider: () -> Date
     
     // UserDefaults keys for tracking app state
     private let hasLaunchedBeforeKey = "nuxie_has_launched_before"
@@ -21,7 +24,14 @@ public class AppLifecyclePlugin: NuxiePlugin {
     
     // MARK: - Initialization
     
-    public init() {
+    public init(
+        userDefaults: UserDefaults = .standard,
+        appVersionProvider: @escaping () -> String = AppLifecyclePlugin.defaultAppVersion,
+        dateProvider: @escaping () -> Date = Date.init
+    ) {
+        self.userDefaults = userDefaults
+        self.appVersionProvider = appVersionProvider
+        self.dateProvider = dateProvider
     }
     
     // MARK: - NuxiePlugin
@@ -62,7 +72,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
         
         let properties: [String: Any] = [
             "source": "app_lifecycle_plugin",
-            "background_date": Date().timeIntervalSince1970
+            "background_date": dateProvider().timeIntervalSince1970
         ]
         
         sdk?.track("$app_backgrounded", properties: properties)
@@ -73,8 +83,8 @@ public class AppLifecyclePlugin: NuxiePlugin {
         
         let properties: [String: Any] = [
             "source": "app_lifecycle_plugin",
-            "foreground_date": Date().timeIntervalSince1970,
-            "app_version": getCurrentAppVersion()
+            "foreground_date": dateProvider().timeIntervalSince1970,
+            "app_version": appVersionProvider()
         ]
         
         sdk?.track("$app_opened", properties: properties)
@@ -83,8 +93,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
     // MARK: - Private Methods
     
     private func trackAppLaunchEvents() {
-        let userDefaults = UserDefaults.standard
-        let currentVersion = getCurrentAppVersion()
+        let currentVersion = appVersionProvider()
         
         let hasLaunchedBefore = userDefaults.bool(forKey: hasLaunchedBeforeKey)
         let lastVersion = userDefaults.string(forKey: lastVersionKey)
@@ -96,7 +105,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
         
         if !hasLaunchedBefore {
             // First launch - App Installed
-            properties["install_date"] = Date().timeIntervalSince1970
+            properties["install_date"] = dateProvider().timeIntervalSince1970
             sdk?.track("$app_installed", properties: properties)
             
             // Mark as launched and save version
@@ -106,7 +115,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
         } else if let lastVersion = lastVersion, lastVersion != currentVersion {
             // App Updated
             properties["previous_version"] = lastVersion
-            properties["update_date"] = Date().timeIntervalSince1970
+            properties["update_date"] = dateProvider().timeIntervalSince1970
             sdk?.track("$app_updated", properties: properties)
             
             // Update stored version
@@ -114,11 +123,11 @@ public class AppLifecyclePlugin: NuxiePlugin {
         }
         
         // Always track App Opened (including first launch and updates)
-        properties["open_date"] = Date().timeIntervalSince1970
+        properties["open_date"] = dateProvider().timeIntervalSince1970
         sdk?.track("$app_opened", properties: properties)
     }
     
-    private func getCurrentAppVersion() -> String {
+    public static func defaultAppVersion() -> String {
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
             if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
                 return "\(version) (\(build))"
