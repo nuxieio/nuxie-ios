@@ -237,7 +237,6 @@ final class UseFeatureIntegrationTests: AsyncSpec {
             describe("error handling") {
                 it("should throw when SDK is not configured") {
                     await NuxieSDK.shared.shutdown()
-                    mocks.resetAllFactories()
 
                     await expect {
                         try await NuxieSDK.shared.useFeatureAndWait("feature")

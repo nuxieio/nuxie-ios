@@ -53,10 +53,27 @@ class JourneyExecutorTestFlowService: FlowServiceProtocol {
 }
 
 class JourneyExecutorTestEventService: EventServiceProtocol {
-    private(set) var routeCalled = false
-    private(set) var lastEvent: NuxieEvent?
-    private(set) var routedEvents: [NuxieEvent] = []
-    private(set) var trackedEvents: [(name: String, properties: [String: Any]?)] = []
+    private let lock = NSLock()
+    private var _routeCalled = false
+    private var _lastEvent: NuxieEvent?
+    private var _routedEvents: [NuxieEvent] = []
+    private var _trackedEvents: [(name: String, properties: [String: Any]?)] = []
+
+    var routeCalled: Bool {
+        lock.withLock { _routeCalled }
+    }
+
+    var lastEvent: NuxieEvent? {
+        lock.withLock { _lastEvent }
+    }
+
+    var routedEvents: [NuxieEvent] {
+        lock.withLock { _routedEvents }
+    }
+
+    var trackedEvents: [(name: String, properties: [String: Any]?)] {
+        lock.withLock { _trackedEvents }
+    }
     
     func track(
         _ event: String,
@@ -66,7 +83,9 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
         completion: ((EventResult) -> Void)?
     ) {
         // Track the event for test verification
-        trackedEvents.append((name: event, properties: properties))
+        lock.withLock {
+            _trackedEvents.append((name: event, properties: properties))
+        }
         
         // Create a simple NuxieEvent for mock purposes (without enrichment)
         let nuxieEvent = TestEventBuilder(name: event)
@@ -81,9 +100,11 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
     }
     
     func route(_ event: NuxieEvent) async -> NuxieEvent? {
-        routeCalled = true
-        lastEvent = event
-        routedEvents.append(event)
+        lock.withLock {
+            _routeCalled = true
+            _lastEvent = event
+            _routedEvents.append(event)
+        }
         return event
     }
     
@@ -128,7 +149,7 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
     }
     
     func getQueuedEventCount() async -> Int {
-        return routedEvents.count
+        return lock.withLock { _routedEvents.count }
     }
     
     func pauseEventQueue() async {
@@ -178,13 +199,15 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
     }
     
     func reset() {
-        routeCalled = false
-        lastEvent = nil
-        routedEvents.removeAll()
-        trackedEvents.removeAll()
-        trackWithResponseResult = nil
-        trackWithResponseError = nil
-        trackWithResponseCalls.removeAll()
+        lock.withLock {
+            _routeCalled = false
+            _lastEvent = nil
+            _routedEvents.removeAll()
+            _trackedEvents.removeAll()
+            _trackWithResponseResult = nil
+            _trackWithResponseError = nil
+            _trackWithResponseCalls.removeAll()
+        }
     }
     
     func reassignEvents(from fromUserId: String, to toUserId: String) async throws -> Int {
@@ -211,21 +234,41 @@ class JourneyExecutorTestEventService: EventServiceProtocol {
 
     // MARK: - trackWithResponse (for remote node testing)
 
-    var trackWithResponseResult: EventResponse?
-    var trackWithResponseError: Error?
-    private(set) var trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
+    private var _trackWithResponseResult: EventResponse?
+    private var _trackWithResponseError: Error?
+    private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
+
+    var trackWithResponseResult: EventResponse? {
+        get { lock.withLock { _trackWithResponseResult } }
+        set { lock.withLock { _trackWithResponseResult = newValue } }
+    }
+
+    var trackWithResponseError: Error? {
+        get { lock.withLock { _trackWithResponseError } }
+        set { lock.withLock { _trackWithResponseError = newValue } }
+    }
+
+    var trackWithResponseCalls: [(event: String, properties: [String: Any]?)] {
+        lock.withLock { _trackWithResponseCalls }
+    }
 
     func trackWithResponse(
         _ event: String,
         properties: [String: Any]?
     ) async throws -> EventResponse {
-        trackWithResponseCalls.append((event: event, properties: properties))
+        lock.withLock {
+            _trackWithResponseCalls.append((event: event, properties: properties))
+        }
 
-        if let error = trackWithResponseError {
+        let (result, error): (EventResponse?, Error?) = lock.withLock {
+            (_trackWithResponseResult, _trackWithResponseError)
+        }
+
+        if let error = error {
             throw error
         }
 
-        return trackWithResponseResult ?? EventResponse(
+        return result ?? EventResponse(
             status: "ok",
             payload: nil,
             customer: nil,
