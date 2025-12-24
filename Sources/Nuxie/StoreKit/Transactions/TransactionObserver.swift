@@ -95,11 +95,8 @@ internal actor TransactionObserver {
 
         LogInfo("TransactionObserver: Processing verified transaction \(transaction.id) for product \(transaction.productID)")
 
-        // Skip revoked transactions (refunded or removed from Family Sharing)
         if transaction.revocationDate != nil {
-            LogDebug("TransactionObserver: Skipping revoked transaction \(transaction.id)")
-            await transaction.finish()
-            return
+            LogDebug("TransactionObserver: Transaction \(transaction.id) is revoked; syncing to notify backend")
         }
 
         // Skip upgraded subscriptions (user has a higher tier now)
