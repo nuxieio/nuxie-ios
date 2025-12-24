@@ -343,26 +343,27 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         NuxieSDK.shared.track("bulk_event_\(i)", properties: ["index": i])
                     }
                     
-                    // Give time for events to be stored
-                    try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+                    // Ensure events are stored before migration begins.
+                    await eventService.drain()
+
+                    await expect {
+                        await eventService.getEventsForUser(anonymousId, limit: 200).count
+                    }.toEventually(equal(eventCount), timeout: .seconds(2))
                     
-                    // Record time before identify
+                    // Record time before migration
                     let startTime = Date()
                     
-                    // Identify user
                     let userId = "bulk_user"
-                    NuxieSDK.shared.identify(userId)
-                    
-                    // Measure migration time
+                    let reassignedCount = try await eventService.reassignEvents(
+                        from: anonymousId,
+                        to: userId
+                    )
+
+                    // Measure migration time after completion
                     let migrationTime = Date().timeIntervalSince(startTime)
-                    
-                    // Migration should be fast (under 1 second for 100 events)
+                    expect(reassignedCount).to(equal(eventCount))
                     expect(migrationTime).to(beLessThan(1.0))
-                    
-                    // Give time for migration to complete
-                    try await Task.sleep(nanoseconds: 500_000_000) // 500ms
-                    
-                    // Verify all events were migrated
+
                     let migratedEvents = await eventService.getEventsForUser(userId, limit: 200)
                     let bulkEvents = migratedEvents.filter { $0.name.starts(with: "bulk_event") }
                     expect(bulkEvents.count).to(equal(eventCount))
