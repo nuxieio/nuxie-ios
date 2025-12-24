@@ -9,11 +9,28 @@ final class GlobalQuickConfiguration: QuickConfiguration {
   override class func configure(_ configuration: QCKConfiguration) {
     configuration.beforeEach {
       MockFactory.resetUsageFlag()
+
+      if NuxieSDK.shared.configuration != nil {
+        runAsyncAndWait(description: "NuxieSDK.shutdown (pre)") {
+          await NuxieSDK.shared.shutdown()
+        }
+      }
     }
 
     configuration.afterEach {
       // Clear any registered network stubs between examples.
       TestURLSessionProvider.reset()
+
+      // Ensure a configuration exists so EventService resolution doesn't crash in tests
+      // that don't call NuxieSDK.setup.
+      if NuxieSDK.shared.configuration == nil {
+        Container.shared.sdkConfiguration.register { NuxieConfiguration(apiKey: "test-api-key") }
+      }
+
+      // Drain queued event work to reduce async noise between tests.
+      runAsyncAndWait(description: "EventService.drain") {
+        await Container.shared.eventService().drain()
+      }
 
       // Shut down the SDK if it was configured during the test.
       if NuxieSDK.shared.configuration != nil {
