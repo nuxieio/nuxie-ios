@@ -97,6 +97,20 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
     func close() async {}
     func onAppDidEnterBackground() async {}
     func onAppBecameActive() async {}
+    func drain() async {}
+    func trackWithResponse(_ event: String, properties: [String: Any]?) async throws -> EventResponse {
+        return EventResponse(
+            status: "ok",
+            payload: nil,
+            customer: nil,
+            event: nil,
+            message: nil,
+            featuresMatched: nil,
+            usage: nil,
+            journey: nil,
+            execution: nil
+        )
+    }
 }
 
 final class IRTestSegmentService: SegmentServiceProtocol, IRSegmentQueries {

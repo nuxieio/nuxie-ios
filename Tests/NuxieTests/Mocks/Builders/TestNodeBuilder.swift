@@ -14,6 +14,9 @@ class TestNodeBuilder {
     // Additional properties to store node-specific data
     private var flowId: String?
     private var duration: TimeInterval?
+    private var remoteAction: String?
+    private var remotePayload: AnyCodable?
+    private var remoteAsync: Bool?
     
     init(id: String) {
         self.id = id
@@ -119,6 +122,16 @@ class TestNodeBuilder {
                 next: next, // Each index maps to branch
                 data: RandomBranchNode.RandomBranchData(branches: randomBranches)
             ))
+        case .remote:
+            return AnyWorkflowNode(RemoteNode(
+                id: id,
+                next: next,
+                data: RemoteNode.RemoteData(
+                    action: remoteAction ?? "webhook",
+                    payload: remotePayload,
+                    async: remoteAsync
+                )
+            ))
         default:
             // Default node for unsupported types
             return AnyWorkflowNode(ExitNode(
@@ -151,7 +164,30 @@ class TestNodeBuilder {
     static func waitUntil(id: String) -> TestNodeBuilder {
         return TestNodeBuilder(id: id).withType(.waitUntil)
     }
-    
+
+    static func remote(id: String, action: String, payload: Any? = nil, async: Bool? = nil) -> TestNodeBuilder {
+        let builder = TestNodeBuilder(id: id).withType(.remote)
+        builder.remoteAction = action
+        builder.remotePayload = payload.map { AnyCodable($0) }
+        builder.remoteAsync = async
+        return builder
+    }
+
+    func withRemoteAction(_ action: String) -> TestNodeBuilder {
+        self.remoteAction = action
+        return self
+    }
+
+    func withRemotePayload(_ payload: Any) -> TestNodeBuilder {
+        self.remotePayload = AnyCodable(payload)
+        return self
+    }
+
+    func withRemoteAsync(_ async: Bool) -> TestNodeBuilder {
+        self.remoteAsync = async
+        return self
+    }
+
     func next(_ nodes: String...) -> TestNodeBuilder {
         return withNext(nodes)
     }

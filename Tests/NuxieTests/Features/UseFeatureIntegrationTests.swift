@@ -6,11 +6,12 @@ import FactoryKit
 
 final class UseFeatureIntegrationTests: AsyncSpec {
     override class func spec() {
-        describe("NuxieSDK.useFeature integration") {
+        describe("NuxieSDK.useFeatureAndWait integration") {
             var mocks: MockFactory!
             var mockApi: MockNuxieApi!
 
             beforeEach {
+
                 // Register mocks using MockFactory
                 mocks = MockFactory.shared
                 mocks.registerAll()
@@ -26,19 +27,13 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 mocks.identityService.setDistinctId("test-user-123")
             }
 
-            afterEach {
-                await mocks.resetAll()
-                await NuxieSDK.shared.shutdown()
-                mocks.resetAllFactories()
-            }
-
             // MARK: - Basic Usage Tests
 
             describe("basic usage") {
                 it("should call API with correct $feature_used event") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("ai_generations")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("ai_generations")
 
                     expect(result.success).to(beTrue())
                     expect(result.featureId).to(equal("ai_generations"))
@@ -53,7 +48,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should include feature_extId in properties") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature("premium_export")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("premium_export")
 
                     let lastCall = await mockApi.lastTrackEventCall
                     let props = lastCall?.properties
@@ -64,7 +59,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                     mocks.identityService.setDistinctId("custom-user-456")
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature("test_feature")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("test_feature")
 
                     let lastCall = await mockApi.lastTrackEventCall
                     expect(lastCall?.distinctId).to(equal("custom-user-456"))
@@ -77,7 +72,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should send custom amount as value") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("credits", amount: 10.0)
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("credits", amount: 10.0)
 
                     expect(result.amountUsed).to(equal(10.0))
 
@@ -88,7 +83,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should handle fractional amounts") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("tokens", amount: 2.5)
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("tokens", amount: 2.5)
 
                     expect(result.amountUsed).to(equal(2.5))
 
@@ -103,7 +98,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should send entityId when provided") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature(
+                    _ = try await NuxieSDK.shared.useFeatureAndWait(
                         "api_calls",
                         entityId: "project-123"
                     )
@@ -115,7 +110,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should not include entityId when nil") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature("api_calls")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("api_calls")
 
                     let lastCall = await mockApi.lastTrackEventCall
                     expect(lastCall?.entityId).to(beNil())
@@ -128,7 +123,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should include setUsage property when true") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature(
+                    _ = try await NuxieSDK.shared.useFeatureAndWait(
                         "credits",
                         amount: 50,
                         setUsage: true
@@ -142,7 +137,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should not include setUsage when false (default)") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature("credits")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("credits")
 
                     let lastCall = await mockApi.lastTrackEventCall
                     let props = lastCall?.properties
@@ -156,7 +151,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should include metadata when provided") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature(
+                    _ = try await NuxieSDK.shared.useFeatureAndWait(
                         "exports",
                         metadata: [
                             "format": "pdf",
@@ -174,7 +169,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should not include metadata when nil") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature("exports")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("exports")
 
                     let lastCall = await mockApi.lastTrackEventCall
                     let props = lastCall?.properties
@@ -193,7 +188,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                         usage: usage
                     )
 
-                    let result = try await NuxieSDK.shared.useFeature("credits")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("credits")
 
                     expect(result.success).to(beTrue())
                     expect(result.message).to(equal("Usage tracked"))
@@ -206,7 +201,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should handle response without usage info") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("credits")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("credits")
 
                     expect(result.success).to(beTrue())
                     expect(result.usage).to(beNil())
@@ -215,7 +210,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should recognize 'ok' status as success") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("feature")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("feature")
 
                     expect(result.success).to(beTrue())
                 }
@@ -223,7 +218,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should recognize 'success' status as success") {
                     await mockApi.configureTrackEventResponse(status: "success")
 
-                    let result = try await NuxieSDK.shared.useFeature("feature")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("feature")
 
                     expect(result.success).to(beTrue())
                 }
@@ -231,7 +226,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should recognize other statuses as failure") {
                     await mockApi.configureTrackEventResponse(status: "error")
 
-                    let result = try await NuxieSDK.shared.useFeature("feature")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("feature")
 
                     expect(result.success).to(beFalse())
                 }
@@ -245,7 +240,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                     mocks.resetAllFactories()
 
                     await expect {
-                        try await NuxieSDK.shared.useFeature("feature")
+                        try await NuxieSDK.shared.useFeatureAndWait("feature")
                     }.to(throwError(NuxieError.notConfigured))
                 }
 
@@ -255,7 +250,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                     )
 
                     await expect {
-                        try await NuxieSDK.shared.useFeature("feature")
+                        try await NuxieSDK.shared.useFeatureAndWait("feature")
                     }.to(throwError())
                 }
 
@@ -265,7 +260,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                     )
 
                     await expect {
-                        try await NuxieSDK.shared.useFeature("feature")
+                        try await NuxieSDK.shared.useFeatureAndWait("feature")
                     }.to(throwError())
                 }
             }
@@ -273,12 +268,12 @@ final class UseFeatureIntegrationTests: AsyncSpec {
             // MARK: - Call Count Tests
 
             describe("API call tracking") {
-                it("should make exactly one API call per useFeature") {
+                it("should make exactly one API call per useFeatureAndWait") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature("feature1")
-                    _ = try await NuxieSDK.shared.useFeature("feature2")
-                    _ = try await NuxieSDK.shared.useFeature("feature3")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("feature1")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("feature2")
+                    _ = try await NuxieSDK.shared.useFeatureAndWait("feature3")
 
                     let callCount = await mockApi.trackEventCallCount
                     expect(callCount).to(equal(3))
@@ -296,7 +291,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                         usage: usage
                     )
 
-                    let result = try await NuxieSDK.shared.useFeature(
+                    let result = try await NuxieSDK.shared.useFeatureAndWait(
                         "premium_feature",
                         amount: 5.0,
                         entityId: "org:123/project:456",
@@ -330,7 +325,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should handle empty feature ID") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("")
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("")
 
                     expect(result.featureId).to(equal(""))
 
@@ -342,7 +337,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should handle zero amount") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    let result = try await NuxieSDK.shared.useFeature("feature", amount: 0)
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("feature", amount: 0)
 
                     expect(result.amountUsed).to(equal(0))
 
@@ -354,7 +349,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
                     let largeAmount = 999999999.99
-                    let result = try await NuxieSDK.shared.useFeature("feature", amount: largeAmount)
+                    let result = try await NuxieSDK.shared.useFeatureAndWait("feature", amount: largeAmount)
 
                     expect(result.amountUsed).to(beCloseTo(largeAmount, within: 0.01))
 
@@ -365,7 +360,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                 it("should handle special characters in all string fields") {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
-                    _ = try await NuxieSDK.shared.useFeature(
+                    _ = try await NuxieSDK.shared.useFeatureAndWait(
                         "feature-with_special.chars:v2",
                         entityId: "org:123/project:456",
                         metadata: ["key with spaces": "value/with/slashes"]
@@ -388,7 +383,7 @@ final class UseFeatureIntegrationTests: AsyncSpec {
                     await mockApi.configureTrackEventResponse(status: "ok")
 
                     // This should compile without warnings due to @discardableResult
-                    try await NuxieSDK.shared.useFeature("feature")
+                    try await NuxieSDK.shared.useFeatureAndWait("feature")
 
                     let callCount = await mockApi.trackEventCallCount
                     expect(callCount).to(equal(1))

@@ -34,7 +34,7 @@ test-ios: generate
 		-project NuxieSDK.xcodeproj \
 		-scheme NuxieSDK \
 		-configuration Debug \
-		-destination 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+		-destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1'
 
 # Alias for test-ios
 test: test-ios

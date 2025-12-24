@@ -66,6 +66,16 @@ public struct FeatureAccess: Sendable {
         FeatureAccess(allowed: false, unlimited: false, balance: nil, type: .boolean)
     }
 
+    /// Create with a specific balance (for local balance updates)
+    static func withBalance(_ balance: Int, unlimited: Bool, type: FeatureType) -> FeatureAccess {
+        FeatureAccess(
+            allowed: unlimited || balance > 0,
+            unlimited: unlimited,
+            balance: balance,
+            type: type
+        )
+    }
+
     private init(allowed: Bool, unlimited: Bool, balance: Int?, type: FeatureType) {
         self.allowed = allowed
         self.unlimited = unlimited

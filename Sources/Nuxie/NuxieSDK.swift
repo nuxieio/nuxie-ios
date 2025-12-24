@@ -703,11 +703,78 @@ public final class NuxieSDK {
 
   // MARK: - Feature Usage
 
-  /// Report usage of a metered feature, consuming balance from the user's entitlement.
+  /// Report usage of a metered feature (fire-and-forget).
   ///
-  /// This method sends the usage directly to the server (synchronous) and returns the result,
-  /// including any updated balance information. Use this after the user has successfully
-  /// used a feature to decrement their balance.
+  /// This method queues a `$feature_used` event to be sent in the next batch and immediately
+  /// decrements the local balance for instant UI feedback. Use this for most usage tracking
+  /// where you don't need server confirmation.
+  ///
+  /// The server will process the event asynchronously and update the ledger. The next profile
+  /// refresh will sync the authoritative balance from the server.
+  ///
+  /// - Parameters:
+  ///   - featureId: The feature identifier (external ID configured in Nuxie dashboard)
+  ///   - amount: The amount to consume (default: 1)
+  ///   - entityId: Optional entity ID for entity-based limits (e.g., per-project usage)
+  ///   - metadata: Optional additional metadata to record with the usage event
+  ///
+  /// - Example:
+  /// ```swift
+  /// // Consume 1 unit of "ai_generations" feature
+  /// Nuxie.shared.useFeature("ai_generations")
+  ///
+  /// // Consume 5 credits for a premium export
+  /// Nuxie.shared.useFeature("export_credits", amount: 5)
+  ///
+  /// // Track per-project usage
+  /// Nuxie.shared.useFeature("api_calls", amount: 1, entityId: "project-123")
+  /// ```
+  public func useFeature(
+    _ featureId: String,
+    amount: Double = 1,
+    entityId: String? = nil,
+    metadata: [String: Any]? = nil
+  ) {
+    guard isSetup else {
+      LogWarning("useFeature called before SDK setup")
+      return
+    }
+
+    // Build properties for $feature_used event
+    var properties: [String: Any] = [
+      "feature_extId": featureId,
+      "amount": amount,
+      "value": amount  // EventService extracts this for the batch payload
+    ]
+
+    if let metadata = metadata {
+      properties["metadata"] = metadata
+    }
+
+    if let entityId = entityId {
+      properties["entityId"] = entityId
+    }
+
+    // Queue event to batch (fire-and-forget)
+    container.eventService().track(
+      "$feature_used",
+      properties: properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
+
+    // Decrement local balance for immediate UI feedback
+    Task { @MainActor in
+      features.decrementBalance(featureId, amount: Int(amount))
+    }
+  }
+
+  /// Report usage of a metered feature and wait for server confirmation.
+  ///
+  /// This method sends the usage directly to the server (blocking) and returns the result,
+  /// including updated balance information. Use this when you need confirmation that the
+  /// usage was recorded, such as for critical or irreversible operations.
   ///
   /// - Parameters:
   ///   - featureId: The feature identifier (external ID configured in Nuxie dashboard)
@@ -720,17 +787,14 @@ public final class NuxieSDK {
   ///
   /// - Example:
   /// ```swift
-  /// // Consume 1 unit of "ai_generations" feature
-  /// let result = try await Nuxie.shared.useFeature("ai_generations")
-  ///
-  /// // Consume 5 credits for a premium export
-  /// let result = try await Nuxie.shared.useFeature("export_credits", amount: 5)
-  ///
-  /// // Track per-project usage
-  /// let result = try await Nuxie.shared.useFeature("api_calls", amount: 1, entityId: "project-123")
+  /// // Consume and confirm usage
+  /// let result = try await Nuxie.shared.useFeatureAndWait("ai_generations")
+  /// if result.success {
+  ///     print("Remaining: \(result.usage?.remaining ?? 0)")
+  /// }
   /// ```
   @discardableResult
-  public func useFeature(
+  public func useFeatureAndWait(
     _ featureId: String,
     amount: Double = 1,
     entityId: String? = nil,
@@ -766,6 +830,13 @@ public final class NuxieSDK {
       value: amount,
       entityId: entityId
     )
+
+    // Update local balance from server response
+    if let usage = response.usage, let remaining = usage.remaining {
+      await MainActor.run {
+        features.setBalance(featureId, balance: Int(remaining))
+      }
+    }
 
     // Build result from response
     return FeatureUsageResult(

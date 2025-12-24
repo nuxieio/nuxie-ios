@@ -43,7 +43,6 @@ final class TransactionServiceTests: AsyncSpec {
             afterEach {
                 // Clean up
                 mockPurchaseDelegate.reset()
-                await NuxieSDK.shared.shutdown()
             }
             
             describe("purchase") {

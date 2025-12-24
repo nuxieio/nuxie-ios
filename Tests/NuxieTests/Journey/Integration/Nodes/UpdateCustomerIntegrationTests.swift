@@ -44,6 +44,11 @@ final class UpdateCustomerNodeIntegrationTests: AsyncSpec {
       }
 
       beforeEach {
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
+
         identityService = JourneyExecutorTestIdentityService()
         Container.shared.identityService.register { identityService }
         Container.shared.segmentService.register { MockSegmentService() }
@@ -78,7 +83,8 @@ final class UpdateCustomerNodeIntegrationTests: AsyncSpec {
       afterEach {
         await Container.shared.journeyService().shutdown()
         identityService.reset()
-        Container.shared.reset()
+        // Don't reset container here - let beforeEach handle it
+        // to avoid race conditions with background tasks accessing services
       }
 
       it("updates user properties and completes") {

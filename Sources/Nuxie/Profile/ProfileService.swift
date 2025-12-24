@@ -65,7 +65,8 @@ internal actor ProfileService: ProfileServiceProtocol {
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
     @Injected(\.flowService) private var flowService: FlowServiceProtocol
     @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
-    @Injected(\.journeyService) private var journeyService: JourneyServiceProtocol
+    // Note: journeyService is resolved lazily in resumeActiveJourneys to avoid circular dependency
+    // (JourneyService → ProfileService → JourneyService)
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
 
@@ -217,14 +218,12 @@ internal actor ProfileService: ProfileServiceProtocol {
         self.cachedProfile = item
         LogDebug("Updated memory cache for \(NuxieLogger.shared.logDistinctID(distinctId))")
         
-        // Write to disk async (fire-and-forget)
-        Task.detached { [diskCache] in
-            do {
-                try await diskCache.store(item, forKey: distinctId)
-                LogDebug("Updated disk cache for \(NuxieLogger.shared.logDistinctID(distinctId))")
-            } catch {
-                LogWarning("Failed to update disk cache: \(error)")
-            }
+        // Write to disk (awaited to keep cache state consistent)
+        do {
+            try await diskCache.store(item, forKey: distinctId)
+            LogDebug("Updated disk cache for \(NuxieLogger.shared.logDistinctID(distinctId))")
+        } catch {
+            LogWarning("Failed to update disk cache: \(error)")
         }
         
         // Start refresh timer
@@ -427,7 +426,8 @@ internal actor ProfileService: ProfileServiceProtocol {
         // Resume active journeys from server (cross-device resume)
         if let journeys = profile.journeys, !journeys.isEmpty {
             LogInfo("Resuming \(journeys.count) active journey(s) from server")
-            await journeyService.resumeFromServerState(journeys, campaigns: profile.campaigns)
+            // Resolve journeyService lazily to break circular dependency
+            await Container.shared.journeyService().resumeFromServerState(journeys, campaigns: profile.campaigns)
         }
 
         // Diff flows

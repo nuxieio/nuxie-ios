@@ -90,7 +90,9 @@ struct ResponseBuilders {
             event: nil,
             message: nil,
             featuresMatched: nil,
-            usage: nil
+            usage: nil,
+            journey: nil,
+            execution: nil
         )
     }
 
@@ -112,7 +114,9 @@ struct ResponseBuilders {
                 current: current,
                 limit: limit,
                 remaining: remaining
-            )
+            ),
+            journey: nil,
+            execution: nil
         )
     }
     

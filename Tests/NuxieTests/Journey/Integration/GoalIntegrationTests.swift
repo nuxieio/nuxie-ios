@@ -32,6 +32,11 @@ final class GoalIntegrationTests: AsyncSpec {
       var mockProductService: MockProductService!
 
       beforeEach {
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
+
         // 1) Fresh mocks
         mockIdentityService = MockIdentityService()
         mockSegmentService = MockSegmentService()
@@ -75,8 +80,8 @@ final class GoalIntegrationTests: AsyncSpec {
       }
 
       afterEach {
-        // Clean up
-        Container.shared.reset()
+        await journeyService.shutdown()
+        mockSleepProvider.reset()
       }
 
       describe("Paywall Journey with Purchase Goal") {

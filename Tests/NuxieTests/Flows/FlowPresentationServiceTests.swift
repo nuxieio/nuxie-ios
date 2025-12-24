@@ -13,8 +13,6 @@ final class FlowPresentationServiceTests: AsyncSpec {
         var mockWindowProvider: MockWindowProvider!
         
         beforeEach { @MainActor in
-            // Reset container
-            Container.shared.reset()
             
             // Register test configuration
             let testConfig = NuxieConfiguration(apiKey: "test-api-key")
@@ -47,7 +45,8 @@ final class FlowPresentationServiceTests: AsyncSpec {
         afterEach { @MainActor in
             // Clean up
             mockWindowProvider.reset()
-            Container.shared.reset()
+            // Don't reset container here - let beforeEach handle it
+            // to avoid race conditions with background tasks accessing services
         }
         
         describe("presentFlow") {

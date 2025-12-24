@@ -94,18 +94,12 @@ internal actor TransactionObserver {
 
         LogInfo("TransactionObserver: Processing verified transaction \(transaction.id) for product \(transaction.productID)")
 
-        // Get the JWT representation of the transaction
-        guard let jwsRepresentation = transaction.jsonRepresentation else {
-            LogError("TransactionObserver: Failed to get JWS representation for transaction \(transaction.id)")
-            await transaction.finish()
-            return
-        }
+        // Get the JSON representation of the transaction
+        let jsonRepresentation = transaction.jsonRepresentation
 
-        // Convert Data to base64 string (the JWS is already a signed JWT)
-        let transactionJwt = String(data: jwsRepresentation, encoding: .utf8) ?? ""
-
-        guard !transactionJwt.isEmpty else {
-            LogError("TransactionObserver: Empty JWS for transaction \(transaction.id)")
+        // Convert Data to string
+        guard let transactionJson = String(data: jsonRepresentation, encoding: .utf8), !transactionJson.isEmpty else {
+            LogError("TransactionObserver: Failed to convert JSON for transaction \(transaction.id)")
             await transaction.finish()
             return
         }
@@ -116,7 +110,7 @@ internal actor TransactionObserver {
         do {
             // Sync with backend
             let response = try await api.syncTransaction(
-                transactionJwt: transactionJwt,
+                transactionJwt: transactionJson,
                 distinctId: distinctId
             )
 

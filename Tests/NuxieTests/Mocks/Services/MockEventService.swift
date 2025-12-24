@@ -4,9 +4,23 @@ import FactoryKit
 
 /// Mock implementation of EventService for testing
 public class MockEventService: EventServiceProtocol {
-    public var routedEvents: [NuxieEvent] = []
-    public var trackedEvents: [(name: String, properties: [String: Any]?)] = []
-    public var eventHandlers: [(String, (NuxieEvent) -> Void)] = []
+    private let lock = NSLock()
+    private var _routedEvents: [NuxieEvent] = []
+    private var _trackedEvents: [(name: String, properties: [String: Any]?)] = []
+    private var _eventHandlers: [(String, (NuxieEvent) -> Void)] = []
+    
+    public private(set) var routedEvents: [NuxieEvent] {
+        get { lock.withLock { _routedEvents } }
+        set { lock.withLock { _routedEvents = newValue } }
+    }
+    public private(set) var trackedEvents: [(name: String, properties: [String: Any]?)] {
+        get { lock.withLock { _trackedEvents } }
+        set { lock.withLock { _trackedEvents = newValue } }
+    }
+    public private(set) var eventHandlers: [(String, (NuxieEvent) -> Void)] {
+        get { lock.withLock { _eventHandlers } }
+        set { lock.withLock { _eventHandlers = newValue } }
+    }
     
     // Test helper: track last event times
     private var lastEventTimes: [String: Date] = [:]
@@ -20,7 +34,9 @@ public class MockEventService: EventServiceProtocol {
         completion: ((EventResult) -> Void)? = nil
     ) {
         // Track the event for test verification
-        trackedEvents.append((name: event, properties: properties))
+        lock.withLock {
+            _trackedEvents.append((name: event, properties: properties))
+        }
         
         // Create a simple NuxieEvent for mock purposes (without enrichment)
         let nuxieEvent = TestEventBuilder(name: event)
@@ -36,10 +52,13 @@ public class MockEventService: EventServiceProtocol {
     
     @discardableResult
     public func route(_ event: NuxieEvent) async -> NuxieEvent? {
-        routedEvents.append(event)
+        let handlers: [(String, (NuxieEvent) -> Void)] = lock.withLock {
+            _routedEvents.append(event)
+            return _eventHandlers
+        }
         
-        // Notify handlers
-        eventHandlers.forEach { (pattern, handler) in
+        // Notify handlers outside lock
+        handlers.forEach { (pattern, handler) in
             if pattern == event.name || pattern == "*" {
                 handler(event)
             }
@@ -69,7 +88,8 @@ public class MockEventService: EventServiceProtocol {
     
     public func getRecentEvents(limit: Int) async -> [StoredEvent] {
         // Convert NuxieEvents to StoredEvents for mock
-        return routedEvents.suffix(limit).compactMap { event in
+        let events = lock.withLock { _routedEvents }
+        return events.suffix(limit).compactMap { event in
             try? StoredEvent(
                 id: UUID.v7().uuidString,
                 name: event.name,
@@ -81,7 +101,8 @@ public class MockEventService: EventServiceProtocol {
     }
     
     public func getEventsForUser(_ distinctId: String, limit: Int) async -> [StoredEvent] {
-        let userEvents = routedEvents.filter { $0.distinctId == distinctId }
+        let events = lock.withLock { _routedEvents }
+        let userEvents = events.filter { $0.distinctId == distinctId }
         return userEvents.suffix(limit).compactMap { event in
             try? StoredEvent(
                 id: UUID.v7().uuidString,
@@ -99,7 +120,8 @@ public class MockEventService: EventServiceProtocol {
     }
     
     public func hasEvent(name: String, distinctId: String, since: Date?) async -> Bool {
-        let userEvents = routedEvents.filter { $0.distinctId == distinctId && $0.name == name }
+        let events = lock.withLock { _routedEvents }
+        let userEvents = events.filter { $0.distinctId == distinctId && $0.name == name }
         if let since = since {
             return userEvents.contains { $0.timestamp >= since }
         }
@@ -107,7 +129,8 @@ public class MockEventService: EventServiceProtocol {
     }
     
     public func countEvents(name: String, distinctId: String, since: Date?, until: Date?) async -> Int {
-        var userEvents = routedEvents.filter { $0.distinctId == distinctId && $0.name == name }
+        let events = lock.withLock { _routedEvents }
+        var userEvents = events.filter { $0.distinctId == distinctId && $0.name == name }
         if let since = since {
             userEvents = userEvents.filter { $0.timestamp >= since }
         }
@@ -119,12 +142,13 @@ public class MockEventService: EventServiceProtocol {
     
     public func getLastEventTime(name: String, distinctId: String, since: Date?, until: Date?) async -> Date? {
         let key = "\(distinctId):\(name)"
+        let cachedTimes: [String: Date] = lock.withLock { lastEventTimes }
         LogDebug("[MockEventService] getLastEventTime called for event '\(name)', user '\(distinctId)'")
-        LogDebug("[MockEventService] Current lastEventTimes dictionary: \(lastEventTimes)")
+        LogDebug("[MockEventService] Current lastEventTimes dictionary: \(cachedTimes)")
         LogDebug("[MockEventService] Bounds: since=\(String(describing: since)), until=\(String(describing: until))")
         
         // Check test helper dictionary first
-        if let time = lastEventTimes[key] {
+        if let time = cachedTimes[key] {
             LogDebug("[MockEventService] Found cached time for key '\(key)': \(time)")
             // Apply bounds to the cached time
             if let since = since, time < since {
@@ -138,7 +162,8 @@ public class MockEventService: EventServiceProtocol {
         }
         
         // Fall back to routed events
-        var userEvents = routedEvents.filter { $0.distinctId == distinctId && $0.name == name }
+        let events = lock.withLock { _routedEvents }
+        var userEvents = events.filter { $0.distinctId == distinctId && $0.name == name }
         if let since = since {
             userEvents = userEvents.filter { $0.timestamp >= since }
         }
@@ -146,7 +171,7 @@ public class MockEventService: EventServiceProtocol {
             userEvents = userEvents.filter { $0.timestamp <= until }
         }
         
-        LogDebug("[MockEventService] Checking \(routedEvents.count) routed events, found \(userEvents.count) matching events")
+        LogDebug("[MockEventService] Checking \(events.count) routed events, found \(userEvents.count) matching events")
         
         // Return the most recent event within the bounds
         let result = userEvents.max(by: { $0.timestamp < $1.timestamp })?.timestamp
@@ -157,7 +182,9 @@ public class MockEventService: EventServiceProtocol {
     // Test helper method to set last event time
     public func setLastEventTime(name: String, distinctId: String, time: Date) {
         let key = "\(distinctId):\(name)"
-        lastEventTimes[key] = time
+        lock.withLock {
+            lastEventTimes[key] = time
+        }
     }
     
     // MARK: - Network Queue Management (Mock implementations)
@@ -170,7 +197,7 @@ public class MockEventService: EventServiceProtocol {
     
     public func getQueuedEventCount() async -> Int {
         // Mock implementation - return count of routed events
-        return routedEvents.count
+        return lock.withLock { _routedEvents.count }
     }
     
     public func pauseEventQueue() async {
@@ -188,7 +215,7 @@ public class MockEventService: EventServiceProtocol {
     }
     
     public func count(name: String, since: Date?, until: Date?, where predicate: IRPredicate?) async -> Int {
-        let events = routedEvents.filter { $0.name == name }
+        let events = lock.withLock { _routedEvents }.filter { $0.name == name }
             .filter { event in
                 if let s = since, event.timestamp < s { return false }
                 if let u = until, event.timestamp > u { return false }
@@ -198,13 +225,13 @@ public class MockEventService: EventServiceProtocol {
     }
     
     public func firstTime(name: String, where predicate: IRPredicate?) async -> Date? {
-        let events = routedEvents.filter { $0.name == name }
+        let events = lock.withLock { _routedEvents }.filter { $0.name == name }
             .sorted(by: { $0.timestamp < $1.timestamp })
         return events.first?.timestamp
     }
     
     public func lastTime(name: String, where predicate: IRPredicate?) async -> Date? {
-        let events = routedEvents.filter { $0.name == name }
+        let events = lock.withLock { _routedEvents }.filter { $0.name == name }
             .sorted(by: { $0.timestamp > $1.timestamp })
         return events.first?.timestamp
     }
@@ -231,45 +258,109 @@ public class MockEventService: EventServiceProtocol {
     
     // Test helpers
     public func reset() {
-        routedEvents.removeAll()
-        trackedEvents.removeAll()
-        eventHandlers.removeAll()
-        lastEventTimes.removeAll()
+        lock.withLock {
+            _routedEvents.removeAll()
+            _trackedEvents.removeAll()
+            _eventHandlers.removeAll()
+            lastEventTimes.removeAll()
+            _trackWithResponseCalls.removeAll()
+            _trackWithResponseResult = nil
+            _trackWithResponseError = nil
+        }
     }
     
     public func addEventHandler(pattern: String, handler: @escaping (NuxieEvent) -> Void) {
-        eventHandlers.append((pattern, handler))
+        lock.withLock {
+            _eventHandlers.append((pattern, handler))
+        }
     }
     
     // MARK: - User Identity Management
     
     public func reassignEvents(from fromUserId: String, to toUserId: String) async throws -> Int {
         // Mock implementation: Update distinctId in routed events
-        var reassignedCount = 0
-        for i in 0..<routedEvents.count {
-            if routedEvents[i].distinctId == fromUserId {
-                // Create new event with updated distinctId
-                let oldEvent = routedEvents[i]
-                routedEvents[i] = NuxieEvent(
-                    id: oldEvent.id,
-                    name: oldEvent.name,
-                    distinctId: toUserId,
-                    properties: oldEvent.properties,
-                    timestamp: oldEvent.timestamp
-                )
-                reassignedCount += 1
+        return lock.withLock {
+            var reassignedCount = 0
+            for i in 0..<_routedEvents.count {
+                if _routedEvents[i].distinctId == fromUserId {
+                    // Create new event with updated distinctId
+                    let oldEvent = _routedEvents[i]
+                    _routedEvents[i] = NuxieEvent(
+                        id: oldEvent.id,
+                        name: oldEvent.name,
+                        distinctId: toUserId,
+                        properties: oldEvent.properties,
+                        timestamp: oldEvent.timestamp
+                    )
+                    reassignedCount += 1
+                }
             }
+            return reassignedCount
         }
-        return reassignedCount
     }
     
-    // MARK: - Cleanup
+    // MARK: - Synchronous Tracking with Response
+
+    private var _trackWithResponseResult: EventResponse?
+    private var _trackWithResponseError: Error?
+    private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
     
+    public var trackWithResponseResult: EventResponse? {
+        get { lock.withLock { _trackWithResponseResult } }
+        set { lock.withLock { _trackWithResponseResult = newValue } }
+    }
+    
+    public var trackWithResponseError: Error? {
+        get { lock.withLock { _trackWithResponseError } }
+        set { lock.withLock { _trackWithResponseError = newValue } }
+    }
+    
+    public private(set) var trackWithResponseCalls: [(event: String, properties: [String: Any]?)] {
+        get { lock.withLock { _trackWithResponseCalls } }
+        set { lock.withLock { _trackWithResponseCalls = newValue } }
+    }
+
+    public func trackWithResponse(
+        _ event: String,
+        properties: [String: Any]?
+    ) async throws -> EventResponse {
+        lock.withLock {
+            _trackWithResponseCalls.append((event: event, properties: properties))
+        }
+
+        let (result, error): (EventResponse?, Error?) = lock.withLock {
+            (_trackWithResponseResult, _trackWithResponseError)
+        }
+        if let error = error {
+            throw error
+        }
+
+        return result ?? EventResponse(
+            status: "ok",
+            payload: nil,
+            customer: nil,
+            event: nil,
+            message: nil,
+            featuresMatched: nil,
+            usage: nil,
+            journey: nil,
+            execution: nil
+        )
+    }
+
+    // MARK: - Cleanup
+
     public func close() async {
         // Mock implementation: just reset state
         reset()
     }
-    
+
+    // MARK: - Drain
+
+    public func drain() async {
+        // Mock implementation: no-op since mock events are stored synchronously
+    }
+
     // MARK: - Lifecycle Events
     
     public func onAppDidEnterBackground() async {

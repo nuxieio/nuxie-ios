@@ -54,13 +54,25 @@ public final class MockSleepProvider: SleepProviderProtocol {
             return
         }
         
-        // Otherwise, wait for manual completion
-        try await withCheckedThrowingContinuation { continuation in
-            let id = UUID.v7()
-            let pendingSleep = PendingSleep(duration: duration, continuation: continuation)
-            
+        // Otherwise, wait for manual completion (and handle cancellation)
+        let id = UUID.v7()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                let pendingSleep = PendingSleep(duration: duration, continuation: continuation)
+                
+                lock.withLock {
+                    pendingSleeps[id] = pendingSleep
+                }
+            }
+        } onCancel: {
             lock.withLock {
-                pendingSleeps[id] = pendingSleep
+                if let pending = pendingSleeps.removeValue(forKey: id) {
+                    pending.continuation.resume(throwing: CancellationError())
+                }
             }
         }
     }
@@ -70,10 +82,11 @@ public final class MockSleepProvider: SleepProviderProtocol {
     /// Complete all pending sleep operations
     public func completeAllSleeps() {
         lock.withLock {
-            for sleep in pendingSleeps.values {
+            let sleepers = pendingSleeps
+            pendingSleeps.removeAll()
+            for sleep in sleepers.values {
                 sleep.continuation.resume()
             }
-            pendingSleeps.removeAll()
         }
     }
     
@@ -116,10 +129,11 @@ public final class MockSleepProvider: SleepProviderProtocol {
     public func reset() {
         lock.withLock {
             // Cancel any pending sleeps
-            for sleep in pendingSleeps.values {
+            let sleepers = pendingSleeps
+            pendingSleeps.removeAll()
+            for sleep in sleepers.values {
                 sleep.continuation.resume(throwing: CancellationError())
             }
-            pendingSleeps.removeAll()
             sleepCalls.removeAll()
             shouldCompleteImmediately = false
             errorToThrow = nil

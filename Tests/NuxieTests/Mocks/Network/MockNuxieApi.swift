@@ -227,7 +227,9 @@ public actor MockNuxieApi: NuxieApiProtocol {
             event: nil,
             message: nil,
             featuresMatched: nil,
-            usage: nil
+            usage: nil,
+            journey: nil,
+            execution: nil
         )
     }
 
@@ -297,12 +299,19 @@ public actor MockNuxieApi: NuxieApiProtocol {
             event: nil,
             message: message,
             featuresMatched: nil,
-            usage: usage
+            usage: usage,
+            journey: nil,
+            execution: nil
         )
     }
 
     public func configureTrackEventFailure(error: Error? = nil) {
         shouldFailTrackEvent = true
         trackEventError = error
+    }
+
+    // Direct setter for trackEventResponse (for tests that need to set custom EventResponse)
+    public func setTrackEventResponse(_ response: EventResponse?) {
+        trackEventResponse = response
     }
 }

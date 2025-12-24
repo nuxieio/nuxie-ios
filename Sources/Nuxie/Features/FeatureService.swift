@@ -2,7 +2,7 @@ import FactoryKit
 import Foundation
 
 /// Protocol defining the FeatureService interface
-protocol FeatureServiceProtocol: AnyObject {
+public protocol FeatureServiceProtocol: AnyObject {
     /// Check feature access from cache (instant, non-blocking)
     func getCached(featureId: String, entityId: String?) async -> FeatureAccess?
 
@@ -214,15 +214,17 @@ internal actor FeatureService: FeatureServiceProtocol {
     /// Update FeatureInfo with current cached features (for SwiftUI reactivity)
     private func notifyFeatureInfoUpdate() async {
         let allFeatures = await getAllCached()
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(allFeatures)
+            info.update(allFeatures)
         }
     }
 
     /// Update FeatureInfo with a single feature (after real-time check)
     private func notifyFeatureInfoUpdate(featureId: String, access: FeatureAccess) async {
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(featureId, access: access)
+            info.update(featureId, access: access)
         }
     }
 
@@ -237,8 +239,9 @@ internal actor FeatureService: FeatureServiceProtocol {
             accessMap[purchaseFeature.id] = purchaseFeature.toFeatureAccess
         }
 
+        let info = featureInfo
         await MainActor.run {
-            featureInfo.update(accessMap)
+            info.update(accessMap)
         }
 
         LogInfo("Feature cache updated from purchase")

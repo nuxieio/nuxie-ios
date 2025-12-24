@@ -5,66 +5,133 @@ import Nimble
 
 /// Test spy for monitoring journey execution without modifying production code
 public class JourneyTestSpy {
+    private let lock = NSLock()
     // MARK: - Recorded Data
     
     /// Node executions with details
-    private(set) var nodeExecutions: [(
+    private var _nodeExecutions: [(
         nodeId: String,
         nodeType: NodeType,
         result: NodeExecutionResult,
         journeyId: String,
         timestamp: Date
     )] = []
+    public private(set) var nodeExecutions: [(
+        nodeId: String,
+        nodeType: NodeType,
+        result: NodeExecutionResult,
+        journeyId: String,
+        timestamp: Date
+    )] {
+        get { lock.withLock { _nodeExecutions } }
+        set { lock.withLock { _nodeExecutions = newValue } }
+    }
     
     /// Journey state transitions
-    private(set) var stateTransitions: [(
+    private var _stateTransitions: [(
         journeyId: String,
         from: JourneyStatus?,
         to: JourneyStatus,
         timestamp: Date
     )] = []
+    public private(set) var stateTransitions: [(
+        journeyId: String,
+        from: JourneyStatus?,
+        to: JourneyStatus,
+        timestamp: Date
+    )] {
+        get { lock.withLock { _stateTransitions } }
+        set { lock.withLock { _stateTransitions = newValue } }
+    }
     
     /// Persistence operations
-    private(set) var persistenceOperations: [(
+    private var _persistenceOperations: [(
         action: PersistAction,
         journeyId: String,
         timestamp: Date
     )] = []
+    public private(set) var persistenceOperations: [(
+        action: PersistAction,
+        journeyId: String,
+        timestamp: Date
+    )] {
+        get { lock.withLock { _persistenceOperations } }
+        set { lock.withLock { _persistenceOperations = newValue } }
+    }
     
     /// Journey lifecycle events
-    private(set) var lifecycleEvents: [(
+    private var _lifecycleEvents: [(
         event: LifecycleEvent,
         journeyId: String,
         campaignId: String,
         timestamp: Date,
         metadata: [String: Any]
     )] = []
+    public private(set) var lifecycleEvents: [(
+        event: LifecycleEvent,
+        journeyId: String,
+        campaignId: String,
+        timestamp: Date,
+        metadata: [String: Any]
+    )] {
+        get { lock.withLock { _lifecycleEvents } }
+        set { lock.withLock { _lifecycleEvents = newValue } }
+    }
     
     /// Context changes in journeys
-    private(set) var contextChanges: [(
+    private var _contextChanges: [(
         journeyId: String,
         key: String,
         oldValue: Any?,
         newValue: Any,
         timestamp: Date
     )] = []
+    public private(set) var contextChanges: [(
+        journeyId: String,
+        key: String,
+        oldValue: Any?,
+        newValue: Any,
+        timestamp: Date
+    )] {
+        get { lock.withLock { _contextChanges } }
+        set { lock.withLock { _contextChanges = newValue } }
+    }
     
     /// Flow display attempts
-    private(set) var flowDisplayAttempts: [(
+    private var _flowDisplayAttempts: [(
         flowId: String,
         journeyId: String,
         nodeId: String,
         timestamp: Date
     )] = []
+    public private(set) var flowDisplayAttempts: [(
+        flowId: String,
+        journeyId: String,
+        nodeId: String,
+        timestamp: Date
+    )] {
+        get { lock.withLock { _flowDisplayAttempts } }
+        set { lock.withLock { _flowDisplayAttempts = newValue } }
+    }
     
     /// Delegate calls
-    private(set) var delegateCalls: [(
+    private var _delegateCalls: [(
         message: String,
         journeyId: String,
         nodeId: String,
         payload: Any?,
         timestamp: Date
     )] = []
+    public private(set) var delegateCalls: [(
+        message: String,
+        journeyId: String,
+        nodeId: String,
+        payload: Any?,
+        timestamp: Date
+    )] {
+        get { lock.withLock { _delegateCalls } }
+        set { lock.withLock { _delegateCalls = newValue } }
+    }
     
     // MARK: - Types
     
@@ -92,7 +159,9 @@ public class JourneyTestSpy {
         journeyId: String,
         timestamp: Date = Date()
     ) {
-        nodeExecutions.append((nodeId, nodeType, result, journeyId, timestamp))
+        lock.withLock {
+            _nodeExecutions.append((nodeId, nodeType, result, journeyId, timestamp))
+        }
     }
     
     public func recordStateTransition(
@@ -101,7 +170,9 @@ public class JourneyTestSpy {
         to: JourneyStatus,
         timestamp: Date = Date()
     ) {
-        stateTransitions.append((journeyId, from, to, timestamp))
+        lock.withLock {
+            _stateTransitions.append((journeyId, from, to, timestamp))
+        }
     }
     
     public func recordPersistence(
@@ -109,7 +180,9 @@ public class JourneyTestSpy {
         journeyId: String,
         timestamp: Date = Date()
     ) {
-        persistenceOperations.append((action, journeyId, timestamp))
+        lock.withLock {
+            _persistenceOperations.append((action, journeyId, timestamp))
+        }
     }
     
     public func recordLifecycleEvent(
@@ -119,7 +192,9 @@ public class JourneyTestSpy {
         timestamp: Date = Date(),
         metadata: [String: Any] = [:]
     ) {
-        lifecycleEvents.append((event, journeyId, campaignId, timestamp, metadata))
+        lock.withLock {
+            _lifecycleEvents.append((event, journeyId, campaignId, timestamp, metadata))
+        }
     }
     
     public func recordContextChange(
@@ -129,7 +204,9 @@ public class JourneyTestSpy {
         newValue: Any,
         timestamp: Date = Date()
     ) {
-        contextChanges.append((journeyId, key, oldValue, newValue, timestamp))
+        lock.withLock {
+            _contextChanges.append((journeyId, key, oldValue, newValue, timestamp))
+        }
     }
     
     public func recordFlowDisplay(
@@ -138,7 +215,9 @@ public class JourneyTestSpy {
         nodeId: String,
         timestamp: Date = Date()
     ) {
-        flowDisplayAttempts.append((flowId, journeyId, nodeId, timestamp))
+        lock.withLock {
+            _flowDisplayAttempts.append((flowId, journeyId, nodeId, timestamp))
+        }
     }
     
     public func recordDelegateCall(
@@ -148,7 +227,9 @@ public class JourneyTestSpy {
         payload: Any? = nil,
         timestamp: Date = Date()
     ) {
-        delegateCalls.append((message, journeyId, nodeId, payload, timestamp))
+        lock.withLock {
+            _delegateCalls.append((message, journeyId, nodeId, payload, timestamp))
+        }
     }
     
     // MARK: - Query Methods
@@ -288,12 +369,14 @@ public class JourneyTestSpy {
     // MARK: - Reset
     
     public func reset() {
-        nodeExecutions.removeAll()
-        stateTransitions.removeAll()
-        persistenceOperations.removeAll()
-        lifecycleEvents.removeAll()
-        contextChanges.removeAll()
-        flowDisplayAttempts.removeAll()
-        delegateCalls.removeAll()
+        lock.withLock {
+            _nodeExecutions.removeAll()
+            _stateTransitions.removeAll()
+            _persistenceOperations.removeAll()
+            _lifecycleEvents.removeAll()
+            _contextChanges.removeAll()
+            _flowDisplayAttempts.removeAll()
+            _delegateCalls.removeAll()
+        }
     }
 }

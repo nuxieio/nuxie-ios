@@ -30,9 +30,14 @@ final class JourneyLifecycleIntegrationTests: AsyncSpec {
             var journeyService: JourneyService!
             
             beforeEach {
+
+                // Register test configuration (required for any services that depend on sdkConfiguration)
+                let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+                Container.shared.sdkConfiguration.register { testConfig }
+
                 // Create test spy
                 spy = JourneyTestSpy()
-                
+
                 // Create fresh mock instances
                 identityService = MockIdentityService()
                 segmentService = MockSegmentService()
@@ -77,8 +82,8 @@ final class JourneyLifecycleIntegrationTests: AsyncSpec {
             }
             
             afterEach {
-                // Clean up
-                Container.shared.reset()
+                await journeyService.shutdown()
+                sleepProvider.reset()
             }
             
             // MARK: - Test 1: Sync-only journey completes immediately without persistence

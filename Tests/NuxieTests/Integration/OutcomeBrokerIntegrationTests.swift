@@ -26,8 +26,10 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
       var outcomeBroker: OutcomeBroker!
 
       beforeEach {
-        // Reset container for clean state
-        Container.shared.reset()
+
+        // Register test configuration (required for any services that depend on sdkConfiguration)
+        let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+        Container.shared.sdkConfiguration.register { testConfig }
 
         // Create all required mocks
         identityService = MockIdentityService()
@@ -85,7 +87,8 @@ final class OutcomeBrokerIntegrationTests: AsyncSpec {
       }
 
       afterEach {
-        Container.shared.reset()
+        await journeyService.shutdown()
+        sleepProvider.reset()
       }
 
       describe("immediate flow completion") {

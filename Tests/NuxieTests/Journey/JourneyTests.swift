@@ -11,6 +11,11 @@ final class JourneyTests: AsyncSpec {
             var mockDateProvider: MockDateProvider!
             
             beforeEach {
+
+                // Register test configuration (required for any services that depend on sdkConfiguration)
+                let testConfig = NuxieConfiguration(apiKey: "test-api-key")
+                Container.shared.sdkConfiguration.register { testConfig }
+
                 // Set up DateProvider
                 mockDateProvider = MockDateProvider()
                 Container.shared.dateProvider.register { mockDateProvider }
@@ -45,7 +50,8 @@ final class JourneyTests: AsyncSpec {
             }
             
             afterEach {
-                Container.shared.reset()
+                // Don't reset container here - let beforeEach handle it
+                // to avoid race conditions with background tasks accessing services
             }
             
             describe("Journey Creation") {
