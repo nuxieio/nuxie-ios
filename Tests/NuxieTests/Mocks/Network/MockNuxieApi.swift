@@ -223,7 +223,6 @@ public actor MockNuxieApi: NuxieApiProtocol {
             throw NuxieNetworkError.httpError(statusCode: 500, message: "Mock tracking error")
         }
 
-        return EventResponse(
         return trackEventResponse ?? EventResponse(
             status: "success",
             payload: nil,
