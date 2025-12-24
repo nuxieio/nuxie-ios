@@ -153,18 +153,16 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         NuxieSDK.shared.track("onboarding_step_2_completed")
                         
                         // Wait for events to be stored
-                        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                        await eventService.drain()
                         
                         // Identify user
                         let userId = "journey_user"
                         NuxieSDK.shared.identify(userId)
                         
-                        // Give time for async reassignment to complete
-                        try await Task.sleep(nanoseconds: 500_000_000) // 500ms
-                        
                         // Continue tracking after identification
                         NuxieSDK.shared.track("onboarding_step_3_completed")
                         NuxieSDK.shared.track("onboarding_completed")
+                        await eventService.drain()
                         
                         // Verify all events are under the identified user
                         await expect {
@@ -222,9 +220,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Identify user
                         let userId = "user_keep_separate"
                         NuxieSDK.shared.identify(userId)
-                        
-                        // Give time for identification
-                        try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+                        await eventService.drain()
                         
                         // Verify anonymous events remain with anonymous user
                         await expect {
@@ -257,26 +253,30 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     NuxieSDK.shared.track("identified_event_2")
                     
                     // Give time for events to be stored
-                    try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    await eventService.drain()
                     
                     // Verify events are under first user
-                    let user1Events = await eventService.getEventsForUser(userId1, limit: 10)
-                    expect(user1Events.filter { $0.name.starts(with: "identified_event") }.count).to(equal(2))
+                    await expect {
+                        let user1Events = await eventService.getEventsForUser(userId1, limit: 10)
+                        return user1Events.filter { $0.name.starts(with: "identified_event") }.count
+                    }.toEventually(equal(2), timeout: .seconds(2))
                     
                     // Identify as different user
                     let userId2 = "user_second"
                     NuxieSDK.shared.identify(userId2)
-                    
-                    // Give time for identification
-                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+                    await eventService.drain()
                     
                     // Verify first user's events remain unchanged
-                    let user1EventsAfter = await eventService.getEventsForUser(userId1, limit: 10)
-                    expect(user1EventsAfter.filter { $0.name.starts(with: "identified_event") }.count).to(equal(2))
+                    await expect {
+                        let user1EventsAfter = await eventService.getEventsForUser(userId1, limit: 10)
+                        return user1EventsAfter.filter { $0.name.starts(with: "identified_event") }.count
+                    }.toEventually(equal(2), timeout: .seconds(2))
                     
                     // Verify second user only has identify event
-                    let user2Events = await eventService.getEventsForUser(userId2, limit: 10)
-                    expect(user2Events.filter { $0.name.starts(with: "identified_event") }.count).to(equal(0))
+                    await expect {
+                        let user2Events = await eventService.getEventsForUser(userId2, limit: 10)
+                        return user2Events.filter { $0.name.starts(with: "identified_event") }.count
+                    }.toEventually(equal(0), timeout: .seconds(2))
                 }
                 
                 it("should NOT reassign when identifying with same ID") {
@@ -289,19 +289,17 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     NuxieSDK.shared.track("event_2")
                     
                     // Give time for events to be stored
-                    try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    await eventService.drain()
                     
                     let eventCountBefore = await eventService.getEventsForUser(userId, limit: 20).count
                     
                     // Identify again with same ID
                     NuxieSDK.shared.identify(userId, userProperties: ["updated": true])
                     
-                    // Give time for identification
-                    try await Task.sleep(nanoseconds: 200_000_000) // 200ms
-                    
                     // Verify event count increased by at most 1 (for the new $identify)
-                    let eventCountAfter = await eventService.getEventsForUser(userId, limit: 20).count
-                    expect(eventCountAfter).to(beLessThanOrEqualTo(eventCountBefore + 1))
+                    await expect {
+                        await eventService.getEventsForUser(userId, limit: 20).count
+                    }.toEventually(beLessThanOrEqualTo(eventCountBefore + 1), timeout: .seconds(2))
                 }
             }
             
@@ -312,7 +310,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     NuxieSDK.shared.track("test_event")
                     
                     // Give time for event to be stored
-                    try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    await eventService.drain()
                     
                     // Note: Cannot easily simulate EventStore failure with current architecture
                     // The test will still validate that SDK continues working even if storage has issues
