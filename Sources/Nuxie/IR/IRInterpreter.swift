@@ -483,6 +483,8 @@ public final class IRInterpreter {
     /// Convert time value and interval to seconds
     private func toSeconds(_ value: Int, _ interval: String) -> TimeInterval {
         switch interval {
+        case "hour":
+            return TimeInterval(value * 3600)
         case "day":
             return TimeInterval(value * 86400)
         case "week":
