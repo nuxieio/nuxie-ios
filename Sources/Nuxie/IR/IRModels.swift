@@ -70,6 +70,9 @@ public indirect enum IRExpr: Codable {
     case timeNow
     case timeAgo(duration: IRExpr)
     case timeWindow(value: Int, interval: String)
+
+    // Journey context
+    case journeyId
     
     /// Step in a sequence query
     public struct Step: Codable {
@@ -283,7 +286,10 @@ public indirect enum IRExpr: Codable {
             let value = try windowContainer.decode(Int.self, forKey: .value)
             let interval = try windowContainer.decode(String.self, forKey: .interval)
             self = .timeWindow(value: value, interval: interval)
-            
+
+        case "Journey.Id":
+            self = .journeyId
+
         default:
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(

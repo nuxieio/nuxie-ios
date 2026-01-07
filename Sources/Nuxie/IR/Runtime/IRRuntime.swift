@@ -30,13 +30,17 @@ final class IRRuntime {
     /// Feature queries adapter
     var features: IRFeatureQueries? = nil
 
+    /// Current journey ID for goal scoping
+    var journeyId: String? = nil
+
     init(
       now: Date? = nil,
       event: NuxieEvent? = nil,
       user: IRUserProps? = nil,
       events: IREventQueries? = nil,
       segments: IRSegmentQueries? = nil,
-      features: IRFeatureQueries? = nil
+      features: IRFeatureQueries? = nil,
+      journeyId: String? = nil
     ) {
       self.now = now
       self.event = event
@@ -44,6 +48,7 @@ final class IRRuntime {
       self.events = events
       self.segments = segments
       self.features = features
+      self.journeyId = journeyId
     }
   }
 
@@ -57,7 +62,8 @@ final class IRRuntime {
       events: cfg.events,
       segments: cfg.segments,
       features: cfg.features,
-      event: cfg.event
+      event: cfg.event,
+      journeyId: cfg.journeyId
     )
   }
 

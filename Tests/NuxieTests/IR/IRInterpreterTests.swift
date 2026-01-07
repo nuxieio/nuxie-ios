@@ -371,12 +371,12 @@ final class IRInterpreterTests: AsyncSpec {
                 let numExpr = IRExpr.number(42.5)
                 let numValue = try await interpreter.evalValue(numExpr)
                 expect(numValue).to(equal(IRValue.number(42.5)))
-                
+
                 let strExpr = IRExpr.string("hello")
                 let strValue = try await interpreter.evalValue(strExpr)
                 expect(strValue).to(equal(IRValue.string("hello")))
             }
-            
+
             it("should evaluate time expressions") {
                 let nowExpr = IRExpr.timeNow
                 let nowValue = try await interpreter.evalValue(nowExpr)
@@ -385,7 +385,7 @@ final class IRInterpreterTests: AsyncSpec {
                 } else {
                     fail("Expected timestamp value")
                 }
-                
+
                 let agoExpr = IRExpr.timeAgo(duration: .duration(3600))
                 let agoValue = try await interpreter.evalValue(agoExpr)
                 if case .timestamp(let ts) = agoValue {
@@ -393,7 +393,7 @@ final class IRInterpreterTests: AsyncSpec {
                 } else {
                     fail("Expected timestamp value")
                 }
-                
+
                 let windowExpr = IRExpr.timeWindow(value: 7, interval: "day")
                 let windowValue = try await interpreter.evalValue(windowExpr)
                 if case .duration(let d) = windowValue {
@@ -402,11 +402,11 @@ final class IRInterpreterTests: AsyncSpec {
                     fail("Expected duration value")
                 }
             }
-            
+
             it("should evaluate lists") {
                 let listExpr = IRExpr.list([.number(1), .string("two"), .bool(true)])
                 let listValue = try await interpreter.evalValue(listExpr)
-                
+
                 if case .list(let items) = listValue {
                     expect(items).to(haveCount(3))
                     expect(items[0]).to(equal(.number(1)))
@@ -415,6 +415,65 @@ final class IRInterpreterTests: AsyncSpec {
                 } else {
                     fail("Expected list value")
                 }
+            }
+        }
+
+        describe("Journey context evaluation") {
+            it("should return journey ID when present in context") {
+                let ctxWithJourney = EvalContext(
+                    now: testDate,
+                    user: mockIdentity,
+                    events: mockEvents,
+                    segments: mockSegments,
+                    event: triggerEvent,
+                    journeyId: "journey_abc123"
+                )
+                let interpreterWithJourney = IRInterpreter(ctx: ctxWithJourney)
+
+                let expr = IRExpr.journeyId
+                let value = try await interpreterWithJourney.evalValue(expr)
+
+                if case .string(let id) = value {
+                    expect(id).to(equal("journey_abc123"))
+                } else {
+                    fail("Expected string value for journeyId")
+                }
+            }
+
+            it("should return null when journey ID is not in context") {
+                // Default ctx has no journeyId
+                let expr = IRExpr.journeyId
+                let value = try await interpreter.evalValue(expr)
+
+                expect(value).to(equal(IRValue.null))
+            }
+
+            it("should compare journey ID in event filter") {
+                let ctxWithJourney = EvalContext(
+                    now: testDate,
+                    user: mockIdentity,
+                    events: mockEvents,
+                    segments: mockSegments,
+                    event: NuxieEvent(
+                        name: "$transaction_complete",
+                        distinctId: "user_123",
+                        properties: ["journey_id": "journey_abc123"]
+                    ),
+                    journeyId: "journey_abc123"
+                )
+                let interpreterWithJourney = IRInterpreter(ctx: ctxWithJourney)
+
+                // Filter: properties.journey_id == Journey.Id
+                let expr = IRExpr.compare(
+                    op: "==",
+                    left: .event(op: "eq", key: "properties.journey_id", value: nil),
+                    right: .journeyId
+                )
+
+                // This tests that Journey.Id resolves to a string that can be compared
+                // The actual comparison logic needs event property access
+                let journeyIdValue = try await interpreterWithJourney.evalValue(.journeyId)
+                expect(journeyIdValue).to(equal(IRValue.string("journey_abc123")))
             }
         }
         

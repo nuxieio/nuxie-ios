@@ -87,33 +87,77 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     }
 
     // Calculate window boundaries
-    let windowEnd = journey.conversionWindow > 0 
-      ? anchor.addingTimeInterval(journey.conversionWindow) 
+    let windowEnd = journey.conversionWindow > 0
+      ? anchor.addingTimeInterval(journey.conversionWindow)
       : nil
-    
-    // Query for the last event within the window boundaries
-    let lastEventTime = await eventService.getLastEventTime(
-      name: eventName, 
-      distinctId: journey.distinctId,
-      since: anchor,
-      until: windowEnd
-    )
-    
-    LogDebug("[GoalEvaluator] Last event time for '\(eventName)' within window: \(String(describing: lastEventTime))")
-    LogDebug("[GoalEvaluator] Window: anchor=\(anchor), end=\(String(describing: windowEnd))")
 
-    guard let lastTime = lastEventTime else {
-      LogDebug("[GoalEvaluator] No qualifying event found within window, returning false")
-      return (false, nil)
+    // If no event filter, use simple query for better performance
+    guard let eventFilter = goal.eventFilter else {
+      // No filter - just check for event existence
+      let lastEventTime = await eventService.getLastEventTime(
+        name: eventName,
+        distinctId: journey.distinctId,
+        since: anchor,
+        until: windowEnd
+      )
+
+      LogDebug("[GoalEvaluator] Last event time for '\(eventName)' within window: \(String(describing: lastEventTime))")
+      LogDebug("[GoalEvaluator] Window: anchor=\(anchor), end=\(String(describing: windowEnd))")
+
+      guard let lastTime = lastEventTime else {
+        LogDebug("[GoalEvaluator] No qualifying event found within window, returning false")
+        return (false, nil)
+      }
+
+      LogDebug("[GoalEvaluator] Goal met! Returning true with time \(lastTime)")
+      return (true, lastTime)
     }
 
-    // Phase 1: Skip event filter evaluation (will add in Phase 2)
-    if goal.eventFilter != nil {
-      LogDebug("Event filter evaluation not yet implemented - accepting any \(eventName) event")
+    // Event filter present - need to evaluate filter against each matching event
+    LogDebug("[GoalEvaluator] Evaluating event filter for '\(eventName)' events")
+
+    // Get all events for user and filter manually
+    let allEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+
+    // Filter events by name and time window, sorted newest first
+    let matchingEvents = allEvents
+      .filter { $0.name == eventName }
+      .filter { event in
+        if event.timestamp < anchor { return false }
+        if let end = windowEnd, event.timestamp > end { return false }
+        return true
+      }
+      .sorted { $0.timestamp > $1.timestamp }
+
+    LogDebug("[GoalEvaluator] Found \(matchingEvents.count) events within window")
+
+    // Evaluate filter against each event (starting with most recent)
+    for storedEvent in matchingEvents {
+      // Convert stored event to NuxieEvent for IR evaluation
+      let nuxieEvent = NuxieEvent(
+        name: storedEvent.name,
+        distinctId: storedEvent.distinctId,
+        properties: storedEvent.getPropertiesDict(),
+        timestamp: storedEvent.timestamp
+      )
+
+      // Build IR config with event context and journey ID
+      let config = IRRuntime.Config(
+        event: nuxieEvent,
+        journeyId: journey.id
+      )
+
+      let filterMatches = await irRuntime.eval(eventFilter, config)
+
+      if filterMatches {
+        LogDebug("[GoalEvaluator] Event filter matched for event at \(storedEvent.timestamp)")
+        LogDebug("[GoalEvaluator] Goal met! Returning true with time \(storedEvent.timestamp)")
+        return (true, storedEvent.timestamp)
+      }
     }
 
-    LogDebug("[GoalEvaluator] Goal met! Returning true with time \(lastTime)")
-    return (true, lastTime)
+    LogDebug("[GoalEvaluator] No events matched the filter, returning false")
+    return (false, nil)
   }
 
   private func evaluateSegmentEnterGoal(_ goal: GoalConfig, journey: Journey, anchor: Date) async
