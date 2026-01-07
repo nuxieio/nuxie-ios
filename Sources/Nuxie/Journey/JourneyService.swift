@@ -938,6 +938,12 @@ public actor JourneyService: JourneyServiceProtocol {
 
     switch policy {
     case .once:
+      // Block if there's already a live journey OR if user has completed this campaign before
+      // The hasLive check prevents starting a second journey while one is in progress
+      // The hasCompletedCampaign check prevents re-entry after completion
+      if hasLive {
+        return false
+      }
       return !journeyStore.hasCompletedCampaign(distinctId: distinctId, campaignId: campaign.id)
 
     case .everyRematch:
