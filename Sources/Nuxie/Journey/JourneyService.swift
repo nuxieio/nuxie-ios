@@ -118,9 +118,16 @@ public actor JourneyService: JourneyServiceProtocol {
     for journey in persisted where journey.status.isLive {
       inMemoryJourneysById[journey.id] = journey
 
-      // Schedule resume if needed
+      // Schedule branch-level resumes
+      for branch in journey.branches where branch.status == .paused {
+        if let resumeAt = branch.resumeAt {
+          scheduleBranchResume(journey: journey, branchId: branch.id, at: resumeAt)
+        }
+      }
+
+      // Legacy fallback: journey-level resume
       if journey.status == .paused, let resumeAt = journey.resumeAt {
-        await scheduleResume(journey, at: resumeAt)
+        scheduleResume(journey, at: resumeAt)
       }
     }
 
@@ -135,16 +142,26 @@ public actor JourneyService: JourneyServiceProtocol {
     // 1) Resume any timers that already matured
     await checkExpiredTimers()
 
-    // 2) Re-arm not-yet-matured timers
-    let candidates = getAllLiveJourneys().filter { $0.status == .paused }
+    // 2) Re-arm not-yet-matured branch timers
+    let candidates = getAllLiveJourneys()
     var scheduled = 0
+    let now = dateProvider.now()
+
     for journey in candidates {
-      if let at = journey.resumeAt, at > dateProvider.now() {
+      // Check each paused branch
+      for branch in journey.branches where branch.status == .paused {
+        if let resumeAt = branch.resumeAt, resumeAt > now {
+          scheduleBranchResume(journey: journey, branchId: branch.id, at: resumeAt)
+          scheduled += 1
+        }
+      }
+      // Legacy fallback: journey-level timer
+      if journey.status == .paused, let at = journey.resumeAt, at > now {
         scheduleResume(journey, at: at)
         scheduled += 1
       }
     }
-    if scheduled > 0 { LogInfo("Re-armed \(scheduled) journey timers") }
+    if scheduled > 0 { LogInfo("Re-armed \(scheduled) journey/branch timers") }
   }
 
   public func onAppBecameActive() async {
@@ -537,21 +554,30 @@ public actor JourneyService: JourneyServiceProtocol {
 
   /// Check and resume expired timers (called on app foreground)
   public func checkExpiredTimers() async {
-    LogDebug("Checking for expired journey timers...")
+    LogDebug("Checking for expired journey/branch timers...")
 
     // Iterate memory, not disk
     let candidates = Array(inMemoryJourneysById.values.filter { $0.status.isLive })
     var resumeCount = 0
+    let now = dateProvider.now()
 
     for journey in candidates {
-      if journey.status == .paused && journey.shouldResume() {
+      // Check for branches with expired timers
+      let expiredBranches = journey.branchesReadyToResume(at: now)
+      if !expiredBranches.isEmpty {
+        for branch in expiredBranches {
+          await resumeBranch(journey: journey, branchId: branch.id)
+          resumeCount += 1
+        }
+      } else if journey.status == .paused && journey.shouldResume(at: now) {
+        // Legacy fallback: journey-level resume
         await resumeJourney(journey)
         resumeCount += 1
       }
     }
 
     if resumeCount > 0 {
-      LogInfo("Resumed \(resumeCount) journeys with expired timers")
+      LogInfo("Resumed \(resumeCount) journeys/branches with expired timers")
     }
   }
 
@@ -653,83 +679,138 @@ public actor JourneyService: JourneyServiceProtocol {
     reason: ResumeReason = .start
   ) async {
     LogDebug(
-      "[JourneyService] executeJourney starting with currentNodeId: \(journey.currentNodeId ?? "nil")"
+      "[JourneyService] executeJourney starting with \(journey.branches.count) branches, \(journey.pendingBranchStarts.count) pending"
     )
 
     // Evaluate goal before starting
     await evaluateGoalIfNeeded(journey, campaign: campaign)
 
     // Check exit conditions before continuing
-    if let reason = await exitDecision(journey, campaign) {
-      LogDebug("[JourneyService] Journey should exit with reason: \(reason)")
-      completeJourney(journey, reason: reason)
+    if let exitReason = await exitDecision(journey, campaign) {
+      LogDebug("[JourneyService] Journey should exit with reason: \(exitReason)")
+      completeJourney(journey, reason: exitReason)
       return
     }
 
-    var iterationCount = 0
-    var currentReason = reason
-    // Execute nodes until we hit an async point or complete
-    while let currentNodeId = journey.currentNodeId {
-      iterationCount += 1
-      LogDebug("[JourneyService] Iteration \(iterationCount): Processing node \(currentNodeId)")
+    // Execute branches concurrently: when one pauses, start the next
+    while true {
+      // Find the first running branch
+      guard let branchIndex = journey.branches.firstIndex(where: { $0.status == .running }) else {
+        // No running branches - try to start a pending branch
+        if let newBranch = journey.startNextPendingBranch() {
+          LogDebug("[JourneyService] Started pending branch \(newBranch.id) at node \(newBranch.currentNodeId ?? "nil")")
+          inMemoryJourneysById[journey.id] = journey
+          continue
+        }
+        // No running branches and no pending - check if all completed
+        if journey.allBranchesCompleted() {
+          LogDebug("[JourneyService] All branches completed - completing journey")
+          completeJourney(journey, reason: .completed)
+        } else {
+          // Some branches still paused - journey is waiting
+          LogDebug("[JourneyService] Journey has paused branches, waiting for resume")
+          persistJourney(journey)
+        }
+        return
+      }
 
-      // Re-evaluate goal before each node execution
+      var branch = journey.branches[branchIndex]
+      let branchResult = await executeBranch(
+        &branch,
+        journey: journey,
+        campaign: campaign,
+        reason: reason
+      )
+      journey.branches[branchIndex] = branch
+      inMemoryJourneysById[journey.id] = journey
+
+      switch branchResult {
+      case .branchCompleted:
+        // Branch finished naturally, continue to next branch
+        LogDebug("[JourneyService] Branch \(branch.id) completed naturally")
+        continue
+
+      case .branchPaused:
+        // Branch is waiting - try to start next pending branch
+        LogDebug("[JourneyService] Branch \(branch.id) paused, checking for pending branches")
+        continue
+
+      case .journeyExited(let exitReason):
+        // Exit node or error - end entire journey
+        LogDebug("[JourneyService] Journey exiting with reason: \(exitReason)")
+        completeJourney(journey, reason: exitReason)
+        return
+      }
+    }
+  }
+
+  /// Result of executing a single branch
+  private enum BranchExecutionResult {
+    case branchCompleted      // Branch reached end (no more nodes)
+    case branchPaused         // Branch is waiting (async node)
+    case journeyExited(JourneyExitReason)  // Journey should end (exit node or error)
+  }
+
+  /// Execute a single branch until it pauses, completes, or exits
+  private func executeBranch(
+    _ branch: inout BranchState,
+    journey: Journey,
+    campaign: Campaign,
+    reason: ResumeReason
+  ) async -> BranchExecutionResult {
+    var currentReason = reason
+    var iterationCount = 0
+
+    while let currentNodeId = branch.currentNodeId {
+      iterationCount += 1
+      LogDebug("[JourneyService] Branch \(branch.id) iteration \(iterationCount): node \(currentNodeId)")
+
+      // Re-evaluate goal before each node
       await evaluateGoalIfNeeded(journey, campaign: campaign)
 
-      // Check exit conditions before executing node
-      if let reason = await exitDecision(journey, campaign) {
-        LogDebug("[JourneyService] Journey should exit with reason: \(reason)")
-        completeJourney(journey, reason: reason)
-        return
+      // Check exit conditions
+      if let exitReason = await exitDecision(journey, campaign) {
+        return .journeyExited(exitReason)
       }
 
       // Find current node
       guard let node = journeyExecutor.findNode(id: currentNodeId, in: campaign) else {
         LogError("Node \(currentNodeId) not found in campaign \(campaign.id)")
-        LogDebug("[JourneyService] ERROR: Node \(currentNodeId) not found!")
-        completeJourney(journey, reason: .error)
-        return
+        return .journeyExited(.error)
       }
 
-      LogDebug("[JourneyService] Found node \(currentNodeId) of type \(node.type)")
-
-      // Execute node with resume reason (only use event/segment reason for first node)
+      // Execute node
       let result = await journeyExecutor.executeNode(
         node,
         journey: journey,
         resumeReason: currentReason
       )
-      // After first node, subsequent nodes use start reason
-      currentReason = .start
-      LogDebug("[JourneyService] Node \(currentNodeId) execution result: \(result)")
+      currentReason = .start  // Only first node uses original reason
+      LogDebug("[JourneyService] Node \(currentNodeId) result: \(result)")
 
       switch result {
       case .continue(let nextNodeIds):
-        // Move to next node(s)
-        let nextNodeId = nextNodeIds.first
-        LogDebug("[JourneyService] Continue to next node: \(nextNodeId ?? "nil")")
-        journey.currentNodeId = nextNodeId
+        // Handle multiple outputs: first continues this branch, rest queued as new branches
+        if nextNodeIds.count > 1 {
+          let additionalPaths = Array(nextNodeIds.dropFirst())
+          journey.queueBranchStarts(additionalPaths)
+          LogDebug("[JourneyService] Queued \(additionalPaths.count) additional branch(es)")
+        }
+        branch.currentNodeId = nextNodeIds.first
         journey.updatedAt = dateProvider.now()
-        inMemoryJourneysById[journey.id] = journey
 
       case .skip(let skipToNodeId):
-        // Skip to specific node
-        LogDebug("[JourneyService] Skip to node: \(skipToNodeId ?? "nil")")
-        journey.currentNodeId = skipToNodeId
+        branch.currentNodeId = skipToNodeId
         journey.updatedAt = dateProvider.now()
-        inMemoryJourneysById[journey.id] = journey
 
       case .async(let resumeAt):
-        // Enter wait state
-        LogDebug(
-          "[JourneyService] Journey \(journey.id) entering async state (paused until \(String(describing: resumeAt)))"
-        )
-        journey.pause(until: resumeAt)
-        inMemoryJourneysById[journey.id] = journey
-        LogDebug("[JourneyService] Journey \(journey.id) status: \(journey.status)")
-        persistJourney(journey)
+        // Branch enters wait state
+        branch.status = .paused
+        branch.resumeAt = resumeAt
+        journey.pauseBranch(withId: branch.id, until: resumeAt)
+        LogDebug("[JourneyService] Branch \(branch.id) paused until \(String(describing: resumeAt))")
 
-        // Track journey paused event
+        // Track paused event
         eventService.track(
           JourneyEvents.journeyPaused,
           properties: JourneyEvents.journeyPausedProperties(
@@ -742,23 +823,25 @@ public actor JourneyService: JourneyServiceProtocol {
           completion: nil
         )
 
-        // Schedule resume if there's a deadline
+        // Schedule timer resume for this branch if there's a deadline
         if let resumeAt = resumeAt {
-          scheduleResume(journey, at: resumeAt)
+          scheduleBranchResume(journey: journey, branchId: branch.id, at: resumeAt)
         }
-        return
 
-      case .complete(let reason):
-        // Journey complete
-        LogDebug("[JourneyService] Journey complete with reason: \(reason)")
-        completeJourney(journey, reason: reason)
-        return
+        return .branchPaused
+
+      case .complete(let exitReason):
+        // Exit node - end entire journey
+        return .journeyExited(exitReason)
       }
     }
 
-    // No more nodes - complete journey
-    LogDebug("[JourneyService] No more nodes to execute - completing journey")
-    completeJourney(journey, reason: .completed)
+    // No more nodes in this branch - mark completed
+    branch.status = .completed
+    branch.currentNodeId = nil
+    journey.completeBranch(withId: branch.id)
+    LogDebug("[JourneyService] Branch \(branch.id) reached end")
+    return .branchCompleted
   }
 
   private func completeJourney(_ journey: Journey, reason: JourneyExitReason) {
@@ -913,7 +996,7 @@ public actor JourneyService: JourneyServiceProtocol {
       do {
         try await self?.sleepProvider.sleep(for: delay)
         guard let self = self, !Task.isCancelled else { return }
-        
+
         // Re-read canonical instance from registry
         if let journey = await self.inMemoryJourneysById[journeyId] {
           await self.resumeJourney(journey)
@@ -928,6 +1011,73 @@ public actor JourneyService: JourneyServiceProtocol {
 
     activeTasks[journey.id] = task
     LogDebug("Scheduled journey \(journey.id) to resume at \(date)")
+  }
+
+  /// Schedule resume for a specific branch within a journey
+  private func scheduleBranchResume(journey: Journey, branchId: String, at date: Date) {
+    // Use a composite key for branch-specific tasks
+    let taskKey = "\(journey.id):\(branchId)"
+
+    // Cancel any existing task for this branch
+    activeTasks[taskKey]?.cancel()
+
+    let delay = max(0, date.timeIntervalSince(dateProvider.now()))
+    let journeyId = journey.id
+
+    let task = Task { [weak self] in
+      do {
+        try await self?.sleepProvider.sleep(for: delay)
+        guard let self = self, !Task.isCancelled else { return }
+
+        // Re-read canonical instance from registry
+        if let journey = await self.inMemoryJourneysById[journeyId] {
+          await self.resumeBranch(journey: journey, branchId: branchId)
+        }
+      } catch {
+        LogDebug("Branch \(branchId) resume task cancelled/failed: \(error)")
+      }
+      await self?.clearTask(for: taskKey)
+    }
+
+    activeTasks[taskKey] = task
+    LogDebug("Scheduled branch \(branchId) of journey \(journey.id) to resume at \(date)")
+  }
+
+  /// Resume a specific branch within a journey (timer-based)
+  private func resumeBranch(journey: Journey, branchId: String) async {
+    guard let branch = journey.branch(withId: branchId),
+          branch.status == .paused else {
+      LogDebug("Branch \(branchId) not found or not paused")
+      return
+    }
+
+    LogInfo("Resuming branch \(branchId) of journey \(journey.id)")
+
+    // Get campaign
+    guard let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) else {
+      LogError("Campaign not found for journey \(journey.id)")
+      return
+    }
+
+    // Resume the branch
+    journey.resumeBranch(withId: branchId)
+    inMemoryJourneysById[journey.id] = journey
+
+    // Track resume event
+    eventService.track(
+      JourneyEvents.journeyResumed,
+      properties: JourneyEvents.journeyResumedProperties(
+        journey: journey,
+        nodeId: branch.currentNodeId,
+        resumeReason: "timer"
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil,
+      completion: nil
+    )
+
+    // Continue execution
+    await executeJourney(journey, campaign: campaign, reason: .timer)
   }
 
   private func clearTask(for journeyId: String) {
@@ -1092,49 +1242,68 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  /// Try to resume paused wait-until journeys for a user due to a reactive trigger (event/segment change)
+  /// Try to resume paused wait-until branches for a user due to a reactive trigger (event/segment change)
   private func tryReactiveResume(for distinctId: String, event: NuxieEvent? = nil) async {
-    let paused = await getActiveJourneys(for: distinctId).filter { $0.status == .paused }
-    guard !paused.isEmpty else { return }
+    // Get all journeys that have paused branches (not just paused journey status)
+    let journeysWithPausedBranches = await getActiveJourneys(for: distinctId).filter { journey in
+      journey.branches.contains(where: { $0.status == .paused })
+    }
+    guard !journeysWithPausedBranches.isEmpty else { return }
 
     // Fetch campaigns for THIS user
     guard let campaigns = await getAllCampaigns(for: distinctId) else { return }
 
-    for journey in paused {
-      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }),
-        let nodeId = journey.currentNodeId,
-        let node = journeyExecutor.findNode(id: nodeId, in: campaign)
-      else { continue }
-
-      // Only wait-until reacts (time-window will self-resume by schedule)
-      if node.type == .waitUntil {
-        // Resume the canonical in-memory instance, then immediately execute.
-        // Cancel any pending timer for this journey (we may advance earlier)
-        activeTasks[journey.id]?.cancel()
-        activeTasks.removeValue(forKey: journey.id)
-
-        journey.resume()  // status -> active
-        inMemoryJourneysById[journey.id] = journey
-
-        // Pass the event-driven resume reason for this reactive re-evaluation
-        let resumeReason: ResumeReason = event != nil ? .event(event!) : .segmentChange
-        let resumeReasonString = event != nil ? "event" : "segment_change"
-
-        // Track journey resumed event
-        eventService.track(
-          JourneyEvents.journeyResumed,
-          properties: JourneyEvents.journeyResumedProperties(
-            journey: journey,
-            nodeId: journey.currentNodeId,
-            resumeReason: resumeReasonString
-          ),
-          userProperties: nil,
-          userPropertiesSetOnce: nil,
-          completion: nil
-        )
-
-        await executeJourney(journey, campaign: campaign, reason: resumeReason)
+    for journey in journeysWithPausedBranches {
+      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else {
+        continue
       }
+
+      // Check each paused branch
+      var branchesToResume: [String] = []
+      for branch in journey.branches where branch.status == .paused {
+        guard let nodeId = branch.currentNodeId,
+              let node = journeyExecutor.findNode(id: nodeId, in: campaign) else {
+          continue
+        }
+
+        // Only wait-until reacts to events (time-window/delay self-resume by schedule)
+        if node.type == .waitUntil {
+          branchesToResume.append(branch.id)
+        }
+      }
+
+      guard !branchesToResume.isEmpty else { continue }
+
+      // Resume matching branches
+      for branchId in branchesToResume {
+        // Cancel any pending timer for this branch
+        let taskKey = "\(journey.id):\(branchId)"
+        activeTasks[taskKey]?.cancel()
+        activeTasks.removeValue(forKey: taskKey)
+
+        journey.resumeBranch(withId: branchId)
+      }
+
+      inMemoryJourneysById[journey.id] = journey
+
+      // Pass the event-driven resume reason for this reactive re-evaluation
+      let resumeReason: ResumeReason = event != nil ? .event(event!) : .segmentChange
+      let resumeReasonString = event != nil ? "event" : "segment_change"
+
+      // Track journey resumed event
+      eventService.track(
+        JourneyEvents.journeyResumed,
+        properties: JourneyEvents.journeyResumedProperties(
+          journey: journey,
+          nodeId: branchesToResume.first.flatMap { journey.branch(withId: $0)?.currentNodeId },
+          resumeReason: resumeReasonString
+        ),
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        completion: nil
+      )
+
+      await executeJourney(journey, campaign: campaign, reason: resumeReason)
     }
   }
 }

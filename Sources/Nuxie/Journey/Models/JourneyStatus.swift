@@ -86,10 +86,47 @@ public enum NodeExecutionResult: Equatable {
 public enum FrequencyPolicy: String, Codable {
     /// User can only enter once ever
     case once = "once"
-    
+
     /// User can re-enter after exiting
     case everyRematch = "every_rematch"
-    
+
     /// User can re-enter after a fixed interval
     case fixedInterval = "fixed_interval"
+}
+
+// MARK: - Branch Execution State
+
+/// Status of a branch within a journey
+public enum BranchStatus: String, Codable {
+    /// Branch is actively executing nodes
+    case running = "running"
+
+    /// Branch is waiting (for time, event, or condition)
+    case paused = "paused"
+
+    /// Branch reached its end (no more nodes)
+    case completed = "completed"
+}
+
+/// State of a single branch within a journey's execution
+public struct BranchState: Codable, Equatable {
+    /// Unique branch identifier
+    public let id: String
+
+    /// Current node being executed in this branch
+    public var currentNodeId: String?
+
+    /// Branch status
+    public var status: BranchStatus
+
+    /// For paused branches, when to resume
+    public var resumeAt: Date?
+
+    /// Initialize a new branch
+    public init(id: String = UUID().uuidString, currentNodeId: String?, status: BranchStatus = .running, resumeAt: Date? = nil) {
+        self.id = id
+        self.currentNodeId = currentNodeId
+        self.status = status
+        self.resumeAt = resumeAt
+    }
 }
