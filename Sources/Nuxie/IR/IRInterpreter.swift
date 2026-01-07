@@ -150,7 +150,7 @@ public final class IRInterpreter {
             return await events.restarted(name: name, inactiveFor: inactiveDuration, within: withinDuration, where: predicate)
             
         // Values used in boolean position - treat as truthy
-        case .timeNow, .timeAgo, .timeWindow, .number, .string, .timestamp, .duration, .list:
+        case .timeNow, .timeAgo, .timeWindow, .journeyId, .number, .string, .timestamp, .duration, .list:
             let value = try await evalValue(expr)
             return value.isTruthy
             
@@ -216,7 +216,11 @@ public final class IRInterpreter {
         case .timeWindow(let value, let interval):
             let seconds = toSeconds(value, interval)
             return .duration(seconds)
-            
+
+        case .journeyId:
+            guard let journeyId = ctx.journeyId else { return .null }
+            return .string(journeyId)
+
         case .eventsCount(let name, let since, let until, let within, let where_):
             // Allow count to be evaluated as a number
             guard let events = ctx.events else { return .number(0) }

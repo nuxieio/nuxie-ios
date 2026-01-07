@@ -399,17 +399,17 @@ final class IRDecoderTests: AsyncSpec {
                 let json = """
                 {"type": "Time.Now"}
                 """
-                
+
                 let data = json.data(using: .utf8)!
                 let expr = try JSONDecoder().decode(IRExpr.self, from: data)
-                
+
                 if case .timeNow = expr {
                     // Success
                 } else {
                     fail("Expected timeNow expression")
                 }
             }
-            
+
             it("should decode Time.Window node") {
                 let json = """
                 {
@@ -418,15 +418,32 @@ final class IRDecoderTests: AsyncSpec {
                     "interval": "day"
                 }
                 """
-                
+
                 let data = json.data(using: .utf8)!
                 let expr = try JSONDecoder().decode(IRExpr.self, from: data)
-                
+
                 if case .timeWindow(let value, let interval) = expr {
                     expect(value).to(equal(7))
                     expect(interval).to(equal("day"))
                 } else {
                     fail("Expected timeWindow expression")
+                }
+            }
+        }
+
+        describe("IRExpr journey context") {
+            it("should decode Journey.Id node") {
+                let json = """
+                {"type": "Journey.Id"}
+                """
+
+                let data = json.data(using: .utf8)!
+                let expr = try JSONDecoder().decode(IRExpr.self, from: data)
+
+                if case .journeyId = expr {
+                    // Success
+                } else {
+                    fail("Expected journeyId expression")
                 }
             }
         }

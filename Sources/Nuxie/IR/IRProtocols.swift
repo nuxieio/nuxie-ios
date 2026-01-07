@@ -125,13 +125,17 @@ public struct EvalContext {
     /// Event for predicate evaluation (when evaluating trigger conditions)
     public let event: NuxieEvent?
 
+    /// Current journey ID for goal scoping (when evaluating goal conditions)
+    public let journeyId: String?
+
     public init(
         now: Date,
         user: IRUserProps? = nil,
         events: IREventQueries? = nil,
         segments: IRSegmentQueries? = nil,
         features: IRFeatureQueries? = nil,
-        event: NuxieEvent? = nil
+        event: NuxieEvent? = nil,
+        journeyId: String? = nil
     ) {
         self.now = now
         self.user = user
@@ -139,5 +143,6 @@ public struct EvalContext {
         self.segments = segments
         self.features = features
         self.event = event
+        self.journeyId = journeyId
     }
 }
