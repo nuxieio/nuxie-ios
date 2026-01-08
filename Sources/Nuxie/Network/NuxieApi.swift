@@ -276,7 +276,7 @@ extension NuxieApi {
         LogDebug("[sendBatch] Created BatchRequest with historicalMigration: \(historicalMigration)")
         
         // Create request with gzip compression for batch endpoint
-        let batchURL = baseURL.appendingPathComponent("/api/i/batch")
+        let batchURL = baseURL.appendingPathComponent("/batch")
         LogDebug("[sendBatch] Batch URL: \(batchURL.absoluteString)")
         
         var urlRequest = URLRequest(url: batchURL)

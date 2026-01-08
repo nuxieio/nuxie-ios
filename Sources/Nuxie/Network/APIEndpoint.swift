@@ -11,17 +11,17 @@ enum APIEndpoint {
     var path: String {
         switch self {
         case .profile:
-            return "/api/i/profile"
+            return "/profile"
         case .event:
-            return "/api/i/event"
+            return "/event"
         case .batch:
-            return "/api/i/batch"
+            return "/batch"
         case .flow(let flowId):
-            return "/api/i/flows/\(flowId)"
+            return "/flows/\(flowId)"
         case .checkFeature:
-            return "/api/i/entitled"
+            return "/entitled"
         case .purchase:
-            return "/api/i/purchase"
+            return "/purchase"
         }
     }
 
