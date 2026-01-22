@@ -78,7 +78,7 @@ final class TriggerServiceTests: AsyncSpec {
 
             it("emits journeyStarted when a journey starts") {
                 let journey = TestJourneyBuilder().build()
-                mockJourneyService.triggerResults = [.started(journey)]
+                await mockJourneyService.setTriggerResults([.started(journey)])
                 mockEventService.trackWithResponseResult = .success()
 
                 var updates: [TriggerUpdate] = []

@@ -1,7 +1,7 @@
 import Foundation
 
-public protocol TriggerBrokerProtocol: AnyObject {
-  func register(eventId: String, handler: @escaping (TriggerUpdate) -> Void)
+public protocol TriggerBrokerProtocol: Actor {
+  func register(eventId: String, handler: @escaping (TriggerUpdate) -> Void) async
   func emit(eventId: String, update: TriggerUpdate) async
   func complete(eventId: String) async
   func reset() async
@@ -12,7 +12,7 @@ public actor TriggerBroker: TriggerBrokerProtocol {
 
   public init() {}
 
-  public func register(eventId: String, handler: @escaping (TriggerUpdate) -> Void) {
+  public func register(eventId: String, handler: @escaping (TriggerUpdate) -> Void) async {
     handlers[eventId] = handler
   }
 

@@ -108,6 +108,10 @@ public actor MockJourneyService: JourneyServiceProtocol {
         handledEvents.append(event)
         return triggerResults
     }
+
+    public func setTriggerResults(_ results: [JourneyTriggerResult]) {
+        triggerResults = results
+    }
     
     public func handleSegmentChange(distinctId: String, segments: Set<String>) async {
         segmentChanges.append((distinctId: distinctId, segments: segments))
