@@ -94,7 +94,7 @@ public final class FlowViewModelRuntime {
     }
 
     public func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
-        let resolved = resolvePathInfo(path, screenId: screenId)
+        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: nil)
         guard let instance = resolved.instance else { return false }
         if resolved.segments.isEmpty { return false }
 
@@ -136,9 +136,10 @@ public final class FlowViewModelRuntime {
     public func setValue(
         path: VmPathRef,
         value: Any,
-        screenId: String?
+        screenId: String?,
+        instanceId: String? = nil
     ) -> Bool {
-        let resolved = resolvePathInfo(path, screenId: screenId)
+        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
         guard var instance = resolved.instance else { return false }
 
         let segments = resolved.segments
@@ -161,8 +162,8 @@ public final class FlowViewModelRuntime {
         return true
     }
 
-    public func getValue(path: VmPathRef, screenId: String?) -> Any? {
-        let resolved = resolvePathInfo(path, screenId: screenId)
+    public func getValue(path: VmPathRef, screenId: String?, instanceId: String? = nil) -> Any? {
+        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
         guard let instance = resolved.instance else { return nil }
 
         let segments = resolved.segments
@@ -203,9 +204,10 @@ public final class FlowViewModelRuntime {
         path: VmPathRef,
         operation: String,
         payload: [String: Any],
-        screenId: String?
+        screenId: String?,
+        instanceId: String? = nil
     ) -> Bool {
-        let resolved = resolvePathInfo(path, screenId: screenId)
+        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
         guard var instance = resolved.instance else { return false }
 
         let segments = resolved.segments
@@ -345,7 +347,8 @@ public final class FlowViewModelRuntime {
 
     private func resolvePathInfo(
         _ path: VmPathRef,
-        screenId: String?
+        screenId: String?,
+        instanceId: String?
     ) -> ResolvedPathInfo {
         switch path {
         case .ids(let ref):
@@ -356,10 +359,11 @@ public final class FlowViewModelRuntime {
                 resolved = resolvePathIds(ref.pathIds)
             }
             if let resolved {
+                let resolvedInstanceId = ref.isRelative == true ? instanceId : nil
                 let instance = resolveInstance(
                     screenId: screenId,
                     viewModelId: resolved.viewModelId,
-                    instanceId: nil
+                    instanceId: resolvedInstanceId
                 )
                 return ResolvedPathInfo(
                     instance: instance,

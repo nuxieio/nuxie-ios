@@ -443,11 +443,13 @@ public actor JourneyService: JourneyServiceProtocol {
         let value = payload["value"] ?? NSNull()
         let source = payload["source"] as? String
         let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+        let instanceId = payload["instanceId"] as? String
         let outcome = await runner.handleViewModelChanged(
           path: path,
           value: value,
           source: source,
-          screenId: screenId
+          screenId: screenId,
+          instanceId: instanceId
         )
         handleOutcome(outcome, journey: journey)
         persistJourney(journey)
