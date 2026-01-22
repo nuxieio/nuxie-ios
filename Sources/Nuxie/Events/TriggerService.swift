@@ -11,6 +11,24 @@ public protocol TriggerServiceProtocol: AnyObject {
   ) async
 }
 
+public extension TriggerServiceProtocol {
+  func trigger(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    userProperties: [String: Any]? = nil,
+    userPropertiesSetOnce: [String: Any]? = nil,
+    handler: @escaping (TriggerUpdate) -> Void
+  ) async {
+    await trigger(
+      event,
+      properties: properties,
+      userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce,
+      handler: handler
+    )
+  }
+}
+
 public actor TriggerService: TriggerServiceProtocol {
   @Injected(\.eventService) private var eventService: EventServiceProtocol
   @Injected(\.journeyService) private var journeyService: JourneyServiceProtocol
