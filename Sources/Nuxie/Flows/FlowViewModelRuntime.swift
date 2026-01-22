@@ -20,7 +20,7 @@ public final class FlowViewModelRuntime {
     private let flowDescription: FlowDescription
     private var viewModels: [String: ViewModel] = [:]
     private var instances: [String: FlowViewModelInstanceState] = [:]
-    private var instancesByViewModel: [String: [FlowViewModelInstanceState]] = [:]
+    private var instancesByViewModel: [String: [String]] = [:]
     private var screenDefaults: [String: (defaultViewModelId: String?, defaultInstanceId: String?)] = [:]
 
     public init(flowDescription: FlowDescription) {
@@ -44,7 +44,7 @@ public final class FlowViewModelRuntime {
             )
             self.instances[state.instanceId] = state
             var list = instancesByViewModel[state.viewModelId] ?? []
-            list.append(state)
+            list.append(state.instanceId)
             instancesByViewModel[state.viewModelId] = list
             applyViewModelDefaults(instanceId: state.instanceId)
         }
@@ -54,7 +54,7 @@ public final class FlowViewModelRuntime {
             if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
                 let blank = createBlankInstance(for: viewModel.id)
                 self.instances[blank.instanceId] = blank
-                instancesByViewModel[viewModel.id] = [blank]
+                instancesByViewModel[viewModel.id] = [blank.instanceId]
             }
         }
     }
@@ -84,7 +84,7 @@ public final class FlowViewModelRuntime {
             )
             instances[state.instanceId] = state
             var list = instancesByViewModel[state.viewModelId] ?? []
-            list.append(state)
+            list.append(state.instanceId)
             instancesByViewModel[state.viewModelId] = list
             applyViewModelDefaults(instanceId: state.instanceId)
         }
@@ -93,7 +93,7 @@ public final class FlowViewModelRuntime {
             if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
                 let blank = createBlankInstance(for: viewModel.id)
                 instances[blank.instanceId] = blank
-                instancesByViewModel[viewModel.id] = [blank]
+                instancesByViewModel[viewModel.id] = [blank.instanceId]
             }
         }
     }
@@ -277,10 +277,10 @@ public final class FlowViewModelRuntime {
             return instance
         }
 
-        if let viewModelId {
-            if let defaultInstance = instancesByViewModel[viewModelId]?.first {
-                return defaultInstance
-            }
+        if let viewModelId,
+           let defaultInstanceId = instancesByViewModel[viewModelId]?.first,
+           let defaultInstance = instances[defaultInstanceId] {
+            return defaultInstance
         }
 
         if let screenId, let defaults = screenDefaults[screenId] {
@@ -288,7 +288,8 @@ public final class FlowViewModelRuntime {
                 return instance
             }
             if let viewModelId = defaults.defaultViewModelId,
-               let instance = instancesByViewModel[viewModelId]?.first {
+               let instanceId = instancesByViewModel[viewModelId]?.first,
+               let instance = instances[instanceId] {
                 return instance
             }
         }
@@ -477,13 +478,16 @@ public final class FlowViewModelRuntime {
 
     private func createBlankInstance(for viewModelId: String) -> FlowViewModelInstanceState {
         let instanceId = "\(viewModelId)_default"
+        var values: [String: AnyCodable] = [:]
+        if let viewModel = viewModels[viewModelId] {
+            applyDefaults(schema: viewModel.properties, target: &values)
+        }
         let state = FlowViewModelInstanceState(
             viewModelId: viewModelId,
             instanceId: instanceId,
             name: "default",
-            values: [:]
+            values: values
         )
-        applyViewModelDefaults(instanceId: instanceId)
-        return instances[instanceId] ?? state
+        return state
     }
 }

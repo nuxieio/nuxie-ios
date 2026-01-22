@@ -38,8 +38,7 @@ final class NuxieApiTests: AsyncSpec {
                     // Setup stub response
                     let profileResponse = ResponseBuilders.buildProfileResponse(
                         campaigns: [ResponseBuilders.buildCampaign()],
-                        segments: [],
-                        flows: [ResponseBuilders.buildRemoteFlow()]
+                        segments: []
                     )
                     
                     StubURLProtocol.register(
@@ -58,7 +57,6 @@ final class NuxieApiTests: AsyncSpec {
                     
                     let result = try await api.fetchProfile(for: distinctId)
                     expect(result.campaigns).to(haveCount(1))
-                    expect(result.flows).to(haveCount(1))
                 }
                 
                 it("should handle network errors") {
@@ -111,8 +109,7 @@ final class NuxieApiTests: AsyncSpec {
                             
                             let response = ResponseBuilders.buildProfileResponse(
                                 campaigns: [],
-                                segments: [],
-                                flows: []
+                                segments: []
                             )
                             
                             let data = try ResponseBuilders.toJSON(response)
@@ -156,8 +153,7 @@ final class NuxieApiTests: AsyncSpec {
                             
                             let response = ResponseBuilders.buildProfileResponse(
                                 campaigns: [],
-                                segments: [],
-                                flows: []
+                                segments: []
                             )
                             
                             let data = try ResponseBuilders.toJSON(response)
@@ -360,7 +356,7 @@ final class NuxieApiTests: AsyncSpec {
                 let flowId = "flow-123"
                 
                 it("should successfully fetch flow") {
-                    let flow = ResponseBuilders.buildRemoteFlow(id: flowId)
+                    let flow = ResponseBuilders.buildFlowDescription(id: flowId)
                     
                     StubURLProtocol.register(
                         matcher: RequestMatchers.get("/api/i/flows/\(flowId)"),
@@ -379,7 +375,7 @@ final class NuxieApiTests: AsyncSpec {
                     let result = try await api.fetchFlow(flowId: flowId)
                     
                     expect(result.id).to(equal(flowId))
-                    expect(result.name).toNot(beEmpty())
+                    expect(result.bundle.url).toNot(beEmpty())
                 }
                 
                 it("should handle flow not found") {
@@ -410,7 +406,7 @@ final class NuxieApiTests: AsyncSpec {
                         handler: { request in
                             capturedRequest = request
                             
-                            let flow = ResponseBuilders.buildRemoteFlow(id: flowId)
+                            let flow = ResponseBuilders.buildFlowDescription(id: flowId)
                             let data = try ResponseBuilders.toJSON(flow)
                             let response = HTTPURLResponse(
                                 url: request.url!,

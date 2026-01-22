@@ -29,6 +29,10 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     private var activityIndicator: UIActivityIndicatorView!
     private var refreshButton: UIButton!
     private var closeButton: UIButton!
+
+    // Runtime readiness + message buffering
+    private var runtimeReady = false
+    private var pendingRuntimeMessages: [(type: String, payload: [String: Any], replyTo: String?)] = []
     
     // MARK: - Computed Properties
     
@@ -292,13 +296,21 @@ extension FlowViewController {
         replyTo: String? = nil,
         completion: ((Any?, Error?) -> Void)? = nil
     ) {
+        if !runtimeReady {
+            pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
+            return
+        }
         flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
     }
 
     // Handle @nuxie/bridge messages directly
     func messageHandler(_ handler: FlowMessageHandler, didReceiveBridgeMessage type: String, payload: [String : Any], id: String?, from webView: FlowWebView) {
         switch type {
-        case "runtime/ready", "runtime/screen_changed", "action/view_model_changed", "action/event":
+        case "runtime/ready":
+            runtimeReady = true
+            runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            flushPendingRuntimeMessages()
+        case "runtime/screen_changed", "action/view_model_changed", "action/event":
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
         case "action/purchase":
             if runtimeDelegate != nil {
@@ -323,7 +335,22 @@ extension FlowViewController {
                 UIApplication.shared.open(url)
             }
         default:
-            LogDebug("FlowViewController: Unhandled bridge message: \(type)")
+            if type.hasPrefix("action/") {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else {
+                LogDebug("FlowViewController: Unhandled bridge message: \(type)")
+            }
+        }
+    }
+}
+
+private extension FlowViewController {
+    func flushPendingRuntimeMessages() {
+        guard runtimeReady, !pendingRuntimeMessages.isEmpty else { return }
+        let queued = pendingRuntimeMessages
+        pendingRuntimeMessages.removeAll()
+        for message in queued {
+            flowWebView.sendBridgeMessage(type: message.type, payload: message.payload, replyTo: message.replyTo, completion: nil)
         }
     }
 }

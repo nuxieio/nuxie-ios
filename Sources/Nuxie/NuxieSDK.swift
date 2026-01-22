@@ -341,9 +341,9 @@ public final class NuxieSDK {
   }
 
 
-  // MARK: - Event History (Internal use for workflow evaluation)
+  // MARK: - Event History (Internal use for journey evaluation)
 
-  /// Get recent events for workflow evaluation
+  /// Get recent events for journey evaluation
   /// - Parameter limit: Maximum events to return (default: 100)
   /// - Returns: Array of recent events or empty array if storage unavailable
   internal func getRecentEvents(limit: Int = 100) async -> [StoredEvent] {

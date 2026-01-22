@@ -6,7 +6,6 @@ import FactoryKit
 class TestProfileResponseBuilder {
     private var campaigns: [Campaign] = []
     private var segments: [Segment] = []
-    private var flows: [RemoteFlow] = []
     private var userProperties: [String: AnyCodable]?
     private var experiments: [String: ExperimentAssignment]?
     private var features: [Feature]?
@@ -29,16 +28,6 @@ class TestProfileResponseBuilder {
     
     func addSegment(_ segment: Segment) -> TestProfileResponseBuilder {
         segments.append(segment)
-        return self
-    }
-    
-    func withFlows(_ flows: [RemoteFlow]) -> TestProfileResponseBuilder {
-        self.flows = flows
-        return self
-    }
-    
-    func addFlow(_ flow: RemoteFlow) -> TestProfileResponseBuilder {
-        flows.append(flow)
         return self
     }
     
@@ -73,7 +62,6 @@ class TestProfileResponseBuilder {
         return ProfileResponse(
             campaigns: campaigns,
             segments: segments,
-            flows: flows,
             userProperties: userProperties,
             experiments: experiments,
             features: features,

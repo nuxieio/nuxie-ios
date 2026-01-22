@@ -26,7 +26,7 @@ public struct ProfileResponse: Codable {
     public let experiments: [String: ExperimentAssignment]?
     /// Customer's feature access (from active subscriptions)
     public let features: [Feature]?
-    /// Active journeys for cross-device resume (server-assisted workflows)
+    /// Active journeys for cross-device resume (server-assisted journeys)
     public let journeys: [ActiveJourney]?
 
     public init(
@@ -240,39 +240,10 @@ public struct Campaign: Codable {
     public let campaignType: String? // Used for default conversion windows
 }
 
-public struct Workflow: Codable {
-    public let nodes: [AnyWorkflowNode]
-}
-
-
-
 public struct Segment: Codable {
     public let id: String
     public let name: String
     public let condition: IREnvelope  // Compiled IR expression from backend
-}
-
-// RemoteFlow represents immutable flow data from the server
-public struct RemoteFlow: Codable {
-    public let id: String
-    public let name: String
-    public let url: String
-    public let products: [RemoteFlowProduct]
-    public let manifest: BuildManifest
-}
-
-public struct Frame: Codable {
-    public let id: String
-    public let name: String
-    public let url: String
-    public let products: [RemoteFlowProduct]
-    public let manifest: BuildManifest?
-}
-
-public struct RemoteFlowProduct: Codable, Equatable {
-    public let id: String
-    public let extId: String
-    public let name: String
 }
 
 public struct BuildManifest: Codable, Equatable {

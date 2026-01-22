@@ -8,7 +8,7 @@ public protocol GoalEvaluatorProtocol {
   /// Check if a journey's goal has been met
   /// - Parameters:
   ///   - journey: The journey to evaluate
-  ///   - campaign: The campaign containing the workflow
+  ///   - campaign: The campaign containing the flow
   /// - Returns: Tuple of (met: whether goal was met, at: when it was met)
   func isGoalMet(journey: Journey, campaign: Campaign) async -> (met: Bool, at: Date?)
 }
