@@ -237,6 +237,82 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_trigger"))
             }
 
+            it("handles list_move, list_set, and list_clear actions") {
+                let flowId = "flow-list-ops"
+                let listProperty = ViewModelProperty(
+                    type: .list,
+                    propertyId: 2,
+                    defaultValue: AnyCodable(["a", "b", "c"]),
+                    required: nil,
+                    enumValues: nil,
+                    itemType: ViewModelProperty(
+                        type: .string,
+                        propertyId: 3,
+                        defaultValue: nil,
+                        required: nil,
+                        enumValues: nil,
+                        itemType: nil,
+                        schema: nil,
+                        viewModelId: nil,
+                        validation: nil
+                    ),
+                    schema: nil,
+                    viewModelId: nil,
+                    validation: nil
+                )
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    properties: [
+                        "items": listProperty
+                    ]
+                )
+                let interaction = Interaction(
+                    id: "int-ops",
+                    trigger: .screenShown,
+                    actions: [
+                        .listMove(ListMoveAction(
+                            path: .path("vm.items"),
+                            from: 0,
+                            to: 2
+                        )),
+                        .listSet(ListSetAction(
+                            path: .path("vm.items"),
+                            index: 1,
+                            value: AnyCodable(["literal": "z"] as [String: Any])
+                        )),
+                        .listClear(ListClearAction(path: .path("vm.items")))
+                    ],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-1": [interaction]],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleScreenChanged("screen-1")
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let items = values?["items"]?.value as? [Any]
+                expect(items?.isEmpty).to(equal(true))
+
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_move"))
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_set"))
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_clear"))
+            }
+
             it("executes after_delay interactions and clears pending snapshot") {
                 let flowId = "flow-after-delay"
                 let viewModel = ViewModel(
