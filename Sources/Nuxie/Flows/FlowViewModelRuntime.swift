@@ -17,24 +17,24 @@ private enum PathSegment {
 }
 
 public final class FlowViewModelRuntime {
-    private let flowDescription: FlowDescription
+    private let remoteFlow: RemoteFlow
     private var viewModels: [String: ViewModel] = [:]
     private var instances: [String: FlowViewModelInstanceState] = [:]
     private var instancesByViewModel: [String: [String]] = [:]
     private var screenDefaults: [String: (defaultViewModelId: String?, defaultInstanceId: String?)] = [:]
 
-    public init(flowDescription: FlowDescription) {
-        self.flowDescription = flowDescription
+    public init(remoteFlow: RemoteFlow) {
+        self.remoteFlow = remoteFlow
 
-        for model in flowDescription.viewModels {
+        for model in remoteFlow.viewModels {
             viewModels[model.id] = model
         }
 
-        for screen in flowDescription.screens {
+        for screen in remoteFlow.screens {
             screenDefaults[screen.id] = (screen.defaultViewModelId, screen.defaultInstanceId)
         }
 
-        let instances = flowDescription.viewModelInstances ?? []
+        let instances = remoteFlow.viewModelInstances ?? []
         for instance in instances {
             let state = FlowViewModelInstanceState(
                 viewModelId: instance.viewModelId,
@@ -50,7 +50,7 @@ public final class FlowViewModelRuntime {
         }
 
         // Ensure each view model has at least one instance
-        for viewModel in flowDescription.viewModels {
+        for viewModel in remoteFlow.viewModels {
             if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
                 let blank = createBlankInstance(for: viewModel.id)
                 self.instances[blank.instanceId] = blank
@@ -89,7 +89,7 @@ public final class FlowViewModelRuntime {
             applyViewModelDefaults(instanceId: state.instanceId)
         }
 
-        for viewModel in flowDescription.viewModels {
+        for viewModel in remoteFlow.viewModels {
             if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
                 let blank = createBlankInstance(for: viewModel.id)
                 instances[blank.instanceId] = blank
@@ -228,6 +228,19 @@ public final class FlowViewModelRuntime {
                    from >= 0, to >= 0, from < array.count, to < array.count {
                     array.swapAt(from, to)
                 }
+            case "move":
+                if let from = payload["from"] as? Int, let to = payload["to"] as? Int,
+                   from >= 0, to >= 0, from < array.count, to <= array.count {
+                    let item = array.remove(at: from)
+                    let target = min(max(to, 0), array.count)
+                    array.insert(item, at: target)
+                }
+            case "set":
+                if let index = payload["index"] as? Int, index >= 0, index < array.count {
+                    array[index] = payload["value"] ?? NSNull()
+                }
+            case "clear":
+                array.removeAll()
             default:
                 return false
             }
