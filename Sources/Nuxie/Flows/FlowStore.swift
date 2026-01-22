@@ -183,18 +183,90 @@ actor FlowStore {
     
     private func extractProductIds(from remoteFlow: RemoteFlow) -> [String] {
         var ids = Set<String>()
-        let viewModelsById = Dictionary(uniqueKeysWithValues: remoteFlow.viewModels.map { ($0.id, $0) })
-        
-        for instance in remoteFlow.viewModelInstances ?? [] {
-            guard let viewModel = viewModelsById[instance.viewModelId] else { continue }
-            collectProductIds(
-                schema: viewModel.properties,
-                values: instance.values,
-                into: &ids
-            )
+        let instances = remoteFlow.viewModelInstances ?? []
+        let instancesByViewModelId = Dictionary(grouping: instances, by: { $0.viewModelId })
+
+        for viewModel in remoteFlow.viewModels {
+            let defaults = buildDefaultValues(schema: viewModel.properties)
+            if let viewModelInstances = instancesByViewModelId[viewModel.id],
+               !viewModelInstances.isEmpty {
+                for instance in viewModelInstances {
+                    let mergedValues = mergeValues(defaults: defaults, overrides: instance.values)
+                    collectProductIds(
+                        schema: viewModel.properties,
+                        values: mergedValues,
+                        into: &ids
+                    )
+                }
+            } else if !defaults.isEmpty {
+                collectProductIds(
+                    schema: viewModel.properties,
+                    values: defaults,
+                    into: &ids
+                )
+            }
         }
-        
+
         return Array(ids)
+    }
+
+    private func buildDefaultValues(schema: [String: ViewModelProperty]) -> [String: AnyCodable] {
+        var values: [String: AnyCodable] = [:]
+
+        for (key, property) in schema {
+            if property.type == .object, let schema = property.schema {
+                let nestedDefaults = buildDefaultValues(schema: schema)
+                if !nestedDefaults.isEmpty {
+                    let raw = nestedDefaults.mapValues { $0.value }
+                    values[key] = AnyCodable(raw)
+                }
+            }
+
+            if values[key] == nil, let defaultValue = property.defaultValue {
+                values[key] = defaultValue
+            }
+        }
+
+        return values
+    }
+
+    private func mergeValues(
+        defaults: [String: AnyCodable],
+        overrides: [String: AnyCodable]
+    ) -> [String: AnyCodable] {
+        let defaultRaw = defaults.mapValues { unwrapAnyCodable($0.value) }
+        let overrideRaw = overrides.mapValues { unwrapAnyCodable($0.value) }
+        let merged = mergeRaw(defaultRaw, overrideRaw)
+        return merged.mapValues { AnyCodable($0) }
+    }
+
+    private func mergeRaw(_ base: [String: Any], _ overrides: [String: Any]) -> [String: Any] {
+        var result = base
+        for (key, value) in overrides {
+            if let baseDict = result[key] as? [String: Any],
+               let overrideDict = value as? [String: Any] {
+                result[key] = mergeRaw(baseDict, overrideDict)
+            } else {
+                result[key] = value
+            }
+        }
+        return result
+    }
+
+    private func unwrapAnyCodable(_ value: Any) -> Any {
+        if let dict = value as? [String: AnyCodable] {
+            return dict.mapValues { unwrapAnyCodable($0.value) }
+        }
+        if let dict = value as? [String: Any] {
+            return dict.mapValues { unwrapAnyCodable($0) }
+        }
+        if let list = value as? [AnyCodable] {
+            return list.map { unwrapAnyCodable($0.value) }
+        }
+        if let list = value as? [Any] {
+            return list.map { unwrapAnyCodable($0) }
+        }
+        return value
     }
     
     private func collectProductIds(
