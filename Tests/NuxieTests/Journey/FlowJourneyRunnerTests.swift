@@ -122,7 +122,10 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     id: "int-1",
                     trigger: .screenShown,
                     actions: [
-                        .setViewModel(SetViewModelAction(path: .path("vm.flag"), value: AnyCodable(["literal": true])))
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.flag"),
+                            value: AnyCodable(["literal": true] as [String: Any])
+                        ))
                     ],
                     enabled: true
                 )
@@ -198,7 +201,11 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     id: "int-1",
                     trigger: .screenShown,
                     actions: [
-                        .listInsert(ListInsertAction(path: .path("vm.items"), index: 0, value: AnyCodable(["literal": "a"]))),
+                        .listInsert(ListInsertAction(
+                            path: .path("vm.items"),
+                            index: 0,
+                            value: AnyCodable(["literal": "a"] as [String: Any])
+                        )),
                         .fireTrigger(FireTriggerAction(path: .path("vm.pulse")))
                     ],
                     enabled: true
