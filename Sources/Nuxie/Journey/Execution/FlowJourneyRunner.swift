@@ -34,7 +34,7 @@ final class FlowJourneyRunner {
     private let journey: Journey
     private let campaign: Campaign
     private let flow: Flow
-    private let flowDescription: FlowDescription
+    private let remoteFlow: RemoteFlow
     private let viewModels: FlowViewModelRuntime
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
@@ -60,6 +60,7 @@ final class FlowJourneyRunner {
     private var isProcessing = false
     private var isPaused = false
     private var debounceTasks: [String: Task<Void, Never>] = [:]
+    private var triggerResetTasks: [String: Task<Void, Never>] = [:]
 
     init(
         journey: Journey,
@@ -70,15 +71,15 @@ final class FlowJourneyRunner {
         self.journey = journey
         self.campaign = campaign
         self.flow = flow
-        self.flowDescription = flow.description
-        self.viewModels = FlowViewModelRuntime(flowDescription: flow.description)
+        self.remoteFlow = flow.remoteFlow
+        self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
         self.viewController = viewController
 
-        let interactions = flow.description.interactions
+        let interactions = flow.remoteFlow.interactions
         self.interactionsByScreen = interactions.screens
         self.interactionsByComponent = interactions.components ?? [:]
 
-        if let index = flow.description.pathIndex {
+        if let index = flow.remoteFlow.pathIndex {
             for (path, entry) in index {
                 let key = "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
                 pathIndexByIds[key] = path
@@ -112,7 +113,7 @@ final class FlowJourneyRunner {
             }
 
             if journey.flowState.currentScreenId == nil {
-                let fallback = flowDescription.entryScreenId ?? flowDescription.screens.first?.id
+                let fallback = remoteFlow.entryScreenId ?? remoteFlow.screens.first?.id
                 if let fallback {
                     await navigate(to: fallback, transition: nil)
                 }
@@ -143,7 +144,9 @@ final class FlowJourneyRunner {
         _ = viewModels.setValue(path: path, value: value, screenId: resolvedScreenId)
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
-        return await dispatchViewModelChanged(path: path, value: value, screenId: resolvedScreenId)
+        let outcome = await dispatchViewModelChanged(path: path, value: value, screenId: resolvedScreenId)
+        scheduleTriggerReset(path: path, screenId: resolvedScreenId)
+        return outcome
     }
 
     func dispatchEventTrigger(_ event: NuxieEvent) async -> RunOutcome? {
@@ -269,7 +272,7 @@ final class FlowJourneyRunner {
     }
 
     private func runEntryActionsIfNeeded() async -> RunOutcome? {
-        let actions = flowDescription.entryActions ?? []
+        let actions = remoteFlow.entryActions ?? []
         guard !actions.isEmpty else { return nil }
 
         enqueueActions(
@@ -826,6 +829,7 @@ final class FlowJourneyRunner {
         sendViewModelPatch(path: action.path, value: resolvedValue, source: "host")
 
         _ = await dispatchViewModelChanged(path: action.path, value: resolvedValue, screenId: screenId)
+        scheduleTriggerReset(path: action.path, screenId: screenId)
 
         return .continue
     }
@@ -842,6 +846,7 @@ final class FlowJourneyRunner {
         sendViewModelTrigger(path: action.path, value: timestamp)
 
         _ = await dispatchViewModelChanged(path: action.path, value: timestamp, screenId: screenId)
+        scheduleTriggerReset(path: action.path, screenId: screenId)
 
         return .continue
     }
@@ -988,13 +993,26 @@ final class FlowJourneyRunner {
         return await processQueue(resumeContext: nil)
     }
 
+    private func scheduleTriggerReset(path: VmPathRef, screenId: String?) {
+        guard viewModels.isTriggerPath(path: path, screenId: screenId) else { return }
+        let key = path.normalizedPath
+        triggerResetTasks[key]?.cancel()
+        triggerResetTasks[key] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000)
+            guard let self else { return }
+            _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId)
+            self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
+            self.sendViewModelTrigger(path: path, value: 0)
+        }
+    }
+
     private func resolveActions(
         interactionId: String,
         screenId: String?,
         componentId: String?
     ) -> [InteractionAction]? {
         if interactionId == "entry" {
-            return flowDescription.entryActions ?? []
+            return remoteFlow.entryActions ?? []
         }
 
         if let screenId,
@@ -1095,13 +1113,13 @@ final class FlowJourneyRunner {
     private func sendViewModelInit() {
         guard let controller = viewController else { return }
         let payload: [String: Any] = [
-            "viewModels": encodeJSON(flowDescription.viewModels) ?? [],
+            "viewModels": encodeJSON(remoteFlow.viewModels) ?? [],
             "instances": encodeJSON(viewModels.allInstances()) ?? [],
-            "converters": flowDescription.converters?.mapValues { value in
+            "converters": remoteFlow.converters?.mapValues { value in
                 value.mapValues { $0.value }
             } ?? [:],
             "screenDefaults": viewModels.screenDefaultsPayload(),
-            "pathIndex": encodeJSON(flowDescription.pathIndex ?? [:]) ?? [:],
+            "pathIndex": encodeJSON(remoteFlow.pathIndex ?? [:]) ?? [:],
         ]
 
         Task { @MainActor in
@@ -1232,7 +1250,7 @@ final class FlowJourneyRunner {
         case .ids(let ids):
             return "ids:\(ids.map(String.init).joined(separator: "."))"
         case .path(let path):
-            if let entry = flowDescription.pathIndex?[path] {
+            if let entry = remoteFlow.pathIndex?[path] {
                 return "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
             }
             return nil

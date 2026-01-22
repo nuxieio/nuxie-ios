@@ -71,6 +71,21 @@ public final class FlowViewModelRuntime {
         return FlowViewModelSnapshot(viewModelInstances: values)
     }
 
+    public func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
+        guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
+            return false
+        }
+        let normalized = resolvePathString(path)
+        let segments = parsePathSegments(normalized)
+        if segments.isEmpty { return false }
+
+        guard let viewModel = viewModels[instance.viewModelId] else { return false }
+        guard let property = resolveProperty(in: viewModel.properties, segments: segments) else {
+            return false
+        }
+        return property.type == .trigger
+    }
+
     public func hydrate(_ snapshot: FlowViewModelSnapshot) {
         instances.removeAll()
         instancesByViewModel.removeAll()
@@ -107,7 +122,7 @@ public final class FlowViewModelRuntime {
             return false
         }
 
-        let normalized = path.normalizedPath
+        let normalized = resolvePathString(path)
         let segments = parsePathSegments(normalized)
         let resolvedValue = resolveLiteralValue(value)
 
@@ -133,7 +148,7 @@ public final class FlowViewModelRuntime {
             return nil
         }
 
-        let normalized = path.normalizedPath
+        let normalized = resolvePathString(path)
         let segments = parsePathSegments(normalized)
 
         if segments.isEmpty {
@@ -178,7 +193,7 @@ public final class FlowViewModelRuntime {
             return false
         }
 
-        let normalized = path.normalizedPath
+        let normalized = resolvePathString(path)
         let segments = parsePathSegments(normalized)
         guard !segments.isEmpty else { return false }
 
@@ -312,6 +327,62 @@ public final class FlowViewModelRuntime {
         }
 
         return nil
+    }
+
+    private func resolvePathString(_ path: VmPathRef) -> String {
+        switch path {
+        case .path(let raw):
+            return raw
+        case .ids(let ids):
+            let key = "ids:\(ids.map(String.init).joined(separator: "."))"
+            return pathIndexByIds()[key] ?? key
+        case .raw(let raw):
+            return raw
+        }
+    }
+
+    private func pathIndexByIds() -> [String: String] {
+        guard let index = remoteFlow.pathIndex else { return [:] }
+        var lookup: [String: String] = [:]
+        for (path, entry) in index {
+            let key = "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
+            lookup[key] = path
+        }
+        return lookup
+    }
+
+    private func resolveProperty(
+        in schema: [String: ViewModelProperty],
+        segments: [PathSegment]
+    ) -> ViewModelProperty? {
+        guard let first = segments.first else { return nil }
+        guard case .prop(let name) = first else { return nil }
+        guard let property = schema[name] else { return nil }
+        let remaining = Array(segments.dropFirst())
+        return resolveProperty(property: property, remaining: remaining)
+    }
+
+    private func resolveProperty(
+        property: ViewModelProperty,
+        remaining: [PathSegment]
+    ) -> ViewModelProperty? {
+        if remaining.isEmpty { return property }
+
+        switch property.type {
+        case .object:
+            guard let schema = property.schema else { return nil }
+            return resolveProperty(in: schema, segments: remaining)
+        case .viewModel:
+            guard let viewModelId = property.viewModelId,
+                  let viewModel = viewModels[viewModelId] else { return nil }
+            return resolveProperty(in: viewModel.properties, segments: remaining)
+        case .list:
+            guard let next = remaining.first, case .index = next else { return nil }
+            guard let itemType = property.itemType else { return nil }
+            return resolveProperty(property: itemType, remaining: Array(remaining.dropFirst()))
+        default:
+            return nil
+        }
     }
 
     private func parsePathSegments(_ path: String) -> [PathSegment] {
