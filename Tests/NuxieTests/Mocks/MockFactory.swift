@@ -33,7 +33,6 @@ public class MockFactory {
     private lazy var _identityService = MockIdentityService()
     private lazy var _segmentService = MockSegmentService()
     private lazy var _journeyStore = MockJourneyStore()
-    private lazy var _journeyExecutor = MockJourneyExecutor()
     private lazy var _profileService = MockProfileService()
     private lazy var _eventService = MockEventService()
     private lazy var _eventStore = MockEventStore()
@@ -48,7 +47,6 @@ public class MockFactory {
     public var identityService: MockIdentityService { Self.markUsed(); return _identityService }
     public var segmentService: MockSegmentService { Self.markUsed(); return _segmentService }
     public var journeyStore: MockJourneyStore { Self.markUsed(); return _journeyStore }
-    public var journeyExecutor: MockJourneyExecutor { Self.markUsed(); return _journeyExecutor }
     public var profileService: MockProfileService { Self.markUsed(); return _profileService }
     public var eventService: MockEventService { Self.markUsed(); return _eventService }
     public var eventStore: MockEventStore { Self.markUsed(); return _eventStore }
@@ -65,7 +63,6 @@ public class MockFactory {
         identityService.reset()
         await segmentService.reset()
         journeyStore.reset()
-        journeyExecutor.reset()
         profileService.reset()
         eventService.reset()
         await eventStore.reset()
@@ -86,8 +83,7 @@ public class MockFactory {
 
         Container.shared.identityService.register { self.identityService }
         Container.shared.segmentService.register { self.segmentService }
-        // journeyStore and journeyExecutor are no longer registered in the container
-        // They are injected directly into JourneyService via constructor
+        // journeyStore is injected directly into JourneyService via constructor
         Container.shared.profileService.register { self.profileService }
         Container.shared.eventService.register { self.eventService }
         Container.shared.nuxieApi.register { self.nuxieApi }
@@ -107,8 +103,7 @@ public class MockFactory {
 
         Container.shared.identityService.register { self.identityService }
         Container.shared.segmentService.register { self.segmentService }
-        // journeyStore and journeyExecutor are no longer registered in the container
-        // They are injected directly into JourneyService via constructor
+        // journeyStore is injected directly into JourneyService via constructor
         Container.shared.profileService.register { self.profileService }
         Container.shared.eventService.register { self.eventService }
         Container.shared.nuxieApi.register { self.nuxieApi }

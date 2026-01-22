@@ -101,7 +101,17 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         
         // 6. Present flow
         await window.present(flowViewController)
-        
+
+        if let journey = journey {
+            eventService.track(
+                JourneyEvents.flowShown,
+                properties: JourneyEvents.flowShownProperties(flowId: flowId, journey: journey),
+                userProperties: nil,
+                userPropertiesSetOnce: nil,
+                completion: nil
+            )
+        }
+
         LogDebug("FlowPresentationService: Successfully presented flow \(flowId)")
         return flowViewController
     }

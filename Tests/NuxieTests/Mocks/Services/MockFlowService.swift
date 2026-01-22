@@ -3,7 +3,7 @@ import Foundation
 
 /// Mock implementation of FlowService for testing
 public class MockFlowService: FlowServiceProtocol {
-    public var prefetchedFlows: [RemoteFlow] = []
+    public var prefetchedFlows: [FlowDescription] = []
     public var removedFlowIds: [String] = []
     
     // Error testing properties
@@ -18,8 +18,8 @@ public class MockFlowService: FlowServiceProtocol {
     public var mockViewControllers: [String: FlowViewController] = [:]
     public var defaultMockViewController: FlowViewController?
     
-    public func prefetchFlows(_ flows: [RemoteFlow]) {
-        prefetchedFlows.append(contentsOf: flows)
+    public func prefetchFlows(_ descriptions: [FlowDescription]) {
+        prefetchedFlows.append(contentsOf: descriptions)
     }
     
     public func removeFlows(_ flowIds: [String]) async {
@@ -48,6 +48,13 @@ public class MockFlowService: FlowServiceProtocol {
         
         // Create a basic mock view controller
         return MockFlowViewController(mockFlowId: flowId)
+    }
+
+    @MainActor
+    public func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+        let controller = try await viewController(for: flowId)
+        controller.runtimeDelegate = runtimeDelegate
+        return controller
     }
     
     public func clearCache() async {

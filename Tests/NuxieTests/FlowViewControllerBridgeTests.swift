@@ -6,14 +6,29 @@ import WebKit
 final class FlowViewControllerBridgeSpec: QuickSpec {
     private func makeFlow(products: [FlowProduct] = []) -> Flow {
         let manifest = BuildManifest(totalFiles: 0, totalSize: 0, contentHash: "hash", files: [])
-        let remote = RemoteFlow(
+        let description = FlowDescription(
             id: "flow1",
-            name: "Test",
-            url: "about:blank",
-            products: [],
-            manifest: manifest
+            version: "v1",
+            bundle: FlowBundleRef(url: "about:blank", manifest: manifest),
+            entryScreenId: "screen-1",
+            entryActions: nil,
+            screens: [
+                FlowDescriptionScreen(
+                    id: "screen-1",
+                    name: nil,
+                    locale: nil,
+                    route: nil,
+                    defaultViewModelId: nil,
+                    defaultInstanceId: nil
+                )
+            ],
+            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            viewModels: [],
+            viewModelInstances: nil,
+            converters: nil,
+            pathIndex: nil
         )
-        return Flow(remoteFlow: remote, products: products)
+        return Flow(description: description, products: products)
     }
 
     private func loadHTML(_ webView: FlowWebView, html: String) {
@@ -68,24 +83,6 @@ final class FlowViewControllerBridgeSpec: QuickSpec {
     }
     override class func spec() {
         describe("FlowViewController bridge") {
-            it("responds to request_products with set_products") {
-                let flow = FlowViewControllerBridgeSpec().makeFlow(products: [FlowProduct(id: "pro", name: "Pro", price: "$9", period: .month)])
-                let vc = FlowViewController(flow: flow, archiveService: FlowArchiver())
-                _ = vc.view
-                FlowViewControllerBridgeSpec().injectBootstrap(vc.flowWebView)
-
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'request_products' })") { _, _ in }
-                waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
-                let msgs = FlowViewControllerBridgeSpec().getMessages(vc.flowWebView)
-                expect(msgs.count).to(beGreaterThanOrEqualTo(1))
-                let match = msgs.first { ($0["type"] as? String) == "set_products" }
-                expect(match).toNot(beNil())
-                let pl = match?["payload"] as? [String: Any]
-                let products = pl?["products"] as? [[String: Any]]
-                expect(products?.count).to(equal(1))
-                expect(products?.first?["id"] as? String).to(equal("pro"))
-            }
-
             it("dismiss triggers onClose userDismissed") {
                 let vc = FlowViewController(flow: FlowViewControllerBridgeSpec().makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view

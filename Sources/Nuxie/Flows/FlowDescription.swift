@@ -276,6 +276,10 @@ public enum InteractionAction: Codable {
     case callDelegate(CallDelegateAction)
     case remote(RemoteAction)
     case setViewModel(SetViewModelAction)
+    case fireTrigger(FireTriggerAction)
+    case listInsert(ListInsertAction)
+    case listRemove(ListRemoveAction)
+    case listSwap(ListSwapAction)
     case exit(ExitAction)
     case unknown(type: String, payload: [String: AnyCodable])
 
@@ -296,6 +300,10 @@ public enum InteractionAction: Codable {
         case callDelegate = "call_delegate"
         case remote
         case setViewModel = "set_view_model"
+        case fireTrigger = "fire_trigger"
+        case listInsert = "list_insert"
+        case listRemove = "list_remove"
+        case listSwap = "list_swap"
         case exit
     }
 
@@ -327,6 +335,14 @@ public enum InteractionAction: Codable {
             self = .remote(try RemoteAction(from: decoder))
         case .setViewModel:
             self = .setViewModel(try SetViewModelAction(from: decoder))
+        case .fireTrigger:
+            self = .fireTrigger(try FireTriggerAction(from: decoder))
+        case .listInsert:
+            self = .listInsert(try ListInsertAction(from: decoder))
+        case .listRemove:
+            self = .listRemove(try ListRemoveAction(from: decoder))
+        case .listSwap:
+            self = .listSwap(try ListSwapAction(from: decoder))
         case .exit:
             self = .exit(try ExitAction(from: decoder))
         case .none:
@@ -365,6 +381,14 @@ public enum InteractionAction: Codable {
         case .remote(let action):
             try action.encode(to: encoder)
         case .setViewModel(let action):
+            try action.encode(to: encoder)
+        case .fireTrigger(let action):
+            try action.encode(to: encoder)
+        case .listInsert(let action):
+            try action.encode(to: encoder)
+        case .listRemove(let action):
+            try action.encode(to: encoder)
+        case .listSwap(let action):
             try action.encode(to: encoder)
         case .exit(let action):
             try action.encode(to: encoder)
@@ -542,6 +566,56 @@ public struct SetViewModelAction: Codable {
         self.type = type
         self.path = path
         self.value = value
+    }
+}
+
+public struct FireTriggerAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+
+    public init(type: String = "fire_trigger", path: VmPathRef) {
+        self.type = type
+        self.path = path
+    }
+}
+
+public struct ListInsertAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+    public let index: Int?
+    public let value: AnyCodable
+
+    public init(type: String = "list_insert", path: VmPathRef, index: Int? = nil, value: AnyCodable) {
+        self.type = type
+        self.path = path
+        self.index = index
+        self.value = value
+    }
+}
+
+public struct ListRemoveAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+    public let index: Int
+
+    public init(type: String = "list_remove", path: VmPathRef, index: Int) {
+        self.type = type
+        self.path = path
+        self.index = index
+    }
+}
+
+public struct ListSwapAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+    public let indexA: Int
+    public let indexB: Int
+
+    public init(type: String = "list_swap", path: VmPathRef, indexA: Int, indexB: Int) {
+        self.type = type
+        self.path = path
+        self.indexA = indexA
+        self.indexB = indexB
     }
 }
 

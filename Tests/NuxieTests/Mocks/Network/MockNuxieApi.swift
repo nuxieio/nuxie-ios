@@ -53,9 +53,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
             name: "Test Campaign",
             versionId: "version-1",
             versionNumber: 1,
-            frequencyPolicy: "unlimited",
-            frequencyInterval: nil,
-            messageLimit: nil,
+            versionName: nil,
+            reentry: .everyTime,
             publishedAt: "2024-01-01T00:00:00Z",
             trigger: .event(EventTriggerConfig(
                 eventName: "test_event",
@@ -66,8 +65,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
                     expr: .bool(true)
                 )
             )),
-            entryNodeId: "node-1",
-            workflow: Workflow(nodes: []),
+            flowId: "flow-1",
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
@@ -85,23 +83,9 @@ public actor MockNuxieApi: NuxieApiProtocol {
             )
         )
         
-        let flow = RemoteFlow(
-            id: "flow-1",
-            name: "Test Flow",
-            url: "https://example.com/flow",
-            products: [],
-            manifest: BuildManifest(
-                totalFiles: 5,
-                totalSize: 1024,
-                contentHash: "hash123",
-                files: []
-            )
-        )
-        
         self.profileResponse = ProfileResponse(
             campaigns: [campaign],
             segments: [segment],
-            flows: [flow],
             userProperties: nil,
             experiments: nil,
             features: nil,
@@ -185,24 +169,42 @@ public actor MockNuxieApi: NuxieApiProtocol {
         return try await fetchProfile(for: distinctId, locale: locale)
     }
     
-    public func fetchFlow(flowId: String) async throws -> RemoteFlow {
+    public func fetchFlow(flowId: String) async throws -> FlowDescription {
         fetchFlowCallCount += 1
         
         if shouldFailFlow {
             throw NuxieNetworkError.httpError(statusCode: 404, message: "Flow not found")
         }
         
-        return RemoteFlow(
+        return FlowDescription(
             id: flowId,
-            name: "Test Flow",
-            url: "https://example.com/flow",
-            products: [],
-            manifest: BuildManifest(
-                totalFiles: 5,
-                totalSize: 1024,
-                contentHash: "hash123",
-                files: []
-            )
+            version: "v1",
+            bundle: FlowBundleRef(
+                url: "https://example.com/flow",
+                manifest: BuildManifest(
+                    totalFiles: 5,
+                    totalSize: 1024,
+                    contentHash: "hash123",
+                    files: []
+                )
+            ),
+            entryScreenId: "screen-1",
+            entryActions: nil,
+            screens: [
+                FlowDescriptionScreen(
+                    id: "screen-1",
+                    name: nil,
+                    locale: nil,
+                    route: nil,
+                    defaultViewModelId: nil,
+                    defaultInstanceId: nil
+                )
+            ],
+            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            viewModels: [],
+            viewModelInstances: nil,
+            converters: nil,
+            pathIndex: nil
         )
     }
     

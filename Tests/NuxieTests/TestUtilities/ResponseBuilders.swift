@@ -9,7 +9,6 @@ struct ResponseBuilders {
     static func buildProfileResponse(
         campaigns: [Campaign] = [],
         segments: [Segment] = [],
-        flows: [RemoteFlow] = [],
         userProperties: [String: AnyCodable]? = nil,
         experiments: [String: ExperimentAssignment]? = nil,
         features: [Feature]? = nil,
@@ -18,7 +17,6 @@ struct ResponseBuilders {
         return ProfileResponse(
             campaigns: campaigns,
             segments: segments,
-            flows: flows,
             userProperties: userProperties,
             experiments: experiments,
             features: features,
@@ -39,16 +37,14 @@ struct ResponseBuilders {
             name: name,
             versionId: versionId,
             versionNumber: versionNumber,
-            frequencyPolicy: "once",
-            frequencyInterval: nil,
-            messageLimit: nil,
+            versionName: nil,
+            reentry: .oneTime,
             publishedAt: Date().ISO8601Format(),
             trigger: .event(EventTriggerConfig(
                 eventName: eventName,
                 condition: nil
             )),
-            entryNodeId: nil,
-            workflow: Workflow(nodes: []),
+            flowId: "flow-1",
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
@@ -127,32 +123,37 @@ struct ResponseBuilders {
     }
     
     // MARK: - Flow Response
-    
-    static func buildRemoteFlow(
+
+    static func buildFlowDescription(
         id: String = "flow-1",
-        name: String = "Test Flow",
+        version: String = "v1",
         url: String = "https://example.com/builds/flow-1",
-        products: [RemoteFlowProduct] = [],
         manifest: BuildManifest? = nil
-    ) -> RemoteFlow {
-        return RemoteFlow(
+    ) -> FlowDescription {
+        return FlowDescription(
             id: id,
-            name: name,
-            url: url,
-            products: products,
-            manifest: manifest ?? buildManifest(files: [])
-        )
-    }
-    
-    static func buildRemoteFlowProduct(
-        id: String = "product-1",
-        extId: String = "com.example.premium",
-        name: String = "Premium"
-    ) -> RemoteFlowProduct {
-        return RemoteFlowProduct(
-            id: id,
-            extId: extId,
-            name: name
+            version: version,
+            bundle: FlowBundleRef(
+                url: url,
+                manifest: manifest ?? buildManifest(files: [])
+            ),
+            entryScreenId: "screen-1",
+            entryActions: nil,
+            screens: [
+                FlowDescriptionScreen(
+                    id: "screen-1",
+                    name: nil,
+                    locale: nil,
+                    route: nil,
+                    defaultViewModelId: nil,
+                    defaultInstanceId: nil
+                )
+            ],
+            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            viewModels: [],
+            viewModelInstances: nil,
+            converters: nil,
+            pathIndex: nil
         )
     }
     

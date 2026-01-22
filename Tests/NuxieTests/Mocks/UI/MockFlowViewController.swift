@@ -17,22 +17,40 @@ class MockFlowViewController: FlowViewController {
     
     /// Create a mock flow view controller with test data
     init(mockFlowId: String = "test-flow") {
-        let remoteFlow = RemoteFlow(
+        let description = FlowDescription(
             id: mockFlowId,
-            name: "Test Flow",
-            url: "https://example.com/flow/\(mockFlowId)",
-            products: [],
-            manifest: BuildManifest(
-                totalFiles: 1,
-                totalSize: 100,
-                contentHash: "test-hash",
-                files: [
-                    BuildFile(path: "index.html", size: 100, contentType: "text/html")
-                ]
-            )
+            version: "v1",
+            bundle: FlowBundleRef(
+                url: "https://example.com/flow/\(mockFlowId)",
+                manifest: BuildManifest(
+                    totalFiles: 1,
+                    totalSize: 100,
+                    contentHash: "test-hash",
+                    files: [
+                        BuildFile(path: "index.html", size: 100, contentType: "text/html")
+                    ]
+                )
+            ),
+            entryScreenId: "screen-1",
+            entryActions: nil,
+            screens: [
+                FlowDescriptionScreen(
+                    id: "screen-1",
+                    name: nil,
+                    locale: nil,
+                    route: nil,
+                    defaultViewModelId: nil,
+                    defaultInstanceId: nil
+                )
+            ],
+            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            viewModels: [],
+            viewModelInstances: nil,
+            converters: nil,
+            pathIndex: nil
         )
-        
-        let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+        let flow = Flow(description: description, products: [])
         // Create a mock FlowArchiver for testing
         let mockArchiver = FlowArchiver()
         super.init(flow: flow, archiveService: mockArchiver)

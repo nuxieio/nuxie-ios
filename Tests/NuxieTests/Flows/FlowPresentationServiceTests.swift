@@ -41,6 +41,25 @@ final class FlowPresentationServiceTests: AsyncSpec {
             // Create service with mock window provider
             service = FlowPresentationService(windowProvider: mockWindowProvider)
         }
+
+        func makeCampaign(id: String) -> Campaign {
+            let publishedAt = ISO8601DateFormatter().string(from: Date())
+            return Campaign(
+                id: id,
+                name: "Test Campaign",
+                versionId: "v1",
+                versionNumber: 1,
+                versionName: nil,
+                reentry: .oneTime,
+                publishedAt: publishedAt,
+                trigger: .event(EventTriggerConfig(eventName: "test_event", condition: nil)),
+                flowId: "flow-test",
+                goal: nil,
+                exitPolicy: nil,
+                conversionAnchor: nil,
+                campaignType: nil
+            )
+        }
         
         afterEach { @MainActor in
             // Clean up
@@ -234,12 +253,8 @@ final class FlowPresentationServiceTests: AsyncSpec {
         describe("journey integration") {
             it("should accept journey context") { @MainActor in
                 // Create mock campaign and journey using TestBuilders
-                let campaign = TestCampaignBuilder(id: "campaign-1")
-                    .withName("Test Campaign")
-                    .withFrequencyPolicy("once_per_user")
-                    .withEventTrigger(eventName: "test_event")
-                    .build()
-                
+                let campaign = makeCampaign(id: "campaign-1")
+
                 let journey = Journey(
                     campaign: campaign,
                     distinctId: "user-1"

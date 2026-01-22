@@ -12,8 +12,29 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
 
             func makeFlow(products: [FlowProduct] = []) -> Flow {
                 let manifest = BuildManifest(totalFiles: 0, totalSize: 0, contentHash: "hash", files: [])
-                let remote = RemoteFlow(id: "flow1", name: "Test", url: "about:blank", products: [], manifest: manifest)
-                return Flow(remoteFlow: remote, products: products)
+                let description = FlowDescription(
+                    id: "flow1",
+                    version: "v1",
+                    bundle: FlowBundleRef(url: "about:blank", manifest: manifest),
+                    entryScreenId: "screen-1",
+                    entryActions: nil,
+                    screens: [
+                        FlowDescriptionScreen(
+                            id: "screen-1",
+                            name: nil,
+                            locale: nil,
+                            route: nil,
+                            defaultViewModelId: nil,
+                            defaultInstanceId: nil
+                        )
+                    ],
+                    interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+                    viewModels: [],
+                    viewModelInstances: nil,
+                    converters: nil,
+                    pathIndex: nil
+                )
+                return Flow(description: description, products: products)
             }
 
             func injectBootstrap(_ webView: FlowWebView) {
@@ -62,7 +83,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "purchase_success" }
@@ -79,7 +100,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "purchase_cancelled" }
@@ -94,7 +115,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "purchase_error" }
@@ -108,7 +129,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'restore' })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/restore' })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "restore_success" }
@@ -120,7 +141,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'restore' })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/restore' })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "restore_error" }
