@@ -16,15 +16,24 @@ private enum PathSegment {
     case index(String)
 }
 
+private struct ResolvedPathInfo {
+    let instance: FlowViewModelInstanceState?
+    let segments: [PathSegment]
+    let rawPath: String
+    let viewModel: ViewModel?
+}
+
 public final class FlowViewModelRuntime {
     private let remoteFlow: RemoteFlow
     private var viewModels: [String: ViewModel] = [:]
+    private var viewModelList: [ViewModel] = []
     private var instances: [String: FlowViewModelInstanceState] = [:]
     private var instancesByViewModel: [String: [String]] = [:]
     private var screenDefaults: [String: (defaultViewModelId: String?, defaultInstanceId: String?)] = [:]
 
     public init(remoteFlow: RemoteFlow) {
         self.remoteFlow = remoteFlow
+        self.viewModelList = remoteFlow.viewModels
 
         for model in remoteFlow.viewModels {
             viewModels[model.id] = model
@@ -72,15 +81,13 @@ public final class FlowViewModelRuntime {
     }
 
     public func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
-        guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
-            return false
-        }
-        let normalized = resolvePathString(path)
-        let segments = parsePathSegments(normalized)
-        if segments.isEmpty { return false }
+        let resolved = resolvePathInfo(path, screenId: screenId)
+        guard let instance = resolved.instance else { return false }
+        if resolved.segments.isEmpty { return false }
 
-        guard let viewModel = viewModels[instance.viewModelId] else { return false }
-        guard let property = resolveProperty(in: viewModel.properties, segments: segments) else {
+        let viewModel = resolved.viewModel ?? viewModels[instance.viewModelId]
+        guard let viewModel else { return false }
+        guard let property = resolveProperty(in: viewModel.properties, segments: resolved.segments) else {
             return false
         }
         return property.type == .trigger
@@ -118,16 +125,14 @@ public final class FlowViewModelRuntime {
         value: Any,
         screenId: String?
     ) -> Bool {
-        guard var instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
-            return false
-        }
+        let resolved = resolvePathInfo(path, screenId: screenId)
+        guard var instance = resolved.instance else { return false }
 
-        let normalized = resolvePathString(path)
-        let segments = parsePathSegments(normalized)
+        let segments = resolved.segments
         let resolvedValue = resolveLiteralValue(value)
 
         if segments.isEmpty {
-            instance.values[normalized] = AnyCodable(resolvedValue)
+            instance.values[resolved.rawPath] = AnyCodable(resolvedValue)
             instances[instance.instanceId] = instance
             return true
         }
@@ -144,15 +149,13 @@ public final class FlowViewModelRuntime {
     }
 
     public func getValue(path: VmPathRef, screenId: String?) -> Any? {
-        guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
-            return nil
-        }
+        let resolved = resolvePathInfo(path, screenId: screenId)
+        guard let instance = resolved.instance else { return nil }
 
-        let normalized = resolvePathString(path)
-        let segments = parsePathSegments(normalized)
+        let segments = resolved.segments
 
         if segments.isEmpty {
-            return instance.values[normalized]?.value
+            return instance.values[resolved.rawPath]?.value
         }
 
         var current: Any = instance.values
@@ -189,12 +192,10 @@ public final class FlowViewModelRuntime {
         payload: [String: Any],
         screenId: String?
     ) -> Bool {
-        guard var instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
-            return false
-        }
+        let resolved = resolvePathInfo(path, screenId: screenId)
+        guard var instance = resolved.instance else { return false }
 
-        let normalized = resolvePathString(path)
-        let segments = parsePathSegments(normalized)
+        let segments = resolved.segments
         guard !segments.isEmpty else { return false }
 
         var current: Any = instance.values
@@ -326,6 +327,96 @@ public final class FlowViewModelRuntime {
             return first
         }
 
+        return nil
+    }
+
+    private func resolvePathInfo(
+        _ path: VmPathRef,
+        screenId: String?
+    ) -> ResolvedPathInfo {
+        switch path {
+        case .ids(let ids):
+            if let resolved = resolvePathIds(ids) {
+                let instance = resolveInstance(
+                    screenId: screenId,
+                    viewModelId: resolved.viewModelId,
+                    instanceId: nil
+                )
+                return ResolvedPathInfo(
+                    instance: instance,
+                    segments: resolved.segments,
+                    rawPath: path.normalizedPath,
+                    viewModel: viewModels[resolved.viewModelId]
+                )
+            }
+            let rawPath = resolvePathString(path)
+            let segments = parsePathSegments(rawPath)
+            let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil)
+            return ResolvedPathInfo(
+                instance: instance,
+                segments: segments,
+                rawPath: rawPath,
+                viewModel: instance.flatMap { viewModels[$0.viewModelId] }
+            )
+        default:
+            let rawPath = resolvePathString(path)
+            let segments = parsePathSegments(rawPath)
+            let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil)
+            return ResolvedPathInfo(
+                instance: instance,
+                segments: segments,
+                rawPath: rawPath,
+                viewModel: instance.flatMap { viewModels[$0.viewModelId] }
+            )
+        }
+    }
+
+    private func resolvePathIds(
+        _ pathIds: [Int]
+    ) -> (viewModelId: String, segments: [PathSegment])? {
+        guard let viewModelIndex = pathIds.first else { return nil }
+        guard viewModelIndex >= 0, viewModelIndex < viewModelList.count else { return nil }
+        let viewModel = viewModelList[viewModelIndex]
+        let propertyIds = Array(pathIds.dropFirst())
+        guard !propertyIds.isEmpty else { return nil }
+
+        var schema = viewModel.properties
+        var segments: [PathSegment] = []
+
+        for (idx, propertyId) in propertyIds.enumerated() {
+            guard let found = findPropertyById(in: schema, propertyId: propertyId) else {
+                return nil
+            }
+            segments.append(.prop(found.name))
+
+            if idx == propertyIds.count - 1 { continue }
+            switch found.property.type {
+            case .object:
+                guard let nested = found.property.schema else { return nil }
+                schema = nested
+            case .viewModel:
+                guard let nestedId = found.property.viewModelId,
+                      let nested = viewModels[nestedId] else { return nil }
+                schema = nested.properties
+            case .list:
+                return nil
+            default:
+                return nil
+            }
+        }
+
+        return (viewModel.id, segments)
+    }
+
+    private func findPropertyById(
+        in schema: [String: ViewModelProperty],
+        propertyId: Int
+    ) -> (name: String, property: ViewModelProperty)? {
+        for (name, property) in schema {
+            if property.propertyId == propertyId {
+                return (name, property)
+            }
+        }
         return nil
     }
 
