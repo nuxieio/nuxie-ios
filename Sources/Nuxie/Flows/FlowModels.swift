@@ -2,30 +2,30 @@ import Foundation
 
 // MARK: - Client-Side Flow Model
 
-/// Client-side flow model that enriches RemoteFlow with local state and product data
+/// Client-side flow model that enriches FlowDescription with local state and product data
 public struct Flow {
-    // IMPORTANT: RemoteFlow is immutable server data - never modify
-    public let remoteFlow: RemoteFlow              // Original data from ProfileManager/API
+    // IMPORTANT: FlowDescription is immutable server data - never modify
+    public let description: FlowDescription              // Original data from API
     
     // Client-side enrichments
     public var products: [FlowProduct]         // Products fetched from StoreKit
     
     // Convenience accessors proxy to remoteFlow for common properties
-    public var id: String { remoteFlow.id }
-    public var name: String { remoteFlow.name }
-    public var manifest: BuildManifest { remoteFlow.manifest }
-    public var url: String { remoteFlow.url }
+    public var id: String { description.id }
+    public var name: String { description.id }
+    public var manifest: BuildManifest? { description.bundle.manifest }
+    public var url: String { description.bundle.url }
     
     // Validation
     public var isValid: Bool {
-        !products.isEmpty
+        true
     }
     
     public init(
-        remoteFlow: RemoteFlow,
+        description: FlowDescription,
         products: [FlowProduct] = []
     ) {
-        self.remoteFlow = remoteFlow
+        self.description = description
         self.products = products
     }
 }
@@ -163,19 +163,4 @@ public struct FlowCacheKey: Hashable {
 
 // MARK: - Flow Changes
 
-/// Result of diffing flows between profile updates
-public struct FlowChanges {
-    public let added: [RemoteFlow]
-    public let updated: [RemoteFlow]
-    public let removed: [String]  // Just IDs for removals
-    
-    public var hasChanges: Bool {
-        !added.isEmpty || !updated.isEmpty || !removed.isEmpty
-    }
-    
-    public init(added: [RemoteFlow] = [], updated: [RemoteFlow] = [], removed: [String] = []) {
-        self.added = added
-        self.updated = updated
-        self.removed = removed
-    }
-}
+// FlowChanges removed (profile no longer returns flow bundles directly)

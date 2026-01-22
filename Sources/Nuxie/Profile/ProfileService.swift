@@ -55,15 +55,11 @@ internal actor ProfileService: ProfileServiceProtocol {
     // Disk cache for persistence
     private let diskCache: any CachedProfileStore
     
-    // Flow tracking
-    private var currentFlows: [RemoteFlow] = []
-    
     // Background refresh timer
     private var refreshTimer: Task<Void, Never>?
 
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
-    @Injected(\.flowService) private var flowService: FlowServiceProtocol
     @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
     // Note: journeyService is resolved lazily in resumeActiveJourneys to avoid circular dependency
     // (JourneyService → ProfileService → JourneyService)
@@ -403,8 +399,6 @@ internal actor ProfileService: ProfileServiceProtocol {
         }
     }
     
-    // MARK: - Flow lifecycle (unchanged from your version, but stays actor-isolated)
-
     private func handleProfileUpdate(_ profile: ProfileResponse) async {
         // Get the current distinct ID for explicit attribution
         let distinctId = identityService.getDistinctId()
@@ -430,56 +424,6 @@ internal actor ProfileService: ProfileServiceProtocol {
             await Container.shared.journeyService().resumeFromServerState(journeys, campaigns: profile.campaigns)
         }
 
-        // Diff flows
-        let changes = diffFlows(oldFlows: currentFlows, newFlows: profile.flows)
-        guard changes.hasChanges else {
-            LogDebug("No flow changes detected in profile update")
-            return
-        }
-
-        LogInfo(
-            "Flow changes - Added: \(changes.added.count), Updated: \(changes.updated.count), Removed: \(changes.removed.count)"
-        )
-
-        if !changes.added.isEmpty {
-            flowService.prefetchFlows(changes.added)
-        }
-        if !changes.updated.isEmpty {
-            await flowService.removeFlows(changes.updated.map { $0.id })
-            flowService.prefetchFlows(changes.updated)
-        }
-        if !changes.removed.isEmpty {
-            await flowService.removeFlows(changes.removed)
-        }
-
-        currentFlows = profile.flows
     }
-
-    private func diffFlows(oldFlows: [RemoteFlow], newFlows: [RemoteFlow]) -> FlowChanges {
-        let oldById = Dictionary(uniqueKeysWithValues: oldFlows.map { ($0.id, $0) })
-        let newById = Dictionary(uniqueKeysWithValues: newFlows.map { ($0.id, $0) })
-
-        var added: [RemoteFlow] = []
-        var updated: [RemoteFlow] = []
-        var removed: [String] = []
-
-        for (id, newFlow) in newById {
-            if let oldFlow = oldById[id] {
-                if oldFlow.manifest.contentHash != newFlow.manifest.contentHash {
-                    updated.append(newFlow)
-                    LogDebug("Flow updated: \(newFlow.name) (hash changed)")
-                }
-            } else {
-                added.append(newFlow)
-                LogDebug("Flow added: \(newFlow.name)")
-            }
-        }
-
-        for id in oldById.keys where newById[id] == nil {
-            removed.append(id)
-            LogDebug("Flow removed: \(id)")
-        }
-
-        return FlowChanges(added: added, updated: updated, removed: removed)
-    }
+}
 }

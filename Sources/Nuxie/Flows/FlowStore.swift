@@ -7,7 +7,7 @@ actor FlowStore {
     // MARK: - Properties
     
     // Client-side flow models keyed by composite hash
-    // Contains both RemoteFlow data and enriched product data
+    // Contains both FlowDescription data and enriched product data
     private var flowModels: [FlowCacheKey: Flow] = [:]
     
     // Deduplication of concurrent requests
@@ -24,32 +24,32 @@ actor FlowStore {
     
     // MARK: - Cache Management
     
-    /// Preload multiple flows with RemoteFlow data (typically from ProfileService)
-    /// This enriches the RemoteFlows with products and caches them
-    func preloadFlows(_ remoteFlows: [RemoteFlow]) async {
-        LogDebug("Preloading \(remoteFlows.count) flows")
+    /// Preload multiple flows with FlowDescription data (typically from warm caches)
+    /// This enriches the FlowDescriptions with products and caches them
+    func preloadFlows(_ descriptions: [FlowDescription]) async {
+        LogDebug("Preloading \(descriptions.count) flows")
         
         // Process flows concurrently for better performance
         await withTaskGroup(of: Void.self) { group in
-            for remoteFlow in remoteFlows {
+            for description in descriptions {
                 group.addTask { [weak self] in
                     guard let self else { return }
                     
-                    let key = FlowCacheKey(id: remoteFlow.id)
+                    let key = FlowCacheKey(id: description.id)
                     
                     // Check if already cached and valid
                     if let cached = await self.flowModels[key], cached.isValid {
-                        LogDebug("Flow already cached and valid: \(remoteFlow.id)")
+                        LogDebug("Flow already cached and valid: \(description.id)")
                         return
                     }
                     
                     // Enrich and cache the flow
                     do {
-                        LogDebug("Preloading flow: \(remoteFlow.id)")
-                        let flow = try await self.enrichFlow(remoteFlow)
+                        LogDebug("Preloading flow: \(description.id)")
+                        let flow = try await self.enrichFlow(description)
                         await self.setFlow(flow, for: key)
                     } catch {
-                        LogError("Failed to preload flow \(remoteFlow.id): \(error)")
+                        LogError("Failed to preload flow \(description.id): \(error)")
                     }
                 }
             }
@@ -65,7 +65,7 @@ actor FlowStore {
         LogDebug("Removed flow from cache: \(id)")
     }
     
-    /// Invalidate cached Flow model (but keep RemoteFlow)
+    /// Invalidate cached Flow model
     func invalidateFlow(id: String) {
         // Remove all variants of this flow
         flowModels = flowModels.filter { $0.key.id != id }
@@ -116,10 +116,10 @@ actor FlowStore {
             do {
                 // Fetch from API
                 LogInfo("Fetching flow from API: \(id)")
-                let remote = try await self.api.fetchFlow(flowId: id)
+                let description = try await self.api.fetchFlow(flowId: id)
                 
                 // Enrich and cache
-                let flow = try await self.enrichFlow(remote)
+                let flow = try await self.enrichFlow(description)
                 await self.setFlow(flow, for: key)
                 
                 // Clear pending after successful completion
@@ -146,54 +146,126 @@ actor FlowStore {
         flowModels[key] = flow
     }
     
-    private func enrichFlow(_ remoteFlow: RemoteFlow) async throws -> Flow {
-        // Fetch products if the flow has any defined
-        let products = try await fetchProducts(for: remoteFlow)
+    private func enrichFlow(_ description: FlowDescription) async throws -> Flow {
+        // Fetch products if the flow references any
+        let products = try await fetchProducts(for: description)
         
         // Create and return the flow with fetched products
         let flow = Flow(
-            remoteFlow: remoteFlow,
+            description: description,
             products: products
         )
         
-        LogDebug("Created flow with \(products.count) products: \(remoteFlow.id)")
+        LogDebug("Created flow with \(products.count) products: \(description.id)")
         return flow
     }
     
-    private func fetchProducts(for remoteFlow: RemoteFlow) async throws -> [FlowProduct] {
-        // Early return if no products defined in the flow
-        guard !remoteFlow.products.isEmpty else {
-            LogDebug("No products defined for flow: \(remoteFlow.id)")
+    private func fetchProducts(for description: FlowDescription) async throws -> [FlowProduct] {
+        let productIds = extractProductIds(from: description)
+        guard !productIds.isEmpty else {
+            LogDebug("No products referenced in flow: \(description.id)")
             return []
         }
         
-        // Use ProductService to fetch products for this flow
-        let flowProducts = try await productService.fetchProducts(for: [remoteFlow])
+        let storeProducts = try await productService.fetchProducts(for: Set(productIds))
         
-        guard let storeProducts = flowProducts[remoteFlow.id] else {
-            LogWarning("ProductService returned no products for flow: \(remoteFlow.id)")
-            return []
-        }
-        
-        // Map to flow products with StoreKit data
-        let flowProductList = storeProducts.compactMap { storeProduct -> FlowProduct? in
-            guard let flowProductMetadata = remoteFlow.products.first(where: { $0.extId == storeProduct.id }) else {
-                LogWarning("Product \(storeProduct.id) not found in flow manifest")
-                return nil
-            }
-            
-            // Get period directly from StoreKit subscription info
-            let period = mapSubscriptionPeriod(storeProduct.subscriptionPeriod)
-            
-            return FlowProduct(
+        let flowProducts = storeProducts.map { storeProduct in
+            FlowProduct(
                 id: storeProduct.id,
                 name: storeProduct.displayName,
                 price: storeProduct.displayPrice,
-                period: period
+                period: mapSubscriptionPeriod(storeProduct.subscriptionPeriod)
             )
         }
         
-        return flowProductList
+        return flowProducts
+    }
+    
+    private func extractProductIds(from description: FlowDescription) -> [String] {
+        var ids = Set<String>()
+        let viewModelsById = Dictionary(uniqueKeysWithValues: description.viewModels.map { ($0.id, $0) })
+        
+        for instance in description.viewModelInstances ?? [] {
+            guard let viewModel = viewModelsById[instance.viewModelId] else { continue }
+            collectProductIds(
+                schema: viewModel.properties,
+                values: instance.values,
+                into: &ids
+            )
+        }
+        
+        return Array(ids)
+    }
+    
+    private func collectProductIds(
+        schema: [String: ViewModelProperty],
+        values: [String: AnyCodable],
+        into ids: inout Set<String>
+    ) {
+        for (key, property) in schema {
+            let value = values[key]?.value
+            switch property.type {
+            case .product:
+                if let productId = extractProductId(from: value) {
+                    ids.insert(productId)
+                }
+            case .list:
+                if let itemType = property.itemType, itemType.type == .product {
+                    if let list = value as? [Any] {
+                        for entry in list {
+                            if let productId = extractProductId(from: entry) {
+                                ids.insert(productId)
+                            }
+                        }
+                    }
+                } else if let itemType = property.itemType, itemType.type == .object,
+                          let list = value as? [Any],
+                          let schema = itemType.schema {
+                    for entry in list {
+                        if let dict = entry as? [String: AnyCodable] {
+                            collectProductIds(schema: schema, values: dict, into: &ids)
+                        } else if let dict = entry as? [String: Any] {
+                            let wrapped = dict.mapValues { AnyCodable($0) }
+                            collectProductIds(schema: schema, values: wrapped, into: &ids)
+                        }
+                    }
+                }
+            case .object:
+                if let schema = property.schema {
+                    if let dict = value as? [String: AnyCodable] {
+                        collectProductIds(schema: schema, values: dict, into: &ids)
+                    } else if let dict = value as? [String: Any] {
+                        let wrapped = dict.mapValues { AnyCodable($0) }
+                        collectProductIds(schema: schema, values: wrapped, into: &ids)
+                    }
+                }
+            default:
+                continue
+            }
+        }
+    }
+    
+    private func extractProductId(from value: Any?) -> String? {
+        if let string = value as? String {
+            return string
+        }
+        if let dict = value as? [String: Any] {
+            if let productId = dict["productId"] as? String {
+                return productId
+            }
+            if let productId = dict["id"] as? String {
+                return productId
+            }
+        }
+        if let dict = value as? [String: AnyCodable] {
+            if let productId = dict["productId"]?.value as? String {
+                return productId
+            }
+            if let productId = dict["id"]?.value as? String {
+                return productId
+            }
+        }
+        return nil
     }
     
     private func mapSubscriptionPeriod(_ subscriptionPeriod: SubscriptionPeriod?) -> ProductPeriod? {

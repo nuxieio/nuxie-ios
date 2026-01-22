@@ -27,7 +27,7 @@ actor FlowArchiver {
     // MARK: - Public API
     
     /// Preload a web archive for a flow - downloads and caches
-    func preloadArchive(for flow: RemoteFlow) async {
+    func preloadArchive(for flow: Flow) async {
         LogDebug("Preloading archive for flow: \(flow.id)")
         
         guard let baseURL = URL(string: flow.url) else {
@@ -35,9 +35,14 @@ actor FlowArchiver {
             return
         }
         
+        guard let manifest = flow.manifest else {
+            LogError("Missing manifest for flow: \(flow.id)")
+            return
+        }
+        
         do {
             let archiveData = try await webArchiver.downloadAndBuildArchive(
-                manifest: flow.manifest,
+                manifest: manifest,
                 baseURL: baseURL
             )
             
@@ -51,7 +56,7 @@ actor FlowArchiver {
     }
     
     /// Get the file URL for a cached web archive
-    func getArchiveURL(for flow: RemoteFlow) -> URL? {
+    func getArchiveURL(for flow: Flow) -> URL? {
         let archiveURL = canonicalURL(for: flow)
         
         // Check if exists
@@ -86,7 +91,7 @@ actor FlowArchiver {
     }
     
     /// Get or download web archive
-    func getOrDownloadArchive(for flow: RemoteFlow) async throws -> URL {
+    func getOrDownloadArchive(for flow: Flow) async throws -> URL {
         // Check if already cached
         if let cachedURL = getArchiveURL(for: flow) {
             LogDebug("Returning cached archive for flow \(flow.id)")
@@ -97,11 +102,15 @@ actor FlowArchiver {
             throw FlowError.invalidManifest
         }
         
+        guard let manifest = flow.manifest else {
+            throw FlowError.invalidManifest
+        }
+        
         LogInfo("Downloading archive for flow \(flow.id)")
         
         // Download and build
         let archiveData = try await webArchiver.downloadAndBuildArchive(
-            manifest: flow.manifest,
+            manifest: manifest,
             baseURL: baseURL
         )
         
@@ -143,10 +152,10 @@ actor FlowArchiver {
     // MARK: - Private Methods
     
     /// Generate canonical filesystem path based on flow URL
-    private func canonicalURL(for flow: RemoteFlow) -> URL {
+    private func canonicalURL(for flow: Flow) -> URL {
         // Use the content hash and flow ID for canonical path
         // This ensures same content = same file
-        let hash = flow.manifest.contentHash
+        let hash = flow.manifest?.contentHash ?? flow.description.version
         let filename = "flow_\(flow.id)_\(hash).webarchive"
         return cacheDirectory.appendingPathComponent(filename)
     }

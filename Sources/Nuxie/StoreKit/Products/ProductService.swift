@@ -35,30 +35,5 @@ public class ProductService {
         }
     }
     
-    public func fetchProducts(for remoteFlows: [RemoteFlow]) async throws -> [String: [any StoreProductProtocol]] {
-        // Collect all unique product IDs across all flows
-        let allProductIds = Set(remoteFlows.flatMap { $0.products.map { $0.extId } })
-        
-        guard !allProductIds.isEmpty else {
-            LogDebug("No products to fetch across \(remoteFlows.count) flows")
-            return [:]
-        }
-        
-        LogDebug("Fetching \(allProductIds.count) unique products for \(remoteFlows.count) flows")
-        
-        // Fetch all products in one batch
-        let allProducts = try await fetchProducts(for: allProductIds)
-        
-        // Create a lookup dictionary for efficient mapping
-        let productLookup = Dictionary(uniqueKeysWithValues: allProducts.map { ($0.id, $0) })
-        
-        // Map products back to their respective flows
-        var flowProducts: [String: [any StoreProductProtocol]] = [:]
-        for flow in remoteFlows {
-            let flowProductIds = flow.products.map { $0.extId }
-            flowProducts[flow.id] = flowProductIds.compactMap { productLookup[$0] }
-        }
-        
-        return flowProducts
-    }
+    // Flow-based helpers removed (FlowDescription no longer carries explicit product lists)
 }
