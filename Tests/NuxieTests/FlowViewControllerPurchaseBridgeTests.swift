@@ -68,7 +68,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 mockDelegate = nil
             }
 
-            it("posts purchase_success on successful purchase") {
+            it("posts purchase_ui_success on successful purchase") {
                 let productId = "pro"
                 mockProductService.mockProducts = [MockStoreProduct(id: productId, displayName: "Pro", price: 9.99, displayPrice: "$9.99")]
                 mockDelegate.purchaseResult = .success
@@ -79,7 +79,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
-                let match = msgs.first { ($0["type"] as? String) == "purchase_success" }
+                let match = msgs.first { ($0["type"] as? String) == "purchase_ui_success" }
                 expect(match).toNot(beNil())
                 let pl = match?["payload"] as? [String: Any]
                 expect(pl?["productId"] as? String).to(equal(productId))

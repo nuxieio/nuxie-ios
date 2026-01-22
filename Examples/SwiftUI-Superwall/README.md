@@ -106,35 +106,27 @@ Instead of hardcoding when/where to show paywalls, MoodLog uses Nuxie's **flow s
 ```swift
 // User taps "Go Pro" button
 Button("Go Pro") {
-    NuxieSDK.shared.track("upgrade_tapped", properties: [
-        "source": "today_screen",
-        "current_streak": moodStore.calculateStreak()
-    ]) { result in
-        handleFlowResult(result)
+    Task {
+        await NuxieSDK.shared.trigger("upgrade_tapped", properties: [
+            "source": "today_screen",
+            "current_streak": moodStore.calculateStreak()
+        ]) { update in
+            handleTriggerUpdate(update)
+        }
     }
 }
 .buttonStyle(.borderedProminent)
 
-func handleFlowResult(_ result: EventResult) {
-    switch result {
-    case .flow(let completion):
-        // Nuxie showed a flow! Handle the outcome
-        switch completion.outcome {
-        case .purchased:
-            // User purchased - Pro unlocked!
-            break
-        case .dismissed:
-            // User closed without buying
-            break
-        // ... other outcomes
-        }
-
-    case .noInteraction:
-        // No flow configured in dashboard - that's ok
+func handleTriggerUpdate(_ update: TriggerUpdate) {
+    switch update {
+    case .entitlement(.allowed):
+        // User purchased - Pro unlocked!
         break
-
-    case .failed(let error):
-        // Handle error
+    case .decision(.noMatch):
+        break
+    case .error(let error):
+        print("Trigger failed: \(error.message)")
+    default:
         break
     }
 }
@@ -366,7 +358,7 @@ Every file demonstrates:
 This example demonstrates:
 
 1. **SDK Setup**: One-time configuration in App init
-2. **Event Tracking**: Strategic placement of track() calls in SwiftUI views
+2. **Event Tracking**: Strategic placement of trigger() calls in SwiftUI views
 3. **User Identification**: Persistent UUID for user continuity
 4. **Purchase Integration**: Proper delegate pattern implementation
 5. **Feature Gating**: Simple entitlement checks before Pro features

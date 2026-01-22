@@ -79,9 +79,7 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
     }
     
     // Required EventServiceProtocol methods
-    func track(_ event: String, properties: [String: Any]?, userProperties: [String: Any]?, userPropertiesSetOnce: [String: Any]?, completion: ((EventResult) -> Void)?) {
-        completion?(.noInteraction)
-    }
+    func track(_ event: String, properties: [String: Any]?, userProperties: [String: Any]?, userPropertiesSetOnce: [String: Any]?) {}
     func configure(networkQueue: NuxieNetworkQueue?, journeyService: JourneyServiceProtocol?, contextBuilder: NuxieContextBuilder?, configuration: NuxieConfiguration?) async throws {}
     func getRecentEvents(limit: Int) async -> [StoredEvent] { return [] }
     func getEventsForUser(_ distinctId: String, limit: Int) async -> [StoredEvent] { return [] }
@@ -110,6 +108,27 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
             journey: nil,
             execution: nil
         )
+    }
+
+    func trackForTrigger(
+        _ event: String,
+        properties: [String: Any]?,
+        userProperties: [String: Any]?,
+        userPropertiesSetOnce: [String: Any]?
+    ) async throws -> (NuxieEvent, EventResponse) {
+        let nuxieEvent = NuxieEvent(name: event, distinctId: "test-user", properties: properties ?? [:])
+        let response = EventResponse(
+            status: "ok",
+            payload: nil,
+            customer: nil,
+            event: nil,
+            message: nil,
+            featuresMatched: nil,
+            usage: nil,
+            journey: nil,
+            execution: nil
+        )
+        return (nuxieEvent, response)
     }
 }
 

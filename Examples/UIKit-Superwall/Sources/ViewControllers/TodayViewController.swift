@@ -111,7 +111,7 @@ final class TodayViewController: UIViewController {
 
         /// **Nuxie Integration: Track view event**
         /// Track when user opens the Today screen
-        NuxieSDK.shared.track(Constants.eventAppOpened, properties: [
+        NuxieSDK.shared.trigger(Constants.eventAppOpened, properties: [
             "launch_date": Date().timeIntervalSince1970,
             "screen": "today"
         ])
@@ -261,7 +261,7 @@ final class TodayViewController: UIViewController {
         /// **Nuxie Integration: Track mood selection**
         /// Track when user selects a mood (before saving) to understand
         /// engagement and where users drop off in the flow
-        NuxieSDK.shared.track(Constants.eventMoodSelected, properties: [
+        NuxieSDK.shared.trigger(Constants.eventMoodSelected, properties: [
             "mood": sender.moodValue,
             "mood_emoji": Constants.moodEmojis[sender.moodValue] ?? "",
             "mood_label": Constants.moodLabels[sender.moodValue] ?? "",
@@ -307,7 +307,7 @@ final class TodayViewController: UIViewController {
             /// **Nuxie Integration: Track mood_saved event**
             /// This is a key engagement event - track detailed properties
             /// to understand user behavior and identify conversion opportunities
-            NuxieSDK.shared.track(Constants.eventMoodSaved, properties: [
+            NuxieSDK.shared.trigger(Constants.eventMoodSaved, properties: [
                 "mood": mood,
                 "mood_emoji": Constants.moodEmojis[mood] ?? "",
                 "mood_label": Constants.moodLabels[mood] ?? "",
@@ -345,17 +345,16 @@ final class TodayViewController: UIViewController {
         /// Nuxie's backend decide whether to show a flow based on campaigns
         /// configured in the dashboard.
         ///
-        /// The completion handler receives an EventResult which tells us:
-        /// - .flow(completion): A flow was shown and user interacted
-        /// - .noInteraction: No flow configured for this event
-        /// - .failed(error): Something went wrong
-        NuxieSDK.shared.track("upgrade_tapped", properties: [
-            "source": "today_screen",
-            "current_streak": moodStore.calculateStreak(),
-            "total_entries": moodStore.count
-        ]) { [weak self] result in
-            DispatchQueue.main.async {
-                self?.handleFlowResult(result)
+        /// The handler receives TriggerUpdate events with decisions and entitlements
+        Task {
+            await NuxieSDK.shared.trigger("upgrade_tapped", properties: [
+                "source": "today_screen",
+                "current_streak": moodStore.calculateStreak(),
+                "total_entries": moodStore.count
+            ]) { [weak self] update in
+                DispatchQueue.main.async {
+                    self?.handleTriggerUpdate(update)
+                }
             }
         }
     }
@@ -363,57 +362,26 @@ final class TodayViewController: UIViewController {
     // MARK: - Nuxie Flow Handling
 
     /// Handles the result of a tracked event that may trigger a flow
-    private func handleFlowResult(_ result: EventResult) {
-        switch result {
-        case .flow(let completion):
-            // Nuxie showed a flow and user interacted with it
-            handleFlowCompletion(completion)
-
-        case .noInteraction:
-            // No flow was shown - this is normal if you haven't configured
-            // a campaign in the Nuxie dashboard yet
-            print("[MoodLog] No flow shown - configure a campaign in Nuxie dashboard for 'upgrade_tapped' event")
-
-        case .failed(let error):
-            // Event tracking failed
-            showError("Unable to load: \(error.localizedDescription)")
-        }
-    }
-
-    /// Handles the completion of a Nuxie flow
-    private func handleFlowCompletion(_ completion: FlowCompletion) {
-        print("[MoodLog] Flow completed - Journey: \(completion.journeyId), Flow: \(completion.flowId)")
-
-        switch completion.outcome {
-        case .purchased(let productId, let transactionId):
-            // User completed a purchase!
-            print("[MoodLog] Purchase completed: \(productId ?? "unknown")")
-            showSuccessMessage("🎉 Welcome to Pro!")
-            updateProBadge()
-
-        case .trialStarted(let productId):
-            // User started a trial
-            print("[MoodLog] Trial started: \(productId ?? "unknown")")
-            showSuccessMessage("🎉 Trial started!")
-            updateProBadge()
-
-        case .restored:
-            // User restored previous purchases
-            print("[MoodLog] Purchases restored")
-            showSuccessMessage("✓ Purchases restored!")
-            updateProBadge()
-
-        case .dismissed:
-            // User closed the flow without purchasing
-            print("[MoodLog] Flow dismissed without purchase")
-
-        case .skipped:
-            // SDK decided not to show the flow (frequency capping, etc.)
-            print("[MoodLog] Flow skipped by SDK")
-
-        case .error(let message):
-            // An error occurred during flow presentation
-            showError(message ?? "Something went wrong")
+    private func handleTriggerUpdate(_ update: TriggerUpdate) {
+        switch update {
+        case .entitlement(let entitlement):
+            switch entitlement {
+            case .allowed:
+                showSuccessMessage("🎉 Welcome to Pro!")
+                updateProBadge()
+            case .denied:
+                showError("Access denied.")
+            case .pending:
+                break
+            }
+        case .decision(let decision):
+            if case .noMatch = decision {
+                print("[MoodLog] No flow shown - configure a campaign in Nuxie dashboard for 'upgrade_tapped' event")
+            }
+        case .error(let error):
+            showError("Unable to load: \(error.message)")
+        case .journey:
+            break
         }
     }
 

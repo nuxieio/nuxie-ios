@@ -10,7 +10,7 @@ packages/nuxie-ios/
 │   ├── NuxieSDK.swift      # Main singleton class
 │   ├── NuxieConfiguration.swift  # Configuration classes
 │   ├── NuxieError.swift    # Error types
-│   ├── EventResult.swift   # Event result enum
+│   ├── TriggerModels.swift # Trigger update models
 │   ├── SDKVersion.swift    # Version constant
 │   ├── DI/                # Dependency injection
 │   │   └── DIContainer.swift  # Service container
@@ -37,7 +37,7 @@ packages/nuxie-ios/
 
 ## Core Design Principles
 
-1. **Event-Centric API**: The primary SDK interface is the `track()` method which handles both local storage and remote tracking
+1. **Event-Centric API**: The primary SDK interface is the `trigger()` method which handles both local storage and remote tracking
 2. **Offline-First Architecture**: Events persist locally immediately, remote sync is asynchronous 
 3. **Dependency Injection**: Services managed through `DIContainer` for testability and clean architecture
 4. **Plugin Architecture**: Extensible plugin system for modular functionality
@@ -52,7 +52,7 @@ packages/nuxie-ios/
 ### API Design
 - **Single Entry Point**: `NuxieSDK.shared` singleton pattern
 - **Setup Required**: Always check `isSetup` before operations, use `isEnabled()` helper for graceful degradation
-- **Track-First**: Primary method is `track()` for event recording and feature gating
+- **Trigger-First**: Primary method is `trigger()` for event recording and feature gating
 - **Immutable Config**: `NuxieConfiguration` properties are `let` where possible
 
 ### Dependency Injection
@@ -219,7 +219,7 @@ try NuxieSDK.shared.setup(with: config)
 ### Event Tracking with Local Storage
 ```swift
 // Events are stored locally immediately and synced remotely async
-NuxieSDK.shared.track("app_launched", properties: [
+NuxieSDK.shared.trigger("app_launched", properties: [
     "version": "1.0.0",
     "platform": "ios"
 ]) { result in
@@ -363,7 +363,7 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 - **Dependency Injection**: DIContainer managing all services as singletons
 - **Plugin System**: Simple install/uninstall/start/stop plugin architecture
 - **App Lifecycle Plugin**: Auto-installed plugin tracking App Installed, App Updated, App Opened, App Backgrounded
-- **Event Tracking**: Full `track()` implementation with local storage + remote sync
+- **Event Tracking**: Full `trigger()` implementation with local storage + remote sync
 - **Campaign-Centric API**: Updated `/profile` endpoint response models to support new workflow-based campaigns
 - **Session Management**: Automatic session tracking with unique identifiers
 - **User Management**: User identification, attribution, and event filtering
@@ -388,7 +388,7 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 
 ### Event Storage Flow
 ```
-track() → EventStoreManager → EventStore → SQLite Database
+trigger() → EventStoreManager → EventStore → SQLite Database
    ↓            ↓                 ↓
 Remote API   Enrichment       Indexing
 (async)      (metadata)      (performance)
@@ -472,7 +472,7 @@ final class NetworkQueueTests: AsyncSpec {
 actor MockService: ServiceProtocol {
     private(set) var events: [Event] = []
     
-    func track(_ event: Event) {
+    func trigger(_ event: Event) {
         events.append(event)
     }
     
@@ -483,7 +483,7 @@ actor MockService: ServiceProtocol {
 
 // Test with async expectations
 it("should track events") {
-    await service.track(event)
+    await service.trigger(event)
     await expect { await service.events.count }.to(equal(1))
 }
 ```

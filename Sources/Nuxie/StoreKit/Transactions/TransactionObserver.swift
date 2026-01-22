@@ -87,12 +87,6 @@ internal actor TransactionObserver {
     private func handleVerifiedTransaction(_ transaction: Transaction, jwsRepresentation transactionJwt: String) async {
         let transactionIdString = String(transaction.id)
 
-        // Skip if already synced in this session
-        guard !syncedTransactionIds.contains(transactionIdString) else {
-            LogDebug("TransactionObserver: Transaction \(transaction.id) already synced this session")
-            return
-        }
-
         LogInfo("TransactionObserver: Processing verified transaction \(transaction.id) for product \(transaction.productID)")
 
         if transaction.revocationDate != nil {
@@ -112,44 +106,67 @@ internal actor TransactionObserver {
             return
         }
 
-        // Get the current user's distinct ID
+        let synced = await syncTransaction(
+            transactionJws: transactionJwt,
+            transactionId: transactionIdString,
+            productId: transaction.productID,
+            originalTransactionId: String(transaction.originalID)
+        )
+
+        if synced {
+            await transaction.finish()
+            LogDebug("TransactionObserver: Transaction \(transaction.id) finished")
+        }
+    }
+
+    /// Sync a verified transaction JWS with backend and update features
+    /// Returns true if the transaction is synced or already known.
+    func syncTransaction(
+        transactionJws: String,
+        transactionId: String,
+        productId: String?,
+        originalTransactionId: String?
+    ) async -> Bool {
+        let preferredId = (originalTransactionId?.isEmpty == false)
+            ? originalTransactionId
+            : (transactionId.isEmpty ? nil : transactionId)
+        let dedupeKey = preferredId ?? transactionJws
+
+        if syncedTransactionIds.contains(dedupeKey) {
+            LogDebug("TransactionObserver: Transaction already synced, finishing fast path")
+            return true
+        }
+
         let distinctId = identityService.getDistinctId()
 
         do {
-            // Sync with backend
             let response = try await api.syncTransaction(
-                transactionJwt: transactionJwt,
+                transactionJwt: transactionJws,
                 distinctId: distinctId
             )
 
             if response.success {
-                LogInfo("TransactionObserver: Transaction \(transaction.id) synced successfully")
-
-                // Update feature cache with returned features
                 if let features = response.features {
                     await featureService.updateFromPurchase(features)
                 }
 
-                // Mark as synced
-                syncedTransactionIds.insert(transactionIdString)
+                syncedTransactionIds.insert(dedupeKey)
 
-                // Track purchase event
-                NuxieSDK.shared.track("$purchase_synced", properties: [
-                    "transaction_id": transactionIdString,
-                    "product_id": transaction.productID,
+                NuxieSDK.shared.trigger("$purchase_synced", properties: [
+                    "transaction_id": transactionId,
+                    "original_transaction_id": originalTransactionId ?? "",
+                    "product_id": productId ?? "",
                     "customer_id": response.customerId ?? ""
                 ])
 
-                // Only finish the transaction AFTER backend confirms success
-                await transaction.finish()
-                LogDebug("TransactionObserver: Transaction \(transaction.id) finished")
-            } else {
-                LogError("TransactionObserver: Backend sync failed for transaction \(transaction.id): \(response.error ?? "Unknown error")")
-                // Don't finish - will retry on next app launch via Transaction.unfinished
+                return true
             }
+
+            LogError("TransactionObserver: Backend sync failed for transaction \(transactionId): \(response.error ?? "Unknown error")")
+            return false
         } catch {
-            LogError("TransactionObserver: Failed to sync transaction \(transaction.id): \(error)")
-            // Don't finish - will retry on next app launch via Transaction.unfinished
+            LogError("TransactionObserver: Failed to sync transaction \(transactionId): \(error)")
+            return false
         }
     }
 
