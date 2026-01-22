@@ -13,7 +13,7 @@ public struct Flow {
     // Convenience accessors proxy to remoteFlow for common properties
     public var id: String { remoteFlow.id }
     public var name: String { remoteFlow.id }
-    public var manifest: BuildManifest? { remoteFlow.bundle.manifest }
+    public var manifest: BuildManifest { remoteFlow.bundle.manifest }
     public var url: String { remoteFlow.bundle.url }
     
     // Validation
@@ -160,7 +160,3 @@ public struct FlowCacheKey: Hashable {
         self.userSegment = userSegment
     }
 }
-
-// MARK: - Flow Changes
-
-// FlowChanges removed (profile no longer returns flow bundles directly)

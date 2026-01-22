@@ -9,6 +9,7 @@ struct ResponseBuilders {
     static func buildProfileResponse(
         campaigns: [Campaign] = [],
         segments: [Segment] = [],
+        flows: [RemoteFlow] = [],
         userProperties: [String: AnyCodable]? = nil,
         experiments: [String: ExperimentAssignment]? = nil,
         features: [Feature]? = nil,
@@ -17,6 +18,7 @@ struct ResponseBuilders {
         return ProfileResponse(
             campaigns: campaigns,
             segments: segments,
+            flows: flows,
             userProperties: userProperties,
             experiments: experiments,
             features: features,
@@ -126,30 +128,23 @@ struct ResponseBuilders {
 
     static func buildRemoteFlow(
         id: String = "flow-1",
-        version: String = "v1",
         url: String = "https://example.com/builds/flow-1",
         manifest: BuildManifest? = nil
     ) -> RemoteFlow {
         return RemoteFlow(
             id: id,
-            version: version,
             bundle: FlowBundleRef(
                 url: url,
                 manifest: manifest ?? buildManifest(files: [])
             ),
-            entryScreenId: "screen-1",
-            entryActions: nil,
             screens: [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    name: nil,
-                    locale: nil,
-                    route: nil,
                     defaultViewModelId: nil,
                     defaultInstanceId: nil
                 )
             ],
-            interactions: RemoteFlowInteractions(screens: [:], components: nil),
+            interactions: [:],
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,

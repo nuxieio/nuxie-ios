@@ -196,7 +196,7 @@ public actor JourneyService: JourneyServiceProtocol {
     inMemoryJourneysById[journey.id] = journey
 
     let flow = try? await flowService.fetchFlow(id: flowId)
-    let entryScreenId = flow?.remoteFlow.entryScreenId ?? flow?.remoteFlow.screens.first?.id
+    let entryScreenId = flow?.remoteFlow.screens.first?.id
 
     eventService.track(
       "$journey_start",
@@ -207,8 +207,7 @@ public actor JourneyService: JourneyServiceProtocol {
         "entry_node_id": entryScreenId as Any,
       ],
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
     eventService.track(
@@ -220,8 +219,7 @@ public actor JourneyService: JourneyServiceProtocol {
         entryScreenId: entryScreenId
       ),
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
     guard await ensureRunner(for: journey, campaign: campaign) != nil else {
@@ -259,8 +257,7 @@ public actor JourneyService: JourneyServiceProtocol {
         resumeReason: "timer"
       ),
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
   }
 
@@ -400,8 +397,7 @@ public actor JourneyService: JourneyServiceProtocol {
             "context": journey.context.mapValues { $0.value },
           ],
           userProperties: nil,
-          userPropertiesSetOnce: nil,
-          completion: nil
+          userPropertiesSetOnce: nil
         )
       }
 
@@ -427,8 +423,7 @@ public actor JourneyService: JourneyServiceProtocol {
           name,
           properties: properties,
           userProperties: nil,
-          userPropertiesSetOnce: nil,
-          completion: nil
+          userPropertiesSetOnce: nil
         )
       }
 
@@ -516,8 +511,7 @@ public actor JourneyService: JourneyServiceProtocol {
         JourneyEvents.flowShown,
         properties: JourneyEvents.flowShownProperties(flowId: flowId, journey: journey),
         userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
+        userPropertiesSetOnce: nil
       )
 
       return runner
@@ -567,8 +561,7 @@ public actor JourneyService: JourneyServiceProtocol {
           resumeAt: pending.resumeAt
         ),
         userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
+        userPropertiesSetOnce: nil
       )
     case .exited(let reason):
       completeJourney(journey, reason: reason)
@@ -676,8 +669,7 @@ public actor JourneyService: JourneyServiceProtocol {
         "duration_seconds": duration,
       ],
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
     eventService.track(
@@ -688,8 +680,7 @@ public actor JourneyService: JourneyServiceProtocol {
         screenId: journey.flowState.currentScreenId
       ),
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
     cancelTasks(for: journey.id)
@@ -746,8 +737,7 @@ public actor JourneyService: JourneyServiceProtocol {
           "window_seconds": journey.conversionWindow,
         ],
         userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
+        userPropertiesSetOnce: nil
       )
     }
   }

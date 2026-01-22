@@ -35,14 +35,9 @@ actor FlowArchiver {
             return
         }
         
-        guard let manifest = flow.manifest else {
-            LogError("Missing manifest for flow: \(flow.id)")
-            return
-        }
-        
         do {
             let archiveData = try await webArchiver.downloadAndBuildArchive(
-                manifest: manifest,
+                manifest: flow.manifest,
                 baseURL: baseURL
             )
             
@@ -102,15 +97,11 @@ actor FlowArchiver {
             throw FlowError.invalidManifest
         }
         
-        guard let manifest = flow.manifest else {
-            throw FlowError.invalidManifest
-        }
-        
         LogInfo("Downloading archive for flow \(flow.id)")
         
         // Download and build
         let archiveData = try await webArchiver.downloadAndBuildArchive(
-            manifest: manifest,
+            manifest: flow.manifest,
             baseURL: baseURL
         )
         
@@ -155,7 +146,7 @@ actor FlowArchiver {
     private func canonicalURL(for flow: Flow) -> URL {
         // Use the content hash and flow ID for canonical path
         // This ensures same content = same file
-        let hash = flow.manifest?.contentHash ?? flow.remoteFlow.version
+        let hash = flow.manifest.contentHash
         let filename = "flow_\(flow.id)_\(hash).webarchive"
         return cacheDirectory.appendingPathComponent(filename)
     }

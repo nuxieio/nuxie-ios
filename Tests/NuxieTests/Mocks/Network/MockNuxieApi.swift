@@ -86,6 +86,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
         self.profileResponse = ProfileResponse(
             campaigns: [campaign],
             segments: [segment],
+            flows: [ResponseBuilders.buildRemoteFlow()],
             userProperties: nil,
             experiments: nil,
             features: nil,
@@ -178,7 +179,6 @@ public actor MockNuxieApi: NuxieApiProtocol {
         
         return RemoteFlow(
             id: flowId,
-            version: "v1",
             bundle: FlowBundleRef(
                 url: "https://example.com/flow",
                 manifest: BuildManifest(
@@ -188,19 +188,14 @@ public actor MockNuxieApi: NuxieApiProtocol {
                     files: []
                 )
             ),
-            entryScreenId: "screen-1",
-            entryActions: nil,
             screens: [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    name: nil,
-                    locale: nil,
-                    route: nil,
                     defaultViewModelId: nil,
                     defaultInstanceId: nil
                 )
             ],
-            interactions: RemoteFlowInteractions(screens: [:], components: nil),
+            interactions: [:],
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,

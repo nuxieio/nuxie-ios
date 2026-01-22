@@ -8,21 +8,15 @@ final class FlowViewControllerBridgeSpec: QuickSpec {
         let manifest = BuildManifest(totalFiles: 0, totalSize: 0, contentHash: "hash", files: [])
         let description = RemoteFlow(
             id: "flow1",
-            version: "v1",
             bundle: FlowBundleRef(url: "about:blank", manifest: manifest),
-            entryScreenId: "screen-1",
-            entryActions: nil,
             screens: [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    name: nil,
-                    locale: nil,
-                    route: nil,
                     defaultViewModelId: nil,
                     defaultInstanceId: nil
                 )
             ],
-            interactions: RemoteFlowInteractions(screens: [:], components: nil),
+            interactions: [:],
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,

@@ -61,6 +61,7 @@ internal actor ProfileService: ProfileServiceProtocol {
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
     @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
+    @Injected(\.flowService) private var flowService: FlowServiceProtocol
     // Note: journeyService is resolved lazily in resumeActiveJourneys to avoid circular dependency
     // (JourneyService → ProfileService → JourneyService)
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
@@ -169,6 +170,8 @@ internal actor ProfileService: ProfileServiceProtocol {
         if let cached = await diskCache.retrieve(forKey: distinctId, allowStale: true) {
             self.cachedProfile = cached
             LogDebug("Loaded profile from disk (age: \(Int(cached.cachedAt.timeIntervalSinceNow * -1 / 60))m)")
+
+            await syncFlows(newFlows: cached.response.flows, previousFlows: nil)
             
             // Start refresh timer if cache is stale
             let age = dateProvider.timeIntervalSince(cached.cachedAt)
@@ -182,10 +185,11 @@ internal actor ProfileService: ProfileServiceProtocol {
     private func refreshProfile(distinctId: String) async throws -> ProfileResponse {
         do {
             let locale = effectiveLocale
+            let previousProfile = cachedProfile?.response
             let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
             LogInfo("Network fetch succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
-            await handleProfileUpdate(fresh)
+            await handleProfileUpdate(fresh, previousProfile: previousProfile)
             return fresh
         } catch {
             LogError("Network fetch failed: \(error)")
@@ -197,10 +201,11 @@ internal actor ProfileService: ProfileServiceProtocol {
     private func refreshInBackground(distinctId: String) async {
         do {
             let locale = effectiveLocale
+            let previousProfile = cachedProfile?.response
             let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
             LogInfo("Background refresh succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
-            await handleProfileUpdate(fresh)
+            await handleProfileUpdate(fresh, previousProfile: previousProfile)
         } catch {
             LogDebug("Background refresh failed: \(error)")
         }
@@ -382,11 +387,15 @@ internal actor ProfileService: ProfileServiceProtocol {
         
         // Clear old user's disk cache
         await diskCache.remove(forKey: oldDistinctId)
+
+        await flowService.clearCache()
         
         // Try to load new user's cache from disk
         if let cached = await diskCache.retrieve(forKey: newDistinctId, allowStale: true) {
             self.cachedProfile = cached
             LogDebug("Loaded new user's profile from disk")
+
+            await syncFlows(newFlows: cached.response.flows, previousFlows: nil)
             
             // Refresh if stale
             let age = dateProvider.timeIntervalSince(cached.cachedAt)
@@ -399,7 +408,10 @@ internal actor ProfileService: ProfileServiceProtocol {
         }
     }
     
-    private func handleProfileUpdate(_ profile: ProfileResponse) async {
+    private func handleProfileUpdate(
+        _ profile: ProfileResponse,
+        previousProfile: ProfileResponse?
+    ) async {
         // Get the current distinct ID for explicit attribution
         let distinctId = identityService.getDistinctId()
         
@@ -424,5 +436,43 @@ internal actor ProfileService: ProfileServiceProtocol {
             await Container.shared.journeyService().resumeFromServerState(journeys, campaigns: profile.campaigns)
         }
 
+        await syncFlows(
+            newFlows: profile.flows,
+            previousFlows: previousProfile?.flows
+        )
+    }
+
+    private func syncFlows(newFlows: [RemoteFlow], previousFlows: [RemoteFlow]?) async {
+        let previousFlows = previousFlows ?? []
+        if newFlows.isEmpty && previousFlows.isEmpty { return }
+
+        let previousById = Dictionary(uniqueKeysWithValues: previousFlows.map { ($0.id, $0) })
+        let nextById = Dictionary(uniqueKeysWithValues: newFlows.map { ($0.id, $0) })
+
+        var flowsToPrefetch: [RemoteFlow] = []
+        var flowIdsToRemove = Set<String>()
+
+        for flow in newFlows {
+            if let previous = previousById[flow.id] {
+                if previous.bundle.manifest.contentHash != flow.bundle.manifest.contentHash {
+                    flowIdsToRemove.insert(flow.id)
+                    flowsToPrefetch.append(flow)
+                }
+            } else {
+                flowsToPrefetch.append(flow)
+            }
+        }
+
+        for previous in previousFlows where nextById[previous.id] == nil {
+            flowIdsToRemove.insert(previous.id)
+        }
+
+        if !flowIdsToRemove.isEmpty {
+            await flowService.removeFlows(Array(flowIdsToRemove))
+        }
+
+        if !flowsToPrefetch.isEmpty {
+            flowService.prefetchFlows(flowsToPrefetch)
+        }
     }
 }

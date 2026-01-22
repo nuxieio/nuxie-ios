@@ -44,14 +44,12 @@ final class FlowJourneyRunner {
     @Injected(\.profileService) private var profileService: ProfileServiceProtocol
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     @Injected(\.irRuntime) private var irRuntime: IRRuntime
-    @Injected(\.outcomeBroker) private var outcomeBroker: OutcomeBrokerProtocol
 
     weak var viewController: FlowViewController?
     var onShowScreen: ((String, AnyCodable?) async -> Void)?
     private(set) var isRuntimeReady = false
 
-    private var interactionsByScreen: [String: [Interaction]] = [:]
-    private var interactionsByComponent: [String: [Interaction]] = [:]
+    private var interactionsById: [String: [Interaction]] = [:]
     private var pathIndexByIds: [String: String] = [:]
 
     private var actionQueue: [ActionRequest] = []
@@ -75,9 +73,7 @@ final class FlowJourneyRunner {
         self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
         self.viewController = viewController
 
-        let interactions = flow.remoteFlow.interactions
-        self.interactionsByScreen = interactions.screens
-        self.interactionsByComponent = interactions.components ?? [:]
+        self.interactionsById = flow.remoteFlow.interactions
 
         if let index = flow.remoteFlow.pathIndex {
             for (path, entry) in index {
@@ -113,7 +109,7 @@ final class FlowJourneyRunner {
             }
 
             if journey.flowState.currentScreenId == nil {
-                let fallback = remoteFlow.entryScreenId ?? remoteFlow.screens.first?.id
+                let fallback = remoteFlow.screens.first?.id
                 if let fallback {
                     await navigate(to: fallback, transition: nil)
                 }
@@ -168,10 +164,10 @@ final class FlowJourneyRunner {
 
         var interactions: [Interaction] = []
         if let componentId {
-            interactions.append(contentsOf: interactionsByComponent[componentId] ?? [])
+            interactions.append(contentsOf: interactionsById[componentId] ?? [])
         }
         if let screenId {
-            interactions.append(contentsOf: interactionsByScreen[screenId] ?? [])
+            interactions.append(contentsOf: interactionsById[screenId] ?? [])
         }
 
         if interactions.isEmpty { return nil }
@@ -239,7 +235,7 @@ final class FlowJourneyRunner {
 
     func dispatchAfterDelay(interactionId: String, screenId: String) async -> RunOutcome? {
         guard journey.flowState.currentScreenId == screenId else { return nil }
-        guard let interactions = interactionsByScreen[screenId] else { return nil }
+        guard let interactions = interactionsById[screenId] else { return nil }
         guard let interaction = interactions.first(where: { $0.id == interactionId }) else { return nil }
         guard case .afterDelay = interaction.trigger else { return nil }
 
@@ -272,17 +268,21 @@ final class FlowJourneyRunner {
     }
 
     private func runEntryActionsIfNeeded() async -> RunOutcome? {
-        let actions = remoteFlow.entryActions ?? []
-        guard !actions.isEmpty else { return nil }
+        guard let entryInteractions = interactionsById["start"], !entryInteractions.isEmpty else { return nil }
 
-        enqueueActions(
-            actions,
-            context: TriggerContext(
-                screenId: journey.flowState.currentScreenId,
-                componentId: nil,
-                interactionId: "entry"
-            )
-        )
+        for interaction in entryInteractions {
+            if interaction.enabled == false { continue }
+            if case .flowEntered = interaction.trigger {
+                enqueueActions(
+                    interaction.actions,
+                    context: TriggerContext(
+                        screenId: journey.flowState.currentScreenId,
+                        componentId: nil,
+                        interactionId: interaction.id
+                    )
+                )
+            }
+        }
 
         return await processQueue(resumeContext: nil)
     }
@@ -648,8 +648,7 @@ final class FlowJourneyRunner {
                 variantId: variant.id
             ),
             userProperties: nil,
-            userPropertiesSetOnce: nil,
-            completion: nil
+            userPropertiesSetOnce: nil
         )
 
         let result = await runNestedActions(variant.actions, context: context)
@@ -674,8 +673,7 @@ final class FlowJourneyRunner {
             action.eventName,
             properties: properties,
             userProperties: nil,
-            userPropertiesSetOnce: nil,
-            completion: nil
+            userPropertiesSetOnce: nil
         )
 
         eventService.track(
@@ -687,8 +685,7 @@ final class FlowJourneyRunner {
                 eventProperties: properties
             ),
             userProperties: nil,
-            userPropertiesSetOnce: nil,
-            completion: nil
+            userPropertiesSetOnce: nil
         )
     }
 
@@ -711,8 +708,7 @@ final class FlowJourneyRunner {
                 attributesUpdated: Array(attributes.keys)
             ),
             userProperties: nil,
-            userPropertiesSetOnce: nil,
-            completion: nil
+            userPropertiesSetOnce: nil
         )
     }
 
@@ -744,8 +740,7 @@ final class FlowJourneyRunner {
                 payload: action.payload?.value
             ),
             userProperties: nil,
-            userPropertiesSetOnce: nil,
-            completion: nil
+            userPropertiesSetOnce: nil
         )
     }
 
@@ -776,8 +771,7 @@ final class FlowJourneyRunner {
                 "$journey_node_executed",
                 properties: payload,
                 userProperties: nil,
-                userPropertiesSetOnce: nil,
-                completion: nil
+                userPropertiesSetOnce: nil
             )
             return .continue
         }
@@ -1045,7 +1039,7 @@ final class FlowJourneyRunner {
         value: Any,
         screenId: String?
     ) async -> RunOutcome? {
-        let interactions = (screenId != nil) ? (interactionsByScreen[screenId!] ?? []) : []
+        let interactions = (screenId != nil) ? (interactionsById[screenId!] ?? []) : []
         if interactions.isEmpty { return nil }
 
         for interaction in interactions {
@@ -1102,28 +1096,19 @@ final class FlowJourneyRunner {
         screenId: String?,
         componentId: String?
     ) -> [InteractionAction]? {
-        if interactionId == "entry" {
-            return remoteFlow.entryActions ?? []
-        }
-
         if let screenId,
-           let list = interactionsByScreen[screenId],
+           let list = interactionsById[screenId],
            let match = list.first(where: { $0.id == interactionId }) {
             return match.actions
         }
 
         if let componentId,
-           let list = interactionsByComponent[componentId],
+           let list = interactionsById[componentId],
            let match = list.first(where: { $0.id == interactionId }) {
             return match.actions
         }
 
-        for (_, list) in interactionsByScreen {
-            if let match = list.first(where: { $0.id == interactionId }) {
-                return match.actions
-            }
-        }
-        for (_, list) in interactionsByComponent {
+        for (_, list) in interactionsById {
             if let match = list.first(where: { $0.id == interactionId }) {
                 return match.actions
             }
@@ -1134,7 +1119,7 @@ final class FlowJourneyRunner {
 
     private func buildAfterDelayTriggers(for screenId: String) -> [FlowAfterDelaySnapshot] {
         let now = dateProvider.now()
-        guard let interactions = interactionsByScreen[screenId] else { return [] }
+        guard let interactions = interactionsById[screenId] else { return [] }
 
         return interactions.compactMap { interaction in
             guard interaction.enabled != false else { return nil }
@@ -1196,8 +1181,7 @@ final class FlowJourneyRunner {
                 error: error
             ),
             userProperties: nil,
-            userPropertiesSetOnce: nil,
-            completion: nil
+            userPropertiesSetOnce: nil
         )
     }
 

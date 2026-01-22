@@ -39,9 +39,19 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             viewModels: [ViewModel] = [],
             viewModelInstances: [ViewModelInstance]? = nil
         ) -> RemoteFlow {
+            var interactions = interactionsByScreen
+            if let entryActions, !entryActions.isEmpty {
+                interactions["start"] = [
+                    Interaction(
+                        id: "start",
+                        trigger: .flowEntered,
+                        actions: entryActions,
+                        enabled: true
+                    )
+                ]
+            }
             return RemoteFlow(
                 id: flowId,
-                version: "v1",
                 bundle: FlowBundleRef(
                     url: "https://example.com/flow/\(flowId)",
                     manifest: BuildManifest(
@@ -51,22 +61,14 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
                     )
                 ),
-                entryScreenId: "screen-1",
-                entryActions: entryActions,
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
-                        name: nil,
-                        locale: nil,
-                        route: nil,
                         defaultViewModelId: viewModels.first?.id,
                         defaultInstanceId: nil
                     )
                 ],
-                interactions: RemoteFlowInteractions(
-                    screens: interactionsByScreen,
-                    components: nil
-                ),
+                interactions: interactions,
                 viewModels: viewModels,
                 viewModelInstances: viewModelInstances,
                 converters: nil,
@@ -635,6 +637,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let profile = ProfileResponse(
                     campaigns: [],
                     segments: [],
+                    flows: [],
                     userProperties: nil,
                     experiments: ["exp-1": assignment],
                     features: nil,

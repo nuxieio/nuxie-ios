@@ -33,7 +33,6 @@ final class FlowViewModelRuntimeTests: QuickSpec {
         ) -> RemoteFlow {
             return RemoteFlow(
                 id: "flow-runtime",
-                version: "v1",
                 bundle: FlowBundleRef(
                     url: "https://example.com/flow/runtime",
                     manifest: BuildManifest(
@@ -43,19 +42,14 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                         files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
                     )
                 ),
-                entryScreenId: "screen-1",
-                entryActions: nil,
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
-                        name: nil,
-                        locale: nil,
-                        route: nil,
                         defaultViewModelId: defaultViewModelId ?? viewModels.first?.id,
                         defaultInstanceId: nil
                     )
                 ],
-                interactions: RemoteFlowInteractions(screens: [:], components: nil),
+                interactions: [:],
                 viewModels: viewModels,
                 viewModelInstances: viewModelInstances,
                 converters: nil,
