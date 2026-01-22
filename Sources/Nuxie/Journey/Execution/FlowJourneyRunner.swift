@@ -126,10 +126,16 @@ final class FlowJourneyRunner {
         path: VmPathRef,
         value: Any,
         source: String?,
-        screenId: String?
+        screenId: String?,
+        instanceId: String?
     ) async -> RunOutcome? {
         let resolvedScreenId = screenId ?? journey.flowState.currentScreenId
-        _ = viewModels.setValue(path: path, value: value, screenId: resolvedScreenId)
+        _ = viewModels.setValue(
+            path: path,
+            value: value,
+            screenId: resolvedScreenId,
+            instanceId: instanceId
+        )
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
         let outcome = await dispatchViewModelChanged(path: path, value: value, screenId: resolvedScreenId)
