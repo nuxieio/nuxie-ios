@@ -52,6 +52,7 @@ public class MockProfileService: ProfileServiceProtocol {
         self.profileResponse = ProfileResponse(
             campaigns: [campaign],
             segments: [segment],
+            flows: [ResponseBuilders.buildRemoteFlow()],
             userProperties: nil,
             experiments: nil,
             features: nil,
@@ -129,6 +130,7 @@ public class MockProfileService: ProfileServiceProtocol {
         profileResponse = ProfileResponse(
             campaigns: campaigns,
             segments: response.segments,
+            flows: response.flows,
             userProperties: response.userProperties,
             experiments: response.experiments,
             features: response.features,

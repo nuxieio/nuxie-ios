@@ -132,15 +132,14 @@ class FlowViewModel {
     /// Update the flow and reload if content has changed
     func updateFlowIfNeeded(_ newFlow: Flow) {
         // Check if the flow content has changed (using manifest hash)
-        let hasContentChanged = flow.manifest?.contentHash != newFlow.manifest?.contentHash
-        let hasURLChanged = flow.url != newFlow.url
+        let hasContentChanged = flow.manifest.contentHash != newFlow.manifest.contentHash
         
         // Always update the flow reference
         self.flow = newFlow
         self.products = newFlow.products
         
         // If content or URL changed, reload the web view
-        if hasContentChanged || hasURLChanged {
+        if hasContentChanged {
             LogDebug("Flow content changed for \(flow.id), reloading web view")
             loadFlow()
         } else if products != newFlow.products {

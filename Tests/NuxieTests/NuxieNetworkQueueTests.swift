@@ -57,6 +57,7 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
         return ProfileResponse(
             campaigns: [],
             segments: [],
+            flows: [],
             userProperties: nil,
             experiments: nil,
             features: nil,
@@ -68,6 +69,7 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
         return ProfileResponse(
             campaigns: [],
             segments: [],
+            flows: [],
             userProperties: nil,
             experiments: nil,
             features: nil,

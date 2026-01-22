@@ -19,7 +19,6 @@ class MockFlowViewController: FlowViewController {
     init(mockFlowId: String = "test-flow") {
         let description = RemoteFlow(
             id: mockFlowId,
-            version: "v1",
             bundle: FlowBundleRef(
                 url: "https://example.com/flow/\(mockFlowId)",
                 manifest: BuildManifest(
@@ -31,19 +30,14 @@ class MockFlowViewController: FlowViewController {
                     ]
                 )
             ),
-            entryScreenId: "screen-1",
-            entryActions: nil,
             screens: [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    name: nil,
-                    locale: nil,
-                    route: nil,
                     defaultViewModelId: nil,
                     defaultInstanceId: nil
                 )
             ],
-            interactions: RemoteFlowInteractions(screens: [:], components: nil),
+            interactions: [:],
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,
