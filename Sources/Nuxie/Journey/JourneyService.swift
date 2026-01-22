@@ -30,6 +30,8 @@ public protocol JourneyServiceProtocol: AnyObject {
 
   func handleEvent(_ event: NuxieEvent) async
 
+  func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult]
+
   func handleSegmentChange(distinctId: String, segments: Set<String>) async
 
   func getActiveJourneys(for distinctId: String) async -> [Journey]
@@ -62,6 +64,7 @@ public actor JourneyService: JourneyServiceProtocol {
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
   @Injected(\.featureService) private var featureService: FeatureServiceProtocol
   @Injected(\.eventService) private var eventService: EventServiceProtocol
+  @Injected(\.triggerBroker) private var triggerBroker: TriggerBrokerProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
   @Injected(\.goalEvaluator) private var goalEvaluator: GoalEvaluatorProtocol
@@ -177,11 +180,23 @@ public actor JourneyService: JourneyServiceProtocol {
     distinctId: String,
     originEventId: String? = nil
   ) async -> Journey? {
-    guard canStartJourney(campaign: campaign, distinctId: distinctId) else {
+    guard suppressionReason(campaign: campaign, distinctId: distinctId) == nil else {
       LogDebug("User \(distinctId) cannot start journey for campaign \(campaign.id)")
       return nil
     }
 
+    return await startJourneyInternal(
+      for: campaign,
+      distinctId: distinctId,
+      originEventId: originEventId
+    )
+  }
+
+  private func startJourneyInternal(
+    for campaign: Campaign,
+    distinctId: String,
+    originEventId: String? = nil
+  ) async -> Journey? {
     guard let flowId = campaign.flowId else {
       LogError("Campaign \(campaign.id) missing flowId, cannot start journey")
       return nil
@@ -287,11 +302,31 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   public func handleEvent(_ event: NuxieEvent) async {
-    guard let campaigns = await getAllCampaigns(for: event.distinctId) else { return }
+    _ = await handleEventForTrigger(event)
+  }
+
+  public func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+    guard let campaigns = await getAllCampaigns(for: event.distinctId) else { return [] }
+
+    var results: [JourneyTriggerResult] = []
 
     for campaign in campaigns {
       guard await shouldTriggerFromEvent(campaign: campaign, event: event) else { continue }
-      _ = await startJourney(for: campaign, distinctId: event.distinctId, originEventId: event.id)
+
+      if let reason = suppressionReason(campaign: campaign, distinctId: event.distinctId) {
+        results.append(.suppressed(reason))
+        continue
+      }
+
+      if let journey = await startJourneyInternal(
+        for: campaign,
+        distinctId: event.distinctId,
+        originEventId: event.id
+      ) {
+        results.append(.started(journey))
+      } else {
+        results.append(.suppressed(.unknown("start_failed")))
+      }
     }
 
     let journeys = await getActiveJourneys(for: event.distinctId)
@@ -317,6 +352,8 @@ public actor JourneyService: JourneyServiceProtocol {
         handleOutcome(outcome, journey: journey)
       }
     }
+
+    return results
   }
 
   public func handleSegmentChange(distinctId: String, segments: Set<String>) async {
@@ -402,18 +439,19 @@ public actor JourneyService: JourneyServiceProtocol {
       }
 
     case "action/view_model_changed":
-      let path = parsePathRef(payload)
-      let value = payload["value"] ?? NSNull()
-      let source = payload["source"] as? String
-      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
-      let outcome = await runner.handleViewModelChanged(
-        path: path,
-        value: value,
-        source: source,
-        screenId: screenId
-      )
-      handleOutcome(outcome, journey: journey)
-      persistJourney(journey)
+      if let path = parsePathRef(payload) {
+        let value = payload["value"] ?? NSNull()
+        let source = payload["source"] as? String
+        let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+        let outcome = await runner.handleViewModelChanged(
+          path: path,
+          value: value,
+          source: source,
+          screenId: screenId
+        )
+        handleOutcome(outcome, journey: journey)
+        persistJourney(journey)
+      }
 
     case "action/event":
       let name = payload["name"] as? String ?? ""
@@ -683,6 +721,20 @@ public actor JourneyService: JourneyServiceProtocol {
       userPropertiesSetOnce: nil
     )
 
+    if let originEventId = journey.getContext("_origin_event_id") as? String {
+      let update = JourneyUpdate(
+        journeyId: journey.id,
+        campaignId: journey.campaignId,
+        flowId: journey.flowId,
+        exitReason: reason,
+        goalMet: journey.convertedAt != nil,
+        goalMetAt: journey.convertedAt,
+        durationSeconds: duration,
+        flowExitReason: nil
+      )
+      Task { await triggerBroker.emit(eventId: originEventId, update: .journey(update)) }
+    }
+
     cancelTasks(for: journey.id)
     flowRunners.removeValue(forKey: journey.id)
     runtimeDelegates.removeValue(forKey: journey.id)
@@ -765,23 +817,29 @@ public actor JourneyService: JourneyServiceProtocol {
 
   // MARK: - Reentry Policy
 
-  private func canStartJourney(campaign: Campaign, distinctId: String) -> Bool {
+  private func suppressionReason(campaign: Campaign, distinctId: String) -> SuppressReason? {
+    if campaign.flowId == nil {
+      return .noFlow
+    }
+
     let live = inMemoryJourneysById.values.filter {
       $0.distinctId == distinctId && $0.campaignId == campaign.id && $0.status.isLive
     }
-    if !live.isEmpty { return false }
+    if !live.isEmpty { return .alreadyActive }
 
     switch campaign.reentry {
     case .everyTime:
-      return true
+      return nil
     case .oneTime:
-      return !journeyStore.hasCompletedCampaign(distinctId: distinctId, campaignId: campaign.id)
+      let completed = journeyStore.hasCompletedCampaign(distinctId: distinctId, campaignId: campaign.id)
+      return completed ? .reentryLimited : nil
     case .oncePerWindow(let window):
       guard let lastCompletion = journeyStore.lastCompletionTime(distinctId: distinctId, campaignId: campaign.id) else {
-        return true
+        return nil
       }
       let interval = windowInterval(window)
-      return dateProvider.timeIntervalSince(lastCompletion) >= interval
+      let allowed = dateProvider.timeIntervalSince(lastCompletion) >= interval
+      return allowed ? nil : .reentryLimited
     }
   }
 
@@ -950,7 +1008,7 @@ public actor JourneyService: JourneyServiceProtocol {
     return nil
   }
 
-  private func parsePathRef(_ payload: [String: Any]) -> VmPathRef {
+  private func parsePathRef(_ payload: [String: Any]) -> VmPathRef? {
     let isRelative = payload["isRelative"] as? Bool
     let nameBased = payload["nameBased"] as? Bool
     if let pathIds = payload["pathIds"] as? [Int] {
@@ -959,10 +1017,7 @@ public actor JourneyService: JourneyServiceProtocol {
     if let pathIds = payload["pathIds"] as? [NSNumber] {
       return .ids(VmPathIds(pathIds: pathIds.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
     }
-    if let path = payload["path"] as? String {
-      return .path(path)
-    }
-    return .raw("unknown")
+    return nil
   }
 
   private func handlePurchase(productId: String, controller: FlowViewController) async {

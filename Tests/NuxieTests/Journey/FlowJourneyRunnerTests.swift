@@ -72,7 +72,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 viewModels: viewModels,
                 viewModelInstances: viewModelInstances,
                 converters: nil,
-                pathIndex: nil
             )
         }
 
@@ -125,7 +124,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .screenShown,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.flag"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -204,11 +203,11 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .screenShown,
                     actions: [
                         .listInsert(ListInsertAction(
-                            path: .path("vm.items"),
+                            path: .ids(VmPathIds(pathIds: [0, 2])),
                             index: 0,
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         )),
-                        .fireTrigger(FireTriggerAction(path: .path("vm.pulse")))
+                        .fireTrigger(FireTriggerAction(path: .ids(VmPathIds(pathIds: [0, 4]))))
                     ],
                     enabled: true
                 )
@@ -274,16 +273,16 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .screenShown,
                     actions: [
                         .listMove(ListMoveAction(
-                            path: .path("vm.items"),
+                            path: .ids(VmPathIds(pathIds: [0, 2])),
                             from: 0,
                             to: 2
                         )),
                         .listSet(ListSetAction(
-                            path: .path("vm.items"),
+                            path: .ids(VmPathIds(pathIds: [0, 2])),
                             index: 1,
                             value: AnyCodable(["literal": "z"] as [String: Any])
                         )),
-                        .listClear(ListClearAction(path: .path("vm.items")))
+                        .listClear(ListClearAction(path: .ids(VmPathIds(pathIds: [0, 2]))))
                     ],
                     enabled: true
                 )
@@ -339,7 +338,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .afterDelay(delayMs: 1000),
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.flag"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -393,7 +392,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     entryActions: [
                         .delay(DelayAction(durationMs: 500)),
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.flag"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -481,7 +480,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     entryActions: [
                         .waitUntil(waitAction),
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.flag"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -534,7 +533,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     condition: TestIRBuilder.alwaysFalse(),
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.variant"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         ))
                     ]
@@ -545,7 +544,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     condition: TestIRBuilder.alwaysTrue(),
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.variant"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": "b"] as [String: Any])
                         ))
                     ]
@@ -596,7 +595,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     percentage: 50,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.variant"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         ))
                     ]
@@ -607,7 +606,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     percentage: 50,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .path("vm.variant"),
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
                             value: AnyCodable(["literal": "b"] as [String: Any])
                         ))
                     ]

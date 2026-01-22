@@ -41,7 +41,6 @@ class MockFlowViewController: FlowViewController {
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,
-            pathIndex: nil
         )
 
         let flow = Flow(remoteFlow: description, products: [])

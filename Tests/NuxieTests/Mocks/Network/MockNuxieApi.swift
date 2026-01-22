@@ -199,7 +199,6 @@ public actor MockNuxieApi: NuxieApiProtocol {
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,
-            pathIndex: nil
         )
     }
     

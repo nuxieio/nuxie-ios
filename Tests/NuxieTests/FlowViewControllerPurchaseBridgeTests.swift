@@ -26,7 +26,6 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                     viewModels: [],
                     viewModelInstances: nil,
                     converters: nil,
-                    pathIndex: nil
                 )
                 return Flow(remoteFlow: description, products: products)
             }

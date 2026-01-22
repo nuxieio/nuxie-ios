@@ -148,7 +148,6 @@ struct ResponseBuilders {
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,
-            pathIndex: nil
         )
     }
     
