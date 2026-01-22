@@ -5,7 +5,7 @@ import FactoryKit
 /// Protocol for presenting flows in dedicated windows
 protocol FlowPresentationServiceProtocol: AnyObject {
     /// Present a flow by ID in a dedicated window
-    @MainActor func presentFlow(_ flowId: String, from journey: Journey?) async throws
+    @MainActor func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController
     
     /// Dismiss the currently presented flow
     @MainActor func dismissCurrentFlow() async
@@ -53,7 +53,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         currentWindow?.isPresenting ?? false
     }
     
-    func presentFlow(_ flowId: String, from journey: Journey?) async throws {
+    func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
         LogInfo("FlowPresentationService: Presenting flow \(flowId)")
         
         // Check if we're within the grace period
@@ -79,7 +79,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         }
         
         // 2. Get flow view controller from FlowService
-        let flowViewController = try await flowService.viewController(for: flowId)
+        let flowViewController = try await flowService.viewController(for: flowId, runtimeDelegate: runtimeDelegate)
         
         // 3. Create presentation window
         guard let window = windowProvider.createPresentationWindow() else {
@@ -103,6 +103,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         await window.present(flowViewController)
         
         LogDebug("FlowPresentationService: Successfully presented flow \(flowId)")
+        return flowViewController
     }
     
     func dismissCurrentFlow() async {

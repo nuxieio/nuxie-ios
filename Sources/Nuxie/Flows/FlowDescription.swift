@@ -39,6 +39,79 @@ public struct FlowPathIndexEntry: Codable {
     public let pathIds: [Int]
 }
 
+// MARK: - View Model Path References
+
+public enum VmPathRef: Codable, Equatable {
+    case path(String)
+    case ids([Int])
+    case raw(String)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case path
+        case pathIds
+    }
+
+    private enum Kind: String, Codable {
+        case path
+        case ids
+    }
+
+    public init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(), let raw = try? single.decode(String.self) {
+            self = .path(raw)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let kind = try? container.decode(Kind.self, forKey: .kind) {
+            switch kind {
+            case .path:
+                let path = try container.decode(String.self, forKey: .path)
+                self = .path(path)
+                return
+            case .ids:
+                let pathIds = try container.decode([Int].self, forKey: .pathIds)
+                self = .ids(pathIds)
+                return
+            }
+        }
+
+        if let path = try? container.decode(String.self, forKey: .path) {
+            self = .path(path)
+            return
+        }
+
+        self = .raw("unknown")
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .path(let path):
+            try container.encode(Kind.path, forKey: .kind)
+            try container.encode(path, forKey: .path)
+        case .ids(let pathIds):
+            try container.encode(Kind.ids, forKey: .kind)
+            try container.encode(pathIds, forKey: .pathIds)
+        case .raw(let raw):
+            try container.encode(Kind.path, forKey: .kind)
+            try container.encode(raw, forKey: .path)
+        }
+    }
+
+    public var normalizedPath: String {
+        switch self {
+        case .path(let path):
+            return path
+        case .ids(let ids):
+            return "ids:\(ids.map(String.init).joined(separator: "."))"
+        case .raw(let raw):
+            return raw
+        }
+    }
+}
+
 // MARK: - Interaction Models
 
 public struct Interaction: Codable {
@@ -59,6 +132,7 @@ public enum InteractionTrigger: Codable {
     case afterDelay(delayMs: Int)
     case event(eventName: String, filter: IREnvelope?)
     case manual(label: String?)
+    case viewModelChanged(path: VmPathRef, debounceMs: Int?)
     case unknown(type: String, payload: [String: AnyCodable]?)
 
     public enum DragDirection: String, Codable {
@@ -78,6 +152,8 @@ public enum InteractionTrigger: Codable {
         case eventName
         case filter
         case label
+        case path
+        case debounceMs
     }
 
     private enum TriggerType: String, Codable {
@@ -91,13 +167,13 @@ public enum InteractionTrigger: Codable {
         case afterDelay = "after_delay"
         case event
         case manual
+        case viewModelChanged = "view_model_changed"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = (try? container.decode(TriggerType.self, forKey: .type)) ?? .manual
-
-        switch type {
+        let typeValue = (try? container.decode(TriggerType.self, forKey: .type))
+        switch typeValue {
         case .tap:
             self = .tap
         case .longPress:
@@ -124,6 +200,18 @@ public enum InteractionTrigger: Codable {
             self = .event(eventName: eventName, filter: filter)
         case .manual:
             self = .manual(label: try container.decodeIfPresent(String.self, forKey: .label))
+        case .viewModelChanged:
+            let path = (try? container.decode(VmPathRef.self, forKey: .path)) ?? .raw("")
+            let debounceMs = try container.decodeIfPresent(Int.self, forKey: .debounceMs)
+            self = .viewModelChanged(path: path, debounceMs: debounceMs)
+        case .none:
+            let rawType = (try? container.decode(String.self, forKey: .type)) ?? "unknown"
+            var payload: [String: AnyCodable] = [:]
+            for key in container.allKeys {
+                if key == .type { continue }
+                payload[key.stringValue] = (try? container.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(nil)
+            }
+            self = .unknown(type: rawType, payload: payload)
         }
     }
 
@@ -158,6 +246,10 @@ public enum InteractionTrigger: Codable {
         case .manual(let label):
             try container.encode(TriggerType.manual, forKey: .type)
             try container.encodeIfPresent(label, forKey: .label)
+        case .viewModelChanged(let path, let debounceMs):
+            try container.encode(TriggerType.viewModelChanged, forKey: .type)
+            try container.encode(path, forKey: .path)
+            try container.encodeIfPresent(debounceMs, forKey: .debounceMs)
         case .unknown(let type, let payload):
             try container.encode(type, forKey: .type)
             if let payload {
@@ -209,8 +301,8 @@ public enum InteractionAction: Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let type = (try? container.decode(ActionType.self, forKey: .type)) ?? .exit
-        switch type {
+        let typeValue = (try? container.decode(ActionType.self, forKey: .type))
+        switch typeValue {
         case .navigate:
             self = .navigate(try NavigateAction(from: decoder))
         case .back:
@@ -237,6 +329,14 @@ public enum InteractionAction: Codable {
             self = .setViewModel(try SetViewModelAction(from: decoder))
         case .exit:
             self = .exit(try ExitAction(from: decoder))
+        case .none:
+            let rawType = (try? container.decode(String.self, forKey: .type)) ?? "unknown"
+            let dynamic = try decoder.container(keyedBy: DynamicCodingKey.self)
+            var payload: [String: AnyCodable] = [:]
+            for key in dynamic.allKeys where key.stringValue != "type" {
+                payload[key.stringValue] = (try? dynamic.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(nil)
+            }
+            self = .unknown(type: rawType, payload: payload)
         }
     }
 
@@ -435,10 +535,10 @@ public struct RemoteAction: Codable {
 
 public struct SetViewModelAction: Codable {
     public let type: String
-    public let path: String
+    public let path: VmPathRef
     public let value: AnyCodable
 
-    public init(type: String = "set_view_model", path: String, value: AnyCodable) {
+    public init(type: String = "set_view_model", path: VmPathRef, value: AnyCodable) {
         self.type = type
         self.path = path
         self.value = value

@@ -3,12 +3,21 @@ import UIKit
 import WebKit
 import FactoryKit
 
+/// Delegate for Flow runtime bridge messages
+protocol FlowRuntimeDelegate: AnyObject {
+    func flowViewController(_ controller: FlowViewController, didReceiveRuntimeMessage type: String, payload: [String: Any], id: String?)
+    func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason)
+}
+
 /// FlowViewController - displays flow content in a WebView with loading and error states
 public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     
     // MARK: - Properties
     
     private let viewModel: FlowViewModel
+
+    /// Delegate for runtime bridge messages
+    weak var runtimeDelegate: FlowRuntimeDelegate?
     
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
@@ -92,10 +101,7 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
             self?.flowWebView.load(request)
         }
         
-        // Bind to product injection
-        viewModel.onInjectProducts = { [weak self] products in
-            self?.injectProducts()
-        }
+        // Product injection handled via runtime bridge when needed
     }
     
     private func setupViews() {
@@ -217,7 +223,9 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
         closeButton.titleLabel?.font = .systemFont(ofSize: 17)
         closeButton.setTitleColor(.label, for: .normal)
         closeButton.addAction(UIAction { [weak self] _ in
-            self?.dismiss(animated: true)
+            guard let self else { return }
+            self.runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
+            self.dismiss(animated: true) { self.onClose?(.userDismissed) }
         }, for: .touchUpInside)
         errorView.addSubview(closeButton)
         
@@ -272,47 +280,43 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     }
     
     // MARK: - Actions
-    
-    
-    // MARK: - Product Injection
-    
-    private func injectProducts() {
-        // Send products using @nuxie/bridge format
-        let productDicts: [[String: Any]] = products.map { p in
-            var d: [String: Any] = [
-                "id": p.id,
-                "name": p.name,
-                "price": p.price
-            ]
-            if let period = p.period { d["period"] = period.rawValue }
-            return d
-        }
-        let payload: [String: Any] = ["products": productDicts]
-        flowWebView.sendBridgeMessage(type: "set_products", payload: payload) { _, error in
-            if let error = error {
-                LogError("Failed to send products via bridge: \(error)")
-            } else {
-                LogDebug("Sent \(self.products.count) products to flow \(self.flow.id) via bridge")
-            }
-        }
-    }
 }
 
 // MARK: - FlowMessageHandlerDelegate
 
 extension FlowViewController {
+    /// Send a runtime message to the Flow bundle
+    func sendRuntimeMessage(
+        type: String,
+        payload: [String: Any] = [:],
+        replyTo: String? = nil,
+        completion: ((Any?, Error?) -> Void)? = nil
+    ) {
+        flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
+    }
+
     // Handle @nuxie/bridge messages directly
     func messageHandler(_ handler: FlowMessageHandler, didReceiveBridgeMessage type: String, payload: [String : Any], id: String?, from webView: FlowWebView) {
         switch type {
-        case "request_products":
-            injectProducts()
-        case "purchase":
-            if let productId = payload["productId"] as? String {
+        case "runtime/ready", "runtime/screen_changed", "action/view_model_changed", "action/event":
+            runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+        case "action/purchase":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else if let productId = payload["productId"] as? String {
                 self.handleBridgePurchase(productId: productId, requestId: id)
             }
-        case "restore":
-            self.handleBridgeRestore(requestId: id)
+        case "action/restore":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else {
+                self.handleBridgeRestore(requestId: id)
+            }
+        case "action/dismiss":
+            runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
+            dismiss(animated: true) { self.onClose?(.userDismissed) }
         case "dismiss", "closeFlow":
+            runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
             dismiss(animated: true) { self.onClose?(.userDismissed) }
         case "openURL":
             if let urlString = payload["url"] as? String, let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
