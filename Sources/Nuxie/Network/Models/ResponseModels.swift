@@ -21,7 +21,6 @@ public struct BatchError: Codable {
 public struct ProfileResponse: Codable {
     public let campaigns: [Campaign]
     public let segments: [Segment]
-    public let flows: [RemoteFlow]
     public let userProperties: [String: AnyCodable]?
     /// Server-computed experiment variant assignments (experimentId -> assignment)
     public let experiments: [String: ExperimentAssignment]?
@@ -33,7 +32,6 @@ public struct ProfileResponse: Codable {
     public init(
         campaigns: [Campaign],
         segments: [Segment],
-        flows: [RemoteFlow],
         userProperties: [String: AnyCodable]? = nil,
         experiments: [String: ExperimentAssignment]? = nil,
         features: [Feature]? = nil,
@@ -41,7 +39,6 @@ public struct ProfileResponse: Codable {
     ) {
         self.campaigns = campaigns
         self.segments = segments
-        self.flows = flows
         self.userProperties = userProperties
         self.experiments = experiments
         self.features = features
@@ -164,22 +161,77 @@ public enum CampaignTrigger: Codable {
     }
 }
 
+// MARK: - Reentry Policy
+
+public struct Window: Codable {
+    public let amount: Int
+    public let unit: WindowUnit
+}
+
+public enum WindowUnit: String, Codable {
+    case minute
+    case hour
+    case day
+    case week
+}
+
+public enum CampaignReentry: Codable {
+    case oneTime
+    case everyTime
+    case oncePerWindow(Window)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case window
+    }
+
+    private enum ReentryType: String, Codable {
+        case oneTime = "one_time"
+        case everyTime = "every_time"
+        case oncePerWindow = "once_per_window"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(ReentryType.self, forKey: .type)
+
+        switch type {
+        case .oneTime:
+            self = .oneTime
+        case .everyTime:
+            self = .everyTime
+        case .oncePerWindow:
+            let window = try container.decode(Window.self, forKey: .window)
+            self = .oncePerWindow(window)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .oneTime:
+            try container.encode(ReentryType.oneTime, forKey: .type)
+        case .everyTime:
+            try container.encode(ReentryType.everyTime, forKey: .type)
+        case .oncePerWindow(let window):
+            try container.encode(ReentryType.oncePerWindow, forKey: .type)
+            try container.encode(window, forKey: .window)
+        }
+    }
+}
+
 public struct Campaign: Codable {
     public let id: String
     public let name: String
     public let versionId: String
     public let versionNumber: Int
-    public let frequencyPolicy: String
-    public let frequencyInterval: TimeInterval?
-    public let messageLimit: Int?
+    public let versionName: String?
+    public let reentry: CampaignReentry
     public let publishedAt: String
     
     // Trigger configuration (discriminated union)
     public let trigger: CampaignTrigger
-    public let entryNodeId: String? // First node to execute after trigger
-    
-    // Workflow contains only action nodes
-    public let workflow: Workflow
+    public let flowId: String?
     
     // Goal and exit configuration (optional for backward compatibility)
     public let goal: GoalConfig?
