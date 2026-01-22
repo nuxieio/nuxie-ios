@@ -82,6 +82,9 @@ public protocol NuxiePurchaseDelegate: AnyObject {
     /// - Parameter product: The StoreKit product to purchase
     /// - Returns: Result of the purchase operation
     func purchase(_ product: any StoreProductProtocol) async -> PurchaseResult
+
+    /// Optional fast-path purchase API returning verified transaction data when available
+    func purchaseOutcome(_ product: any StoreProductProtocol) async -> PurchaseOutcome
     
     /// Restore previous purchases
     /// - Returns: Result of the restore operation
@@ -89,7 +92,6 @@ public protocol NuxiePurchaseDelegate: AnyObject {
 }
 
 public extension NuxiePurchaseDelegate {
-    /// Optional fast-path purchase API returning verified transaction data when available
     func purchaseOutcome(_ product: any StoreProductProtocol) async -> PurchaseOutcome {
         let result = await purchase(product)
         return PurchaseOutcome(result: result, productId: product.id)

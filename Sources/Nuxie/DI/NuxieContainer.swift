@@ -128,7 +128,7 @@ extension Container {
       .scope(.sdk)
   }
 
-  var transactionObserver: Factory<TransactionObserver> {
+  var transactionObserver: Factory<TransactionObserverProtocol> {
     self { TransactionObserver() }
       .scope(.sdk)
   }
