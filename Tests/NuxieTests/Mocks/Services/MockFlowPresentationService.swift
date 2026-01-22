@@ -30,6 +30,7 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
         return isPresentingFlow
     }
     
+    @discardableResult
     @MainActor
     public func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
         LogDebug("[MockFlowPresentationService] presentFlow called with flowId: \(flowId), journey: \(journey?.id ?? "nil")")

@@ -358,7 +358,7 @@ public class EventService: EventServiceProtocol {
     }
 
     // Apply enrichment
-    finalProperties = enrich(finalProperties)
+    finalProperties = await enrich(finalProperties)
 
     // Store event locally (for history)
     do {
@@ -410,7 +410,7 @@ public class EventService: EventServiceProtocol {
       }
     }
 
-    finalProperties = enrich(finalProperties)
+    finalProperties = await enrich(finalProperties)
 
     do {
       try await eventStore.storeEvent(
@@ -576,7 +576,7 @@ public class EventService: EventServiceProtocol {
       }
     }
 
-    let finalProperties = enrich(propertiesWithSession)
+    let finalProperties = await enrich(propertiesWithSession)
 
     let nuxieEvent = NuxieEvent(
       name: p.name,
@@ -602,11 +602,11 @@ public class EventService: EventServiceProtocol {
 
   // MARK: - Worker helpers
 
-  private func enrich(_ custom: [String: Any]) -> [String: Any] {
+  private func enrich(_ custom: [String: Any]) async -> [String: Any] {
     let sanitized = EventSanitizer.sanitizeDataTypes(custom)
     let withContext: [String: Any]
     if let contextBuilder {
-      withContext = contextBuilder.buildEnrichedProperties(customProperties: sanitized)
+      withContext = await contextBuilder.buildEnrichedProperties(customProperties: sanitized)
     } else {
       withContext = sanitized
     }
