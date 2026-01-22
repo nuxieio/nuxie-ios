@@ -155,7 +155,7 @@ actor FlowArchiver {
     private func canonicalURL(for flow: Flow) -> URL {
         // Use the content hash and flow ID for canonical path
         // This ensures same content = same file
-        let hash = flow.manifest?.contentHash ?? flow.description.version
+        let hash = flow.manifest?.contentHash ?? flow.remoteFlow.version
         let filename = "flow_\(flow.id)_\(hash).webarchive"
         return cacheDirectory.appendingPathComponent(filename)
     }

@@ -2,19 +2,19 @@ import Foundation
 
 // MARK: - Client-Side Flow Model
 
-/// Client-side flow model that enriches FlowDescription with local state and product data
+/// Client-side flow model that enriches RemoteFlow with local state and product data
 public struct Flow {
-    // IMPORTANT: FlowDescription is immutable server data - never modify
-    public let description: FlowDescription              // Original data from API
+    // IMPORTANT: RemoteFlow is immutable server data - never modify
+    public let remoteFlow: RemoteFlow              // Original data from API
     
     // Client-side enrichments
     public var products: [FlowProduct]         // Products fetched from StoreKit
     
     // Convenience accessors proxy to remoteFlow for common properties
-    public var id: String { description.id }
-    public var name: String { description.id }
-    public var manifest: BuildManifest? { description.bundle.manifest }
-    public var url: String { description.bundle.url }
+    public var id: String { remoteFlow.id }
+    public var name: String { remoteFlow.id }
+    public var manifest: BuildManifest? { remoteFlow.bundle.manifest }
+    public var url: String { remoteFlow.bundle.url }
     
     // Validation
     public var isValid: Bool {
@@ -22,10 +22,10 @@ public struct Flow {
     }
     
     public init(
-        description: FlowDescription,
+        remoteFlow: RemoteFlow,
         products: [FlowProduct] = []
     ) {
-        self.description = description
+        self.remoteFlow = remoteFlow
         self.products = products
     }
 }

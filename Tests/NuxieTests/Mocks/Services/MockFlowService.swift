@@ -3,7 +3,7 @@ import Foundation
 
 /// Mock implementation of FlowService for testing
 public class MockFlowService: FlowServiceProtocol {
-    public var prefetchedFlows: [FlowDescription] = []
+    public var prefetchedFlows: [RemoteFlow] = []
     public var removedFlowIds: [String] = []
     public var fetchedFlowIds: [String] = []
     
@@ -22,8 +22,8 @@ public class MockFlowService: FlowServiceProtocol {
     public var mockViewControllers: [String: FlowViewController] = [:]
     public var defaultMockViewController: FlowViewController?
     
-    public func prefetchFlows(_ descriptions: [FlowDescription]) {
-        prefetchedFlows.append(contentsOf: descriptions)
+    public func prefetchFlows(_ remoteFlows: [RemoteFlow]) {
+        prefetchedFlows.append(contentsOf: remoteFlows)
     }
     
     public func removeFlows(_ flowIds: [String]) async {

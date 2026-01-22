@@ -32,14 +32,14 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             )
         }
 
-        func makeFlowDescription(
+        func makeRemoteFlow(
             flowId: String,
             entryActions: [InteractionAction]? = nil,
             interactionsByScreen: [String: [Interaction]] = [:],
             viewModels: [ViewModel] = [],
             viewModelInstances: [ViewModelInstance]? = nil
-        ) -> FlowDescription {
-            return FlowDescription(
+        ) -> RemoteFlow {
+            return RemoteFlow(
                 id: flowId,
                 version: "v1",
                 bundle: FlowBundleRef(
@@ -54,7 +54,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 entryScreenId: "screen-1",
                 entryActions: entryActions,
                 screens: [
-                    FlowDescriptionScreen(
+                    RemoteFlowScreen(
                         id: "screen-1",
                         name: nil,
                         locale: nil,
@@ -63,7 +63,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         defaultInstanceId: nil
                     )
                 ],
-                interactions: FlowDescriptionInteractions(
+                interactions: RemoteFlowInteractions(
                     screens: interactionsByScreen,
                     components: nil
                 ),
@@ -77,13 +77,13 @@ final class FlowJourneyRunnerTests: AsyncSpec {
         describe("FlowJourneyRunner") {
             it("pauses on entry delay") {
                 let flowId = "flow-delay"
-                let flowDescription = makeFlowDescription(
+                let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
                     entryActions: [
                         .delay(DelayAction(durationMs: 5000))
                     ]
                 )
-                let flow = Flow(description: flowDescription, products: [])
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 let campaign = makeCampaign(flowId: flowId)
                 let journey = Journey(campaign: campaign, distinctId: "user-1")
                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
@@ -129,13 +129,13 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     ],
                     enabled: true
                 )
-                let flowDescription = makeFlowDescription(
+                let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
                     interactionsByScreen: ["screen-1": [interaction]],
                     viewModels: [viewModel]
                 )
 
-                let flow = Flow(description: flowDescription, products: [])
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 let campaign = makeCampaign(flowId: flowId)
                 let journey = Journey(campaign: campaign, distinctId: "user-1")
                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
@@ -210,13 +210,13 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     ],
                     enabled: true
                 )
-                let flowDescription = makeFlowDescription(
+                let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
                     interactionsByScreen: ["screen-1": [interaction]],
                     viewModels: [viewModel]
                 )
 
-                let flow = Flow(description: flowDescription, products: [])
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 let campaign = makeCampaign(flowId: flowId)
                 let journey = Journey(campaign: campaign, distinctId: "user-1")
                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
@@ -267,13 +267,13 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     ],
                     enabled: true
                 )
-                let flowDescription = makeFlowDescription(
+                let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
                     interactionsByScreen: ["screen-1": [interaction]],
                     viewModels: [viewModel]
                 )
 
-                let flow = Flow(description: flowDescription, products: [])
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 let campaign = makeCampaign(flowId: flowId)
                 let journey = Journey(campaign: campaign, distinctId: "user-1")
                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
@@ -310,7 +310,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         )
                     ]
                 )
-                let flowDescription = makeFlowDescription(
+                let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
                     entryActions: [
                         .delay(DelayAction(durationMs: 500)),
@@ -322,7 +322,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     viewModels: [viewModel]
                 )
 
-                let flow = Flow(description: flowDescription, products: [])
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 let campaign = makeCampaign(flowId: flowId)
                 let journey = Journey(campaign: campaign, distinctId: "user-1")
                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
@@ -341,6 +341,356 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let flag = values?["flag"]?.value as? Bool
                 expect(flag).to(equal(true))
                 expect(journey.flowState.pendingAction).to(beNil())
+            }
+
+            it("pauses on time_window when outside configured hours") {
+                let flowId = "flow-time-window"
+                let action = TimeWindowAction(
+                    startTime: "09:00",
+                    endTime: "17:00",
+                    timezone: "UTC",
+                    daysOfWeek: nil
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.timeWindow(action)]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+                let date = calendar.date(from: DateComponents(year: 2024, month: 1, day: 1, hour: 2, minute: 0))!
+                mocks.dateProvider.setCurrentDate(date)
+
+                let outcome = await runner.handleRuntimeReady()
+
+                if case .paused(let pending) = outcome {
+                    expect(pending.kind).to(equal(.timeWindow))
+                    expect(pending.resumeAt).toNot(beNil())
+                } else {
+                    fail("Expected time_window to pause")
+                }
+            }
+
+            it("resumes wait_until when event condition is satisfied") {
+                let flowId = "flow-wait"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    properties: [
+                        "flag": ViewModelProperty(
+                            type: .boolean,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(false),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let waitAction = WaitUntilAction(
+                    condition: TestWaitCondition.event("ready"),
+                    maxTimeMs: 10_000
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .waitUntil(waitAction),
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.flag"),
+                            value: AnyCodable(["literal": true] as [String: Any])
+                        ))
+                    ],
+                    viewModels: [viewModel]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let outcome = await runner.handleRuntimeReady()
+                if case .paused(let pending) = outcome {
+                    expect(pending.kind).to(equal(.waitUntil))
+                } else {
+                    fail("Expected wait_until to pause")
+                }
+
+                let event = TestEventBuilder(name: "ready").withDistinctId("user-1").build()
+                _ = await runner.resumePendingAction(reason: .event(event), event: event)
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let flag = values?["flag"]?.value as? Bool
+                expect(flag).to(equal(true))
+                expect(journey.flowState.pendingAction).to(beNil())
+            }
+
+            it("executes the first matching condition branch") {
+                let flowId = "flow-condition"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    properties: [
+                        "variant": ViewModelProperty(
+                            type: .string,
+                            propertyId: 1,
+                            defaultValue: AnyCodable("none"),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let branchA = ConditionBranch(
+                    id: "branch-a",
+                    label: nil,
+                    condition: TestIRBuilder.alwaysFalse(),
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.variant"),
+                            value: AnyCodable(["literal": "a"] as [String: Any])
+                        ))
+                    ]
+                )
+                let branchB = ConditionBranch(
+                    id: "branch-b",
+                    label: nil,
+                    condition: TestIRBuilder.alwaysTrue(),
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.variant"),
+                            value: AnyCodable(["literal": "b"] as [String: Any])
+                        ))
+                    ]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .condition(ConditionAction(branches: [branchA, branchB]))
+                    ],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                _ = await runner.handleRuntimeReady()
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let variant = values?["variant"]?.value as? String
+                expect(variant).to(equal("b"))
+            }
+
+            it("applies experiment variant from profile assignment") {
+                let flowId = "flow-experiment"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    properties: [
+                        "variant": ViewModelProperty(
+                            type: .string,
+                            propertyId: 1,
+                            defaultValue: AnyCodable("none"),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let variantA = ExperimentVariant(
+                    id: "a",
+                    name: "A",
+                    percentage: 50,
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.variant"),
+                            value: AnyCodable(["literal": "a"] as [String: Any])
+                        ))
+                    ]
+                )
+                let variantB = ExperimentVariant(
+                    id: "b",
+                    name: "B",
+                    percentage: 50,
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.variant"),
+                            value: AnyCodable(["literal": "b"] as [String: Any])
+                        ))
+                    ]
+                )
+
+                let experiment = ExperimentAction(
+                    experimentId: "exp-1",
+                    variants: [variantA, variantB]
+                )
+
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.experiment(experiment)],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let assignment = ExperimentAssignment(
+                    experimentId: "exp-1",
+                    variantId: "b",
+                    flowId: nil
+                )
+                let profile = ProfileResponse(
+                    campaigns: [],
+                    segments: [],
+                    userProperties: nil,
+                    experiments: ["exp-1": assignment],
+                    features: nil,
+                    journeys: nil
+                )
+                mocks.profileService.setProfileResponse(profile)
+                _ = try? await mocks.profileService.fetchProfile(distinctId: journey.distinctId)
+
+                _ = await runner.handleRuntimeReady()
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let variant = values?["variant"]?.value as? String
+                expect(variant).to(equal("b"))
+                expect(journey.context["_experiment_id"]?.value as? String).to(equal("exp-1"))
+                expect(journey.context["_variant_id"]?.value as? String).to(equal("b"))
+            }
+
+            it("updates context from remote action success") {
+                let flowId = "flow-remote"
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .remote(RemoteAction(
+                            action: "do_work",
+                            payload: AnyCodable(["key": "value"] as [String: Any]),
+                            async: false
+                        ))
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let execution = EventResponse.ExecutionResult(
+                    success: true,
+                    statusCode: nil,
+                    error: nil,
+                    contextUpdates: ["flag": AnyCodable(true)]
+                )
+                mocks.eventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: nil,
+                    customer: nil,
+                    event: nil,
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: execution
+                )
+
+                _ = await runner.handleRuntimeReady()
+
+                let flag = journey.context["flag"]?.value as? Bool
+                expect(flag).to(equal(true))
+            }
+
+            it("pauses on remote action retryable error") {
+                let flowId = "flow-remote-retry"
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .remote(RemoteAction(
+                            action: "do_work",
+                            payload: AnyCodable(["key": "value"] as [String: Any]),
+                            async: false
+                        ))
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let execution = EventResponse.ExecutionResult(
+                    success: false,
+                    statusCode: 500,
+                    error: EventResponse.ExecutionResult.ExecutionError(
+                        message: "retry later",
+                        retryable: true,
+                        retryAfter: 5
+                    ),
+                    contextUpdates: nil
+                )
+                mocks.eventService.trackWithResponseResult = EventResponse(
+                    status: "error",
+                    payload: nil,
+                    customer: nil,
+                    event: nil,
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: execution
+                )
+
+                let outcome = await runner.handleRuntimeReady()
+
+                if case .paused(let pending) = outcome {
+                    expect(pending.kind).to(equal(.remoteRetry))
+                    expect(pending.resumeAt).toNot(beNil())
+                } else {
+                    fail("Expected remote retry to pause")
+                }
+            }
+
+            it("tracks send_event and updates customer properties") {
+                let flowId = "flow-send-event"
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .updateCustomer(UpdateCustomerAction(attributes: ["plan": AnyCodable("pro")])),
+                        .sendEvent(SendEventAction(
+                            eventName: "custom_event",
+                            properties: ["source": AnyCodable("flow")]
+                        ))
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                _ = await runner.handleRuntimeReady()
+
+                let props = mocks.identityService.getUserProperties()
+                expect(props["plan"] as? String).to(equal("pro"))
+
+                let trackedEvents = mocks.eventService.trackedEvents.map(\.name)
+                expect(trackedEvents).to(contain("custom_event"))
             }
         }
     }

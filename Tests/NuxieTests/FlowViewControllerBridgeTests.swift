@@ -6,14 +6,14 @@ import WebKit
 final class FlowViewControllerBridgeSpec: QuickSpec {
     private func makeFlow(products: [FlowProduct] = []) -> Flow {
         let manifest = BuildManifest(totalFiles: 0, totalSize: 0, contentHash: "hash", files: [])
-        let description = FlowDescription(
+        let description = RemoteFlow(
             id: "flow1",
             version: "v1",
             bundle: FlowBundleRef(url: "about:blank", manifest: manifest),
             entryScreenId: "screen-1",
             entryActions: nil,
             screens: [
-                FlowDescriptionScreen(
+                RemoteFlowScreen(
                     id: "screen-1",
                     name: nil,
                     locale: nil,
@@ -22,13 +22,13 @@ final class FlowViewControllerBridgeSpec: QuickSpec {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            interactions: RemoteFlowInteractions(screens: [:], components: nil),
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,
             pathIndex: nil
         )
-        return Flow(description: description, products: products)
+        return Flow(remoteFlow: description, products: products)
     }
 
     private func loadHTML(_ webView: FlowWebView, html: String) {

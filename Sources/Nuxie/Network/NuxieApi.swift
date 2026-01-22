@@ -337,11 +337,11 @@ extension NuxieApi {
     // MARK: - Flow
     
     /// Fetch flow by ID
-    public func fetchFlow(flowId: String) async throws -> FlowDescription {
+    public func fetchFlow(flowId: String) async throws -> RemoteFlow {
         return try await self.request(
             endpoint: .flow(flowId),
             body: nil,
-            responseType: FlowDescription.self
+            responseType: RemoteFlow.self
         )
     }
     

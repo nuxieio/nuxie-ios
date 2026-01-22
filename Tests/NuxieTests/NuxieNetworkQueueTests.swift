@@ -75,7 +75,7 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
         )
     }
 
-    func fetchFlow(flowId: String) async throws -> FlowDescription {
+    func fetchFlow(flowId: String) async throws -> RemoteFlow {
         fatalError("Not implemented for tests")
     }
 

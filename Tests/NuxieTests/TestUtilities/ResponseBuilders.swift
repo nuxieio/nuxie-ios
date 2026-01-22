@@ -124,13 +124,13 @@ struct ResponseBuilders {
     
     // MARK: - Flow Response
 
-    static func buildFlowDescription(
+    static func buildRemoteFlow(
         id: String = "flow-1",
         version: String = "v1",
         url: String = "https://example.com/builds/flow-1",
         manifest: BuildManifest? = nil
-    ) -> FlowDescription {
-        return FlowDescription(
+    ) -> RemoteFlow {
+        return RemoteFlow(
             id: id,
             version: version,
             bundle: FlowBundleRef(
@@ -140,7 +140,7 @@ struct ResponseBuilders {
             entryScreenId: "screen-1",
             entryActions: nil,
             screens: [
-                FlowDescriptionScreen(
+                RemoteFlowScreen(
                     id: "screen-1",
                     name: nil,
                     locale: nil,
@@ -149,7 +149,7 @@ struct ResponseBuilders {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            interactions: RemoteFlowInteractions(screens: [:], components: nil),
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,

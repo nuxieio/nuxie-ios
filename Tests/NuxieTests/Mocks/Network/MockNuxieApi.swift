@@ -169,14 +169,14 @@ public actor MockNuxieApi: NuxieApiProtocol {
         return try await fetchProfile(for: distinctId, locale: locale)
     }
     
-    public func fetchFlow(flowId: String) async throws -> FlowDescription {
+    public func fetchFlow(flowId: String) async throws -> RemoteFlow {
         fetchFlowCallCount += 1
         
         if shouldFailFlow {
             throw NuxieNetworkError.httpError(statusCode: 404, message: "Flow not found")
         }
         
-        return FlowDescription(
+        return RemoteFlow(
             id: flowId,
             version: "v1",
             bundle: FlowBundleRef(
@@ -191,7 +191,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
             entryScreenId: "screen-1",
             entryActions: nil,
             screens: [
-                FlowDescriptionScreen(
+                RemoteFlowScreen(
                     id: "screen-1",
                     name: nil,
                     locale: nil,
@@ -200,7 +200,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            interactions: RemoteFlowInteractions(screens: [:], components: nil),
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,

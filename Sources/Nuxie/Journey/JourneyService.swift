@@ -196,7 +196,7 @@ public actor JourneyService: JourneyServiceProtocol {
     inMemoryJourneysById[journey.id] = journey
 
     let flow = try? await flowService.fetchFlow(id: flowId)
-    let entryScreenId = flow?.description.entryScreenId ?? flow?.description.screens.first?.id
+    let entryScreenId = flow?.remoteFlow.entryScreenId ?? flow?.remoteFlow.screens.first?.id
 
     eventService.track(
       "$journey_start",
