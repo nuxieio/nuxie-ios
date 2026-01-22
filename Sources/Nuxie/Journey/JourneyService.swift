@@ -961,11 +961,13 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   private func parsePathRef(_ payload: [String: Any]) -> VmPathRef {
+    let isRelative = payload["isRelative"] as? Bool
+    let nameBased = payload["nameBased"] as? Bool
     if let pathIds = payload["pathIds"] as? [Int] {
-      return .ids(pathIds)
+      return .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
     }
     if let pathIds = payload["pathIds"] as? [NSNumber] {
-      return .ids(pathIds.map { $0.intValue })
+      return .ids(VmPathIds(pathIds: pathIds.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
     }
     if let path = payload["path"] as? String {
       return .path(path)

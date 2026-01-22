@@ -1272,15 +1272,20 @@ final class FlowJourneyRunner {
     }
 
     private func appendPathPayload(_ payload: inout [String: Any], path: VmPathRef) {
-        let normalized = path.normalizedPath
-        if let ids = parseIds(normalized) {
-            payload["pathIds"] = ids
+        if case .ids(let ref) = path {
+            payload["pathIds"] = ref.pathIds
+            if ref.isRelative == true {
+                payload["isRelative"] = true
+            }
+            if ref.nameBased == true {
+                payload["nameBased"] = true
+            }
         }
 
         if let pathString = pathString(for: path) {
             payload["path"] = pathString
-        } else if !normalized.hasPrefix("ids:") {
-            payload["path"] = normalized
+        } else if case .path(let raw) = path {
+            payload["path"] = raw
         }
     }
 
@@ -1338,8 +1343,16 @@ final class FlowJourneyRunner {
 
     private func pathIdsKey(for ref: VmPathRef) -> String? {
         switch ref {
-        case .ids(let ids):
-            return "ids:\(ids.map(String.init).joined(separator: "."))"
+        case .ids(let ref):
+            let prefix: String
+            if ref.isRelative == true {
+                prefix = "ids:rel"
+            } else if ref.nameBased == true {
+                prefix = "ids:name"
+            } else {
+                prefix = "ids"
+            }
+            return "\(prefix):\(ref.pathIds.map(String.init).joined(separator: "."))"
         case .path(let path):
             if let entry = remoteFlow.pathIndex?[path] {
                 return "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
@@ -1354,8 +1367,8 @@ final class FlowJourneyRunner {
         switch ref {
         case .path(let path):
             return path
-        case .ids(let ids):
-            let key = "ids:\(ids.map(String.init).joined(separator: "."))"
+        case .ids(let ref):
+            let key = "ids:\(ref.pathIds.map(String.init).joined(separator: "."))"
             return pathIndexByIds[key]
         case .raw:
             return nil
@@ -1403,14 +1416,6 @@ final class FlowJourneyRunner {
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(value) else { return nil }
         return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-    }
-
-    private func parseIds(_ key: String) -> [Int]? {
-        guard key.hasPrefix("ids:") else { return nil }
-        let raw = key.dropFirst(4)
-        let parts = raw.split(separator: ".")
-        let ids = parts.compactMap { Int($0) }
-        return ids.isEmpty ? nil : ids
     }
 
     private func evalConditionIR(_ envelope: IREnvelope?, event: NuxieEvent?) async -> Bool {
