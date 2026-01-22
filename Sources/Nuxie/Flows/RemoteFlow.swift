@@ -293,6 +293,9 @@ public enum InteractionAction: Codable {
     case listInsert(ListInsertAction)
     case listRemove(ListRemoveAction)
     case listSwap(ListSwapAction)
+    case listMove(ListMoveAction)
+    case listSet(ListSetAction)
+    case listClear(ListClearAction)
     case exit(ExitAction)
     case unknown(type: String, payload: [String: AnyCodable])
 
@@ -317,6 +320,9 @@ public enum InteractionAction: Codable {
         case listInsert = "list_insert"
         case listRemove = "list_remove"
         case listSwap = "list_swap"
+        case listMove = "list_move"
+        case listSet = "list_set"
+        case listClear = "list_clear"
         case exit
     }
 
@@ -356,6 +362,12 @@ public enum InteractionAction: Codable {
             self = .listRemove(try ListRemoveAction(from: decoder))
         case .listSwap:
             self = .listSwap(try ListSwapAction(from: decoder))
+        case .listMove:
+            self = .listMove(try ListMoveAction(from: decoder))
+        case .listSet:
+            self = .listSet(try ListSetAction(from: decoder))
+        case .listClear:
+            self = .listClear(try ListClearAction(from: decoder))
         case .exit:
             self = .exit(try ExitAction(from: decoder))
         case .none:
@@ -402,6 +414,12 @@ public enum InteractionAction: Codable {
         case .listRemove(let action):
             try action.encode(to: encoder)
         case .listSwap(let action):
+            try action.encode(to: encoder)
+        case .listMove(let action):
+            try action.encode(to: encoder)
+        case .listSet(let action):
+            try action.encode(to: encoder)
+        case .listClear(let action):
             try action.encode(to: encoder)
         case .exit(let action):
             try action.encode(to: encoder)
@@ -631,6 +649,44 @@ public struct ListSwapAction: Codable {
         self.path = path
         self.indexA = indexA
         self.indexB = indexB
+    }
+}
+
+public struct ListMoveAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+    public let from: Int
+    public let to: Int
+
+    public init(type: String = "list_move", path: VmPathRef, from: Int, to: Int) {
+        self.type = type
+        self.path = path
+        self.from = from
+        self.to = to
+    }
+}
+
+public struct ListSetAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+    public let index: Int
+    public let value: AnyCodable
+
+    public init(type: String = "list_set", path: VmPathRef, index: Int, value: AnyCodable) {
+        self.type = type
+        self.path = path
+        self.index = index
+        self.value = value
+    }
+}
+
+public struct ListClearAction: Codable {
+    public let type: String
+    public let path: VmPathRef
+
+    public init(type: String = "list_clear", path: VmPathRef) {
+        self.type = type
+        self.path = path
     }
 }
 

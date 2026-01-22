@@ -420,6 +420,18 @@ final class FlowJourneyRunner {
                 let result = await handleListSwap(listSwap, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
+            case .listMove(let listMove):
+                let result = await handleListMove(listMove, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .listSet(let listSet):
+                let result = await handleListSet(listSet, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .listClear(let listClear):
+                let result = await handleListClear(listClear, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .exit(let exitAction):
                 trackAction(action, context: context, error: nil)
                 return .exit(mapExitReason(exitAction.reason))
@@ -930,6 +942,85 @@ final class FlowJourneyRunner {
         return .continue
     }
 
+    private func handleListMove(
+        _ action: ListMoveAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        let screenId = context.screenId ?? journey.flowState.currentScreenId
+        let payload: [String: Any] = [
+            "from": action.from,
+            "to": action.to
+        ]
+
+        let ok = viewModels.setListValue(
+            path: action.path,
+            operation: "move",
+            payload: payload,
+            screenId: screenId
+        )
+
+        if ok {
+            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            sendViewModelListOperation(op: "move", path: action.path, payload: payload)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
+            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+        }
+
+        return .continue
+    }
+
+    private func handleListSet(
+        _ action: ListSetAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        let screenId = context.screenId ?? journey.flowState.currentScreenId
+        let resolvedValue = resolveValueRefs(action.value.value, context: context)
+        let payload: [String: Any] = [
+            "index": action.index,
+            "value": resolvedValue
+        ]
+
+        let ok = viewModels.setListValue(
+            path: action.path,
+            operation: "set",
+            payload: payload,
+            screenId: screenId
+        )
+
+        if ok {
+            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            sendViewModelListOperation(op: "set", path: action.path, payload: payload)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
+            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+        }
+
+        return .continue
+    }
+
+    private func handleListClear(
+        _ action: ListClearAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        let screenId = context.screenId ?? journey.flowState.currentScreenId
+        let payload: [String: Any] = [:]
+
+        let ok = viewModels.setListValue(
+            path: action.path,
+            operation: "clear",
+            payload: payload,
+            screenId: screenId
+        )
+
+        if ok {
+            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            sendViewModelListOperation(op: "clear", path: action.path, payload: payload)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
+            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+        }
+
+        return .continue
+    }
+
     private func runNestedActions(
         _ actions: [InteractionAction],
         context: TriggerContext
@@ -998,7 +1089,7 @@ final class FlowJourneyRunner {
         let key = path.normalizedPath
         triggerResetTasks[key]?.cancel()
         triggerResetTasks[key] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_000_000)
+            await Task.yield()
             guard let self else { return }
             _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId)
             self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
@@ -1471,6 +1562,9 @@ private extension InteractionAction {
         case .listInsert: return "list_insert"
         case .listRemove: return "list_remove"
         case .listSwap: return "list_swap"
+        case .listMove: return "list_move"
+        case .listSet: return "list_set"
+        case .listClear: return "list_clear"
         case .exit: return "exit"
         case .unknown(let type, _): return type
         }
