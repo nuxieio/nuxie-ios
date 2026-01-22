@@ -28,6 +28,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     
     @Injected(\.flowService) private var flowService: FlowServiceProtocol
     @Injected(\.eventService) private var eventService: EventServiceProtocol
+    @Injected(\.triggerBroker) private var triggerBroker: TriggerBrokerProtocol
     private let windowProvider: WindowProviderProtocol
     
     // MARK: - State
@@ -107,9 +108,16 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                 JourneyEvents.flowShown,
                 properties: JourneyEvents.flowShownProperties(flowId: flowId, journey: journey),
                 userProperties: nil,
-                userPropertiesSetOnce: nil,
-                completion: nil
+                userPropertiesSetOnce: nil
             )
+            if let originEventId = journey.getContext("_origin_event_id") as? String {
+                let ref = JourneyRef(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId
+                )
+                await triggerBroker.emit(eventId: originEventId, update: .decision(.flowShown(ref)))
+            }
         }
 
         LogDebug("FlowPresentationService: Successfully presented flow \(flowId)")
@@ -159,8 +167,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowDismissed,
                     properties: JourneyEvents.flowDismissedProperties(flowId: flowId, journey: journey),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil,
-                    completion: nil
+                    userPropertiesSetOnce: nil
                 )
 
             case .purchaseCompleted:
@@ -168,8 +175,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowPurchased,
                     properties: JourneyEvents.flowPurchasedProperties(flowId: flowId, journey: journey, productId: nil),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil,
-                    completion: nil
+                    userPropertiesSetOnce: nil
                 )
 
             case .timeout:
@@ -177,8 +183,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowTimedOut,
                     properties: JourneyEvents.flowTimedOutProperties(flowId: flowId, journey: journey),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil,
-                    completion: nil
+                    userPropertiesSetOnce: nil
                 )
 
             case .error(let error):
@@ -186,8 +191,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowErrored,
                     properties: JourneyEvents.flowErroredProperties(flowId: flowId, journey: journey, errorMessage: error.localizedDescription),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil,
-                    completion: nil
+                    userPropertiesSetOnce: nil
                 )
             }
         }

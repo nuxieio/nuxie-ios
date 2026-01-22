@@ -63,6 +63,16 @@ extension Container {
       .scope(.sdk)
   }
 
+  var triggerBroker: Factory<TriggerBrokerProtocol> {
+    self { TriggerBroker() }
+      .scope(.sdk)
+  }
+
+  var triggerService: Factory<TriggerServiceProtocol> {
+    self { TriggerService() }
+      .scope(.sdk)
+  }
+
   var segmentService: Factory<SegmentServiceProtocol> {
     self { SegmentService() }
       .scope(.sdk)
@@ -134,13 +144,6 @@ extension Container {
       return service
     }
     .scope(.sdk)
-  }
-
-  // MARK: - Outcome Broker
-
-  var outcomeBroker: Factory<OutcomeBrokerProtocol> {
-    self { OutcomeBroker() }
-      .scope(.sdk)
   }
 
   /// Centralized IR runtime for context building and evaluation

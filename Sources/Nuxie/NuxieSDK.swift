@@ -162,28 +162,50 @@ public final class NuxieSDK {
     LogInfo("SDK shutdown completed")
   }
 
-  // MARK: - Core Event Method
+  // MARK: - Trigger (Event) API
 
-  /// Track an event with optional user properties (synchronous wrapper)
+  /// Trigger an event (analytics-only)
   /// - Parameters:
   ///   - event: Event name
   ///   - properties: Event properties
   ///   - userProperties: Properties to set on the user profile (mapped to $set)
   ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
-  ///   - completion: Optional completion handler called when event completes (immediately or after immediate flow)
-  public func track(
+  public func trigger(
     _ event: String,
     properties: [String: Any]? = nil,
     userProperties: [String: Any]? = nil,
-    userPropertiesSetOnce: [String: Any]? = nil,
-    completion: ((EventResult) -> Void)? = nil
+    userPropertiesSetOnce: [String: Any]? = nil
   ) {
     container.eventService().track(
       event,
       properties: properties,
       userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce
+    )
+  }
+
+  /// Trigger an event with journey/entitlement outcomes
+  /// - Parameters:
+  ///   - event: Event name
+  ///   - properties: Event properties
+  ///   - userProperties: Properties to set on the user profile (mapped to $set)
+  ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
+  ///   - handler: Receives progressive TriggerUpdate events
+  public func trigger(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    userProperties: [String: Any]? = nil,
+    userPropertiesSetOnce: [String: Any]? = nil,
+    handler: @escaping (TriggerUpdate) -> Void
+  ) async {
+    guard isSetup else { return }
+    let triggerService = container.triggerService()
+    await triggerService.trigger(
+      event,
+      properties: properties,
+      userProperties: userProperties,
       userPropertiesSetOnce: userPropertiesSetOnce,
-      completion: completion
+      handler: handler
     )
   }
 
@@ -265,8 +287,7 @@ public final class NuxieSDK {
       "$identify",
       properties: props,
       userProperties: userProperties,
-      userPropertiesSetOnce: userPropertiesSetOnce,
-      completion: nil
+      userPropertiesSetOnce: userPropertiesSetOnce
     )
   }
 
@@ -760,8 +781,7 @@ public final class NuxieSDK {
       "$feature_used",
       properties: properties,
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
     // Decrement local balance for immediate UI feedback

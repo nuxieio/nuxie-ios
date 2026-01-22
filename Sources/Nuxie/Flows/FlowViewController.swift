@@ -370,8 +370,14 @@ extension FlowViewController {
                     self.flowWebView.sendBridgeMessage(type: "purchase_error", payload: ["error": "Product not found"])            
                     return
                 }
-                try await transactionService.purchase(product)
-                self.flowWebView.sendBridgeMessage(type: "purchase_success", payload: ["productId": productId])
+                let syncResult = try await transactionService.purchase(product)
+                self.flowWebView.sendBridgeMessage(type: "purchase_ui_success", payload: ["productId": productId])
+                if let syncTask = syncResult.syncTask {
+                    let confirmed = await syncTask.value
+                    if confirmed {
+                        self.flowWebView.sendBridgeMessage(type: "purchase_confirmed", payload: ["productId": productId])
+                    }
+                }
             } catch StoreKitError.purchaseCancelled {
                 self.flowWebView.sendBridgeMessage(type: "purchase_cancelled", payload: [:])
             } catch {

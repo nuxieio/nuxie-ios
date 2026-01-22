@@ -109,21 +109,29 @@ NuxieSDK.shared.identify(
 )
 ```
 
-Track events (optionally observe immediate outcomes):
+Trigger events (optionally observe decisions/entitlements):
 
 ```swift
-NuxieSDK.shared.track(
+NuxieSDK.shared.trigger(
   "premium_feature_tapped",
   properties: ["feature": "pro_filters"]
-) { result in
-  switch result {
-  case .noInteraction:
-    break // Event recorded, no immediate flow was shown
-  case .flow(let completion):
-    // Inspect outcome (purchase, dismissed, etc.)
-    print("Flow \(completion.flowId) outcome: \(completion.outcome)")
-  case .failed(let error):
-    print("Track failed: \(error)")
+)
+
+Task {
+  await NuxieSDK.shared.trigger(
+    "premium_feature_tapped",
+    properties: ["feature": "pro_filters"]
+  ) { update in
+    switch update {
+    case .entitlement(.allowed):
+      print("Unlocked")
+    case .decision(.noMatch):
+      break
+    case .error(let error):
+      print("Trigger failed: \(error.message)")
+    default:
+      break
+    }
   }
 }
 ```
@@ -138,7 +146,8 @@ NuxieSDK.shared.reset() // keepAnonymousId = true by default
 
 - `NuxieSDK.shared.setup(with:)`: initialize the SDK (call once).
 - `NuxieSDK.shared.identify(_:userProperties:userPropertiesSetOnce:)`: identify a user and set traits.
-- `NuxieSDK.shared.track(_:properties:userProperties:userPropertiesSetOnce:completion:)`: track events; optional completion reports immediate flow outcomes.
+- `NuxieSDK.shared.trigger(_:properties:userProperties:userPropertiesSetOnce:)`: trigger events (analytics-only).
+- `NuxieSDK.shared.trigger(_:properties:userProperties:userPropertiesSetOnce:handler:)`: trigger events with decisions/entitlements.
 - `NuxieSDK.shared.reset(keepAnonymousId:)`: clear identity (e.g., logout).
 - `NuxieSDK.shared.version`: current SDK version string.
 - `NuxieSDK.shared.getDistinctId()`: current distinct ID (identified or anonymous).

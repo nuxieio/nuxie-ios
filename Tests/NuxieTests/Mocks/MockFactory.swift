@@ -39,6 +39,8 @@ public class MockFactory {
     private lazy var _nuxieApi = MockNuxieApi()
     private lazy var _flowService = MockFlowService()
     private lazy var _flowPresentationService = MockFlowPresentationService()
+    private lazy var _triggerBroker = TriggerBroker()
+    private lazy var _triggerService = TriggerService()
     private lazy var _dateProvider = MockDateProvider()
     private lazy var _sleepProvider = MockSleepProvider()
     private lazy var _productService = MockProductService()
@@ -53,6 +55,8 @@ public class MockFactory {
     public var nuxieApi: MockNuxieApi { Self.markUsed(); return _nuxieApi }
     public var flowService: MockFlowService { Self.markUsed(); return _flowService }
     public var flowPresentationService: MockFlowPresentationService { Self.markUsed(); return _flowPresentationService }
+    public var triggerBroker: TriggerBroker { Self.markUsed(); return _triggerBroker }
+    public var triggerService: TriggerService { Self.markUsed(); return _triggerService }
     public var dateProvider: MockDateProvider { Self.markUsed(); return _dateProvider }
     public var sleepProvider: MockSleepProvider { Self.markUsed(); return _sleepProvider }
     public var productService: MockProductService { Self.markUsed(); return _productService }
@@ -69,6 +73,7 @@ public class MockFactory {
         await nuxieApi.reset()
         flowService.reset()
         flowPresentationService.reset()
+        await triggerBroker.reset()
         dateProvider.reset()
         sleepProvider.reset()
         productService.reset()
@@ -89,6 +94,8 @@ public class MockFactory {
         Container.shared.nuxieApi.register { self.nuxieApi }
         Container.shared.flowService.register { self.flowService }
         Container.shared.flowPresentationService.register { self.flowPresentationService }
+        Container.shared.triggerBroker.register { self.triggerBroker }
+        Container.shared.triggerService.register { self.triggerService }
         Container.shared.dateProvider.register { self.dateProvider }
         Container.shared.sleepProvider.register { self.sleepProvider }
         Container.shared.productService.register { self.productService }
@@ -109,6 +116,8 @@ public class MockFactory {
         Container.shared.nuxieApi.register { self.nuxieApi }
         Container.shared.flowService.register { self.flowService }
         // DON'T register flowPresentationService - let real implementation run for integration tests
+        Container.shared.triggerBroker.register { self.triggerBroker }
+        Container.shared.triggerService.register { self.triggerService }
         Container.shared.dateProvider.register { self.dateProvider }
         Container.shared.sleepProvider.register { self.sleepProvider }
         Container.shared.productService.register { self.productService }
