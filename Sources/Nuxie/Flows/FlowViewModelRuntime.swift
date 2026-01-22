@@ -183,7 +183,7 @@ public final class FlowViewModelRuntime {
                     return nil
                 }
             case .index(let expr):
-                guard let index = resolveIndex(expr: expr, screenId: screenId) else {
+                guard let index = resolveIndex(expr: expr) else {
                     return nil
                 }
                 if let list = current as? [AnyCodable], index < list.count {
@@ -223,7 +223,7 @@ public final class FlowViewModelRuntime {
                     return false
                 }
             case .index(let expr):
-                guard let index = resolveIndex(expr: expr, screenId: screenId) else { return false }
+                guard let index = resolveIndex(expr: expr) else { return false }
                 if let list = current as? [AnyCodable], index < list.count {
                     current = list[index].value
                 } else if let list = current as? [Any], index < list.count {
@@ -368,24 +368,11 @@ public final class FlowViewModelRuntime {
                     viewModel: viewModels[resolved.viewModelId]
                 )
             }
-            let rawPath = resolvePathString(path)
-            let segments = parsePathSegments(rawPath)
-            let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil)
             return ResolvedPathInfo(
-                instance: instance,
-                segments: segments,
-                rawPath: rawPath,
-                viewModel: instance.flatMap { viewModels[$0.viewModelId] }
-            )
-        default:
-            let rawPath = resolvePathString(path)
-            let segments = parsePathSegments(rawPath)
-            let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil)
-            return ResolvedPathInfo(
-                instance: instance,
-                segments: segments,
-                rawPath: rawPath,
-                viewModel: instance.flatMap { viewModels[$0.viewModelId] }
+                instance: nil,
+                segments: [],
+                rawPath: path.normalizedPath,
+                viewModel: nil
             )
         }
     }
@@ -503,28 +490,6 @@ public final class FlowViewModelRuntime {
         return nil
     }
 
-    private func resolvePathString(_ path: VmPathRef) -> String {
-        switch path {
-        case .path(let raw):
-            return raw
-        case .ids(let ref):
-            let key = "ids:\(ref.pathIds.map(String.init).joined(separator: "."))"
-            return pathIndexByIds()[key] ?? path.normalizedPath
-        case .raw(let raw):
-            return raw
-        }
-    }
-
-    private func pathIndexByIds() -> [String: String] {
-        guard let index = remoteFlow.pathIndex else { return [:] }
-        var lookup: [String: String] = [:]
-        for (path, entry) in index {
-            let key = "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
-            lookup[key] = path
-        }
-        return lookup
-    }
-
     private func resolveProperty(
         in schema: [String: ViewModelProperty],
         segments: [PathSegment]
@@ -559,71 +524,6 @@ public final class FlowViewModelRuntime {
         }
     }
 
-    private func parsePathSegments(_ path: String) -> [PathSegment] {
-        let trimmed = stripVmPrefix(path)
-        guard !trimmed.isEmpty else { return [] }
-        if trimmed.hasPrefix("ids:") {
-            return [.prop(trimmed)]
-        }
-
-        var segments: [PathSegment] = []
-        var index = trimmed.startIndex
-
-        func readIdentifier() -> String? {
-            let start = index
-            while index < trimmed.endIndex {
-                let char = trimmed[index]
-                if char == "." || char == "[" { break }
-                index = trimmed.index(after: index)
-            }
-            return start == index ? nil : String(trimmed[start..<index])
-        }
-
-        guard let first = readIdentifier() else { return [] }
-        segments.append(.prop(first))
-
-        while index < trimmed.endIndex {
-            let char = trimmed[index]
-            if char == "." {
-                index = trimmed.index(after: index)
-                if let name = readIdentifier() {
-                    segments.append(.prop(name))
-                }
-                continue
-            }
-            if char == "[" {
-                index = trimmed.index(after: index)
-                let start = index
-                var depth = 1
-                while index < trimmed.endIndex && depth > 0 {
-                    let next = trimmed[index]
-                    if next == "[" { depth += 1 }
-                    if next == "]" { depth -= 1 }
-                    if depth == 0 { break }
-                    index = trimmed.index(after: index)
-                }
-                if depth != 0 { break }
-                let expr = String(trimmed[start..<index]).trimmingCharacters(in: .whitespaces)
-                index = trimmed.index(after: index)
-                segments.append(.index(expr))
-                continue
-            }
-            break
-        }
-
-        return segments
-    }
-
-    private func stripVmPrefix(_ path: String) -> String {
-        var trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("vm.") {
-            trimmed = String(trimmed.dropFirst(3))
-        } else if trimmed.hasPrefix("vm/") {
-            trimmed = String(trimmed.dropFirst(3))
-        }
-        return trimmed
-    }
-
     private func resolveLiteralValue(_ value: Any) -> Any {
         if let dict = value as? [String: Any],
            let literal = dict["literal"] {
@@ -636,15 +536,9 @@ public final class FlowViewModelRuntime {
         return value
     }
 
-    private func resolveIndex(expr: String, screenId: String?) -> Int? {
+    private func resolveIndex(expr: String) -> Int? {
         if let value = Int(expr.trimmingCharacters(in: .whitespaces)) {
             return value
-        }
-        let ref = VmPathRef.path(expr)
-        if let value = getValue(path: ref, screenId: screenId) {
-            if let number = value as? Int { return number }
-            if let number = value as? Double { return Int(number) }
-            if let string = value as? String, let number = Int(string) { return number }
         }
         return nil
     }
@@ -674,7 +568,7 @@ public final class FlowViewModelRuntime {
             )
             return base
         case .index(let expr):
-            guard let index = resolveIndex(expr: expr, screenId: screenId) else { return current }
+            guard let index = resolveIndex(expr: expr) else { return current }
             var list: [Any] = []
             if let array = current as? [Any] {
                 list = array

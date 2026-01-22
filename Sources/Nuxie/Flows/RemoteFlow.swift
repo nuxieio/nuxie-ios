@@ -10,7 +10,6 @@ public struct RemoteFlow: Codable {
     public let viewModels: [ViewModel]
     public let viewModelInstances: [ViewModelInstance]?
     public let converters: [String: [String: AnyCodable]]?
-    public let pathIndex: [String: FlowPathIndexEntry]?
 }
 
 public struct FlowBundleRef: Codable {
@@ -25,10 +24,6 @@ public struct RemoteFlowScreen: Codable {
 }
 
 public typealias RemoteFlowInteractions = [String: [Interaction]]
-
-public struct FlowPathIndexEntry: Codable {
-    public let pathIds: [Int]
-}
 
 @available(*, deprecated, renamed: "RemoteFlow")
 public typealias FlowDescription = RemoteFlow
@@ -54,59 +49,46 @@ public struct VmPathIds: Codable, Equatable {
 }
 
 public enum VmPathRef: Codable, Equatable {
-    case path(String)
     case ids(VmPathIds)
-    case raw(String)
 
     private enum CodingKeys: String, CodingKey {
         case kind
-        case path
         case pathIds
         case isRelative
         case nameBased
     }
 
     private enum Kind: String, Codable {
-        case path
         case ids
     }
 
     public init(from decoder: Decoder) throws {
-        if let single = try? decoder.singleValueContainer(), let raw = try? single.decode(String.self) {
-            self = .path(raw)
-            return
-        }
-
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if let kind = try? container.decode(Kind.self, forKey: .kind) {
-            switch kind {
-            case .path:
-                let path = try container.decode(String.self, forKey: .path)
-                self = .path(path)
-                return
-            case .ids:
-                let pathIds = try container.decode([Int].self, forKey: .pathIds)
-                let isRelative = try? container.decode(Bool.self, forKey: .isRelative)
-                let nameBased = try? container.decode(Bool.self, forKey: .nameBased)
-                self = .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
-                return
-            }
-        }
-
-        if let path = try? container.decode(String.self, forKey: .path) {
-            self = .path(path)
+        if let kind = try? container.decode(Kind.self, forKey: .kind), kind == .ids {
+            let pathIds = try container.decode([Int].self, forKey: .pathIds)
+            let isRelative = try? container.decode(Bool.self, forKey: .isRelative)
+            let nameBased = try? container.decode(Bool.self, forKey: .nameBased)
+            self = .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
             return
         }
 
-        self = .raw("unknown")
+        if let pathIds = try? container.decode([Int].self, forKey: .pathIds) {
+            let isRelative = try? container.decode(Bool.self, forKey: .isRelative)
+            let nameBased = try? container.decode(Bool.self, forKey: .nameBased)
+            self = .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
+            return
+        }
+
+        throw DecodingError.dataCorruptedError(
+            forKey: .pathIds,
+            in: container,
+            debugDescription: "VmPathRef requires pathIds"
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .path(let path):
-            try container.encode(Kind.path, forKey: .kind)
-            try container.encode(path, forKey: .path)
         case .ids(let ref):
             try container.encode(Kind.ids, forKey: .kind)
             try container.encode(ref.pathIds, forKey: .pathIds)
@@ -116,16 +98,11 @@ public enum VmPathRef: Codable, Equatable {
             if ref.nameBased == true {
                 try container.encode(true, forKey: .nameBased)
             }
-        case .raw(let raw):
-            try container.encode(Kind.path, forKey: .kind)
-            try container.encode(raw, forKey: .path)
         }
     }
 
     public var normalizedPath: String {
         switch self {
-        case .path(let path):
-            return path
         case .ids(let ref):
             let prefix: String
             if ref.isRelative == true {
@@ -136,8 +113,6 @@ public enum VmPathRef: Codable, Equatable {
                 prefix = "ids"
             }
             return "\(prefix):\(ref.pathIds.map(String.init).joined(separator: "."))"
-        case .raw(let raw):
-            return raw
         }
     }
 }
@@ -239,7 +214,7 @@ public enum InteractionTrigger: Codable {
         case .manual:
             self = .manual(label: try container.decodeIfPresent(String.self, forKey: .label))
         case .viewModelChanged:
-            let path = (try? container.decode(VmPathRef.self, forKey: .path)) ?? .raw("")
+            let path = try container.decode(VmPathRef.self, forKey: .path)
             let debounceMs = try container.decodeIfPresent(Int.self, forKey: .debounceMs)
             self = .viewModelChanged(path: path, debounceMs: debounceMs)
         case .none:

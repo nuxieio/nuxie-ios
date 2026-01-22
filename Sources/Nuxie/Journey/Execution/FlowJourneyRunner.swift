@@ -50,7 +50,6 @@ final class FlowJourneyRunner {
     private(set) var isRuntimeReady = false
 
     private var interactionsById: [String: [Interaction]] = [:]
-    private var pathIndexByIds: [String: String] = [:]
 
     private var actionQueue: [ActionRequest] = []
     private var activeRequest: ActionRequest?
@@ -74,13 +73,6 @@ final class FlowJourneyRunner {
         self.viewController = viewController
 
         self.interactionsById = flow.remoteFlow.interactions
-
-        if let index = flow.remoteFlow.pathIndex {
-            for (path, entry) in index {
-                let key = "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
-                pathIndexByIds[key] = path
-            }
-        }
 
         if let snapshot = journey.flowState.viewModelSnapshot {
             viewModels.hydrate(snapshot)
@@ -1194,7 +1186,6 @@ final class FlowJourneyRunner {
                 value.mapValues { $0.value }
             } ?? [:],
             "screenDefaults": viewModels.screenDefaultsPayload(),
-            "pathIndex": encodeJSON(remoteFlow.pathIndex ?? [:]) ?? [:],
         ]
 
         Task { @MainActor in
@@ -1265,12 +1256,6 @@ final class FlowJourneyRunner {
                 payload["nameBased"] = true
             }
         }
-
-        if let pathString = pathString(for: path) {
-            payload["path"] = pathString
-        } else if case .path(let raw) = path {
-            payload["path"] = raw
-        }
     }
 
     private func matchesTrigger(
@@ -1306,23 +1291,10 @@ final class FlowJourneyRunner {
     }
 
     private func matchesViewModelPath(triggerPath: VmPathRef, inputPath: VmPathRef) -> Bool {
-        let triggerKey = normalizedPathKey(triggerPath)
-        let inputKey = normalizedPathKey(inputPath)
-        if triggerKey == inputKey { return true }
-
         if let triggerIds = pathIdsKey(for: triggerPath), let inputIds = pathIdsKey(for: inputPath) {
             return triggerIds == inputIds
         }
-
-        if let triggerPath = pathString(for: triggerPath), let inputPath = pathString(for: inputPath) {
-            return triggerPath == inputPath
-        }
-
         return false
-    }
-
-    private func normalizedPathKey(_ ref: VmPathRef) -> String {
-        return ref.normalizedPath
     }
 
     private func pathIdsKey(for ref: VmPathRef) -> String? {
@@ -1337,25 +1309,6 @@ final class FlowJourneyRunner {
                 prefix = "ids"
             }
             return "\(prefix):\(ref.pathIds.map(String.init).joined(separator: "."))"
-        case .path(let path):
-            if let entry = remoteFlow.pathIndex?[path] {
-                return "ids:\(entry.pathIds.map(String.init).joined(separator: "."))"
-            }
-            return nil
-        case .raw:
-            return nil
-        }
-    }
-
-    private func pathString(for ref: VmPathRef) -> String? {
-        switch ref {
-        case .path(let path):
-            return path
-        case .ids(let ref):
-            let key = "ids:\(ref.pathIds.map(String.init).joined(separator: "."))"
-            return pathIndexByIds[key]
-        case .raw:
-            return nil
         }
     }
 
@@ -1370,8 +1323,8 @@ final class FlowJourneyRunner {
             if dict.count == 1, let literal = dict["literal"] {
                 return literal
             }
-            if dict.count == 1, let ref = dict["ref"] as? String {
-                return viewModels.getValue(path: VmPathRef.path(ref), screenId: context.screenId ?? journey.flowState.currentScreenId) as Any
+            if dict.count == 1, let refValue = dict["ref"], let ref = parseRefPath(refValue) {
+                return viewModels.getValue(path: ref, screenId: context.screenId ?? journey.flowState.currentScreenId) as Any
             }
             var resolved: [String: Any] = [:]
             for (key, entry) in dict {
@@ -1383,8 +1336,8 @@ final class FlowJourneyRunner {
             if dict.count == 1, let literal = dict["literal"]?.value {
                 return literal
             }
-            if dict.count == 1, let ref = dict["ref"]?.value as? String {
-                return viewModels.getValue(path: VmPathRef.path(ref), screenId: context.screenId ?? journey.flowState.currentScreenId) as Any
+            if dict.count == 1, let refValue = dict["ref"]?.value, let ref = parseRefPath(refValue) {
+                return viewModels.getValue(path: ref, screenId: context.screenId ?? journey.flowState.currentScreenId) as Any
             }
             var resolved: [String: Any] = [:]
             for (key, entry) in dict {
@@ -1393,6 +1346,31 @@ final class FlowJourneyRunner {
             return resolved
         }
         return value
+    }
+
+    private func parseRefPath(_ value: Any) -> VmPathRef? {
+        if let ref = value as? VmPathRef { return ref }
+        if let dict = value as? [String: Any] {
+            let isRelative = dict["isRelative"] as? Bool
+            let nameBased = dict["nameBased"] as? Bool
+            if let ids = dict["pathIds"] as? [Int] {
+                return .ids(VmPathIds(pathIds: ids, isRelative: isRelative, nameBased: nameBased))
+            }
+            if let ids = dict["pathIds"] as? [NSNumber] {
+                return .ids(VmPathIds(pathIds: ids.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+            }
+        }
+        if let dict = value as? [String: AnyCodable] {
+            let isRelative = dict["isRelative"]?.value as? Bool
+            let nameBased = dict["nameBased"]?.value as? Bool
+            if let ids = dict["pathIds"]?.value as? [Int] {
+                return .ids(VmPathIds(pathIds: ids, isRelative: isRelative, nameBased: nameBased))
+            }
+            if let ids = dict["pathIds"]?.value as? [NSNumber] {
+                return .ids(VmPathIds(pathIds: ids.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+            }
+        }
+        return nil
     }
 
     private func encodeJSON<T: Encodable>(_ value: T) -> Any? {

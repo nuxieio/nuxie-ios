@@ -53,7 +53,6 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 viewModels: viewModels,
                 viewModelInstances: viewModelInstances,
                 converters: nil,
-                pathIndex: nil
             )
         }
 
