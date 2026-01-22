@@ -14,7 +14,7 @@ public enum FlowPendingActionKind: String, Codable {
     case remoteRetry
 }
 
-public struct FlowPendingAction: Codable, Equatable {
+public struct FlowPendingAction: Codable {
     public let interactionId: String
     public let screenId: String?
     public let componentId: String?
@@ -26,7 +26,7 @@ public struct FlowPendingAction: Codable, Equatable {
     public let startedAt: Date
 }
 
-public struct FlowJourneyState: Codable, Equatable {
+public struct FlowJourneyState: Codable {
     public var currentScreenId: String?
     public var navigationStack: [String]
     public var viewModelSnapshot: FlowViewModelSnapshot?

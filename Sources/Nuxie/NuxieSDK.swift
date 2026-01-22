@@ -539,7 +539,7 @@ public final class NuxieSDK {
     }
     
     let flowPresentationService = container.flowPresentationService()
-    try await flowPresentationService.presentFlow(flowId, from: nil)
+    try await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
   }
 
   // MARK: - Profile Management

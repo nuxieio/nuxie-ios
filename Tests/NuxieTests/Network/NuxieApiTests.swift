@@ -42,7 +42,7 @@ final class NuxieApiTests: AsyncSpec {
                     )
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/profile"),
+                        matcher: RequestMatchers.post("/profile"),
                         handler: { request in
                             let data = try ResponseBuilders.toJSON(profileResponse)
                             let response = HTTPURLResponse(
@@ -61,7 +61,7 @@ final class NuxieApiTests: AsyncSpec {
                 
                 it("should handle network errors") {
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/profile"),
+                        matcher: RequestMatchers.post("/profile"),
                         handler: { _ in throw URLError(.networkConnectionLost) }
                     )
                     
@@ -81,7 +81,7 @@ final class NuxieApiTests: AsyncSpec {
                     )
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/profile"),
+                        matcher: RequestMatchers.post("/profile"),
                         handler: { request in
                             let data = try ResponseBuilders.toJSON(errorResponse)
                             let response = HTTPURLResponse(
@@ -103,7 +103,7 @@ final class NuxieApiTests: AsyncSpec {
                     var capturedRequest: URLRequest?
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/profile"),
+                        matcher: RequestMatchers.post("/profile"),
                         handler: { request in
                             capturedRequest = request
                             
@@ -146,7 +146,7 @@ final class NuxieApiTests: AsyncSpec {
                     
                     StubURLProtocol.register(
                         matcher: { request in
-                            return request.httpMethod == "POST" && request.url?.path == "/api/i/profile"
+                            return request.httpMethod == "POST" && request.url?.path == "/profile"
                         },
                         handler: { request in
                             capturedRequest = request
@@ -191,7 +191,7 @@ final class NuxieApiTests: AsyncSpec {
                     let eventResponse = ResponseBuilders.buildEventResponse()
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             let data = try ResponseBuilders.toJSON(eventResponse)
                             let response = HTTPURLResponse(
@@ -218,7 +218,7 @@ final class NuxieApiTests: AsyncSpec {
                     var capturedRequest: URLRequest?
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
                             
@@ -278,7 +278,7 @@ final class NuxieApiTests: AsyncSpec {
                     )
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/batch"),
+                        matcher: RequestMatchers.post("/batch"),
                         handler: { request in
                             let data = try ResponseBuilders.toJSON(batchResponse)
                             let response = HTTPURLResponse(
@@ -302,7 +302,7 @@ final class NuxieApiTests: AsyncSpec {
                     
                     StubURLProtocol.register(
                         matcher: { request in
-                            return request.httpMethod == "POST" && request.url?.path == "/api/i/batch"
+                            return request.httpMethod == "POST" && request.url?.path == "/batch"
                         },
                         handler: { request in
                             capturedRequest = request
@@ -359,7 +359,7 @@ final class NuxieApiTests: AsyncSpec {
                     let flow = ResponseBuilders.buildFlowDescription(id: flowId)
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.get("/api/i/flows/\(flowId)"),
+                        matcher: RequestMatchers.get("/flows/\(flowId)"),
                         handler: { request in
                             let data = try ResponseBuilders.toJSON(flow)
                             let response = HTTPURLResponse(
@@ -380,7 +380,7 @@ final class NuxieApiTests: AsyncSpec {
                 
                 it("should handle flow not found") {
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.get("/api/i/flows/\(flowId)"),
+                        matcher: RequestMatchers.get("/flows/\(flowId)"),
                         handler: { request in
                             let response = HTTPURLResponse(
                                 url: request.url!,
@@ -402,7 +402,7 @@ final class NuxieApiTests: AsyncSpec {
                     var capturedRequest: URLRequest?
                     
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.get("/api/i/flows/\(flowId)"),
+                        matcher: RequestMatchers.get("/flows/\(flowId)"),
                         handler: { request in
                             capturedRequest = request
                             

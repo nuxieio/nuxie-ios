@@ -5,11 +5,15 @@ import Foundation
 public class MockFlowService: FlowServiceProtocol {
     public var prefetchedFlows: [FlowDescription] = []
     public var removedFlowIds: [String] = []
+    public var fetchedFlowIds: [String] = []
     
     // Error testing properties
     public var shouldFailFlowDisplay = false
     public var failureError: Error?
     public var displayAttempts: [(flowId: String, timestamp: Date)] = []
+
+    public var mockFlows: [String: Flow] = [:]
+    public var defaultMockFlow: Flow?
     
     // Property storage for testing
     private var properties: [String: Any] = [:]
@@ -24,6 +28,21 @@ public class MockFlowService: FlowServiceProtocol {
     
     public func removeFlows(_ flowIds: [String]) async {
         removedFlowIds.append(contentsOf: flowIds)
+    }
+
+    public func fetchFlow(id: String) async throws -> Flow {
+        fetchedFlowIds.append(id)
+
+        if let flow = mockFlows[id] {
+            return flow
+        }
+        if let flow = defaultMockFlow {
+            return flow
+        }
+        if let error = failureError {
+            throw error
+        }
+        throw FlowError.flowNotFound(id)
     }
     
     @MainActor
@@ -66,12 +85,15 @@ public class MockFlowService: FlowServiceProtocol {
     public func reset() {
         prefetchedFlows = []
         removedFlowIds = []
+        fetchedFlowIds = []
         shouldFailFlowDisplay = false
         failureError = nil
         displayAttempts = []
         properties = [:]
         mockViewControllers = [:]
         defaultMockViewController = nil
+        mockFlows = [:]
+        defaultMockFlow = nil
     }
     
     // Property storage methods for testing

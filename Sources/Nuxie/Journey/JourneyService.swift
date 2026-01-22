@@ -293,7 +293,7 @@ public actor JourneyService: JourneyServiceProtocol {
     guard let campaigns = await getAllCampaigns(for: event.distinctId) else { return }
 
     for campaign in campaigns {
-      guard shouldTriggerFromEvent(campaign: campaign, event: event) else { continue }
+      guard await shouldTriggerFromEvent(campaign: campaign, event: event) else { continue }
       _ = await startJourney(for: campaign, distinctId: event.distinctId, originEventId: event.id)
     }
 
@@ -368,7 +368,7 @@ public actor JourneyService: JourneyServiceProtocol {
 
   // MARK: - Runtime Bridge
 
-  private func handleRuntimeMessage(
+  fileprivate func handleRuntimeMessage(
     journeyId: String,
     type: String,
     payload: [String: Any],
@@ -459,7 +459,7 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  private func handleRuntimeDismiss(
+  fileprivate func handleRuntimeDismiss(
     journeyId: String,
     reason: CloseReason,
     controller: FlowViewController
@@ -493,7 +493,7 @@ public actor JourneyService: JourneyServiceProtocol {
       let flow = try await flowService.fetchFlow(id: flowId)
       let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
 
-      runner.onShowScreen = { [weak self, weak runner] screenId, transition in
+      runner.onShowScreen = { [weak self, weak runner] (screenId: String, transition: AnyCodable?) async in
         guard let self else { return }
         let controller = try? await self.presentFlowIfNeeded(flowId: flowId, journey: journey)
         if let controller {
@@ -527,11 +527,10 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  @MainActor
   private func presentFlowIfNeeded(flowId: String, journey: Journey) async throws -> FlowViewController {
     if let runner = flowRunners[journey.id],
        let controller = runner.viewController,
-       flowPresentationService.isFlowPresented {
+       await flowPresentationService.isFlowPresented {
       return controller
     }
     if let delegate = runtimeDelegates[journey.id] {
@@ -585,11 +584,7 @@ public actor JourneyService: JourneyServiceProtocol {
       }
       let key = taskKey(journeyId: journey.id, kind: "after_delay", id: item.interactionId)
       scheduleTask(key: key, at: item.fireAt) { [weak self] in
-        guard let self else { return }
-        if let runner = self.flowRunners[journey.id] {
-          let outcome = await runner.dispatchAfterDelay(interactionId: item.interactionId, screenId: item.screenId)
-          self.handleOutcome(outcome, journey: journey)
-        }
+        await self?.handleAfterDelay(journeyId: journey.id, interactionId: item.interactionId, screenId: item.screenId)
       }
     }
   }
@@ -597,10 +592,7 @@ public actor JourneyService: JourneyServiceProtocol {
   private func scheduleResume(journeyId: String, at date: Date) {
     let key = taskKey(journeyId: journeyId, kind: "resume", id: nil)
     scheduleTask(key: key, at: date) { [weak self] in
-      guard let self else { return }
-      if let journey = self.inMemoryJourneysById[journeyId] {
-        await self.resumeJourney(journey)
-      }
+      await self?.resumeJourneyIfCached(journeyId: journeyId)
     }
   }
 
@@ -609,17 +601,35 @@ public actor JourneyService: JourneyServiceProtocol {
 
     let delay = max(0, date.timeIntervalSince(dateProvider.now()))
     let task = Task { [weak self] in
-      do {
-        try await self?.sleepProvider.sleep(for: delay)
-        guard let self, !Task.isCancelled else { return }
-        await work()
-      } catch {
-        LogDebug("Journey task \(key) cancelled/failed: \(error)")
-      }
-      await self?.clearTask(key)
+      guard let self else { return }
+      await self.runScheduledTask(key: key, delay: delay, work: work)
     }
 
     activeTasks[key] = task
+  }
+
+  private func runScheduledTask(key: String, delay: TimeInterval, work: @escaping () async -> Void) async {
+    do {
+      try await sleepProvider.sleep(for: delay)
+      guard !Task.isCancelled else { return }
+      await work()
+    } catch {
+      LogDebug("Journey task \(key) cancelled/failed: \(error)")
+    }
+    clearTask(key)
+  }
+
+  private func handleAfterDelay(journeyId: String, interactionId: String, screenId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
+
+    let outcome = await runner.dispatchAfterDelay(interactionId: interactionId, screenId: screenId)
+    handleOutcome(outcome, journey: journey)
+  }
+
+  private func resumeJourneyIfCached(journeyId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId] else { return }
+    await resumeJourney(journey)
   }
 
   private func taskKey(journeyId: String, kind: String, id: String?) -> String {
@@ -992,7 +1002,7 @@ public actor JourneyService: JourneyServiceProtocol {
     await MainActor.run {
       Task { @MainActor in
         do {
-          try await transactionService.restorePurchases()
+          try await transactionService.restore()
           controller.sendRuntimeMessage(type: "restore_success", payload: [:])
         } catch {
           controller.sendRuntimeMessage(type: "restore_error", payload: ["error": error.localizedDescription])
