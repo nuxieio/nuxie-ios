@@ -5,6 +5,7 @@ import FactoryKit
 /// Protocol for presenting flows in dedicated windows
 protocol FlowPresentationServiceProtocol: AnyObject {
     /// Present a flow by ID in a dedicated window
+    @discardableResult
     @MainActor func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController
     
     /// Dismiss the currently presented flow
@@ -54,6 +55,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         currentWindow?.isPresenting ?? false
     }
     
+    @discardableResult
     func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
         LogInfo("FlowPresentationService: Presenting flow \(flowId)")
         
