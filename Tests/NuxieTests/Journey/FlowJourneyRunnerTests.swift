@@ -236,6 +236,112 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_insert"))
                 await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_trigger"))
             }
+
+            it("executes after_delay interactions and clears pending snapshot") {
+                let flowId = "flow-after-delay"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    properties: [
+                        "flag": ViewModelProperty(
+                            type: .boolean,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(false),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let interaction = Interaction(
+                    id: "int-delay",
+                    trigger: .afterDelay(delayMs: 1000),
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.flag"),
+                            value: AnyCodable(["literal": true] as [String: Any])
+                        ))
+                    ],
+                    enabled: true
+                )
+                let flowDescription = makeFlowDescription(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-1": [interaction]],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(description: flowDescription, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                _ = await runner.handleScreenChanged("screen-1")
+
+                expect(journey.flowState.pendingAfterDelay).to(haveCount(1))
+
+                _ = await runner.dispatchAfterDelay(interactionId: "int-delay", screenId: "screen-1")
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let flag = values?["flag"]?.value as? Bool
+                expect(flag).to(equal(true))
+                expect(journey.flowState.pendingAfterDelay).to(beEmpty())
+            }
+
+            it("resumes delayed entry action and continues sequence") {
+                let flowId = "flow-resume"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    properties: [
+                        "flag": ViewModelProperty(
+                            type: .boolean,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(false),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let flowDescription = makeFlowDescription(
+                    flowId: flowId,
+                    entryActions: [
+                        .delay(DelayAction(durationMs: 500)),
+                        .setViewModel(SetViewModelAction(
+                            path: .path("vm.flag"),
+                            value: AnyCodable(["literal": true] as [String: Any])
+                        ))
+                    ],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(description: flowDescription, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let outcome = await runner.handleRuntimeReady()
+                var paused = false
+                if case .paused(let pending) = outcome {
+                    paused = (pending.kind == .delay)
+                }
+                expect(paused).to(beTrue())
+
+                _ = await runner.resumePendingAction(reason: .timer, event: nil)
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let flag = values?["flag"]?.value as? Bool
+                expect(flag).to(equal(true))
+                expect(journey.flowState.pendingAction).to(beNil())
+            }
         }
     }
 }

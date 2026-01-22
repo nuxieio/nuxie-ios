@@ -365,61 +365,61 @@ final class FlowJourneyRunner {
                 let result = handleDelay(delay, context: context, index: index, resumeContext: resumeContext)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .timeWindow(let action):
-                let result = await handleTimeWindow(action, context: context, index: index, resumeContext: resumeContext)
+            case .timeWindow(let timeWindow):
+                let result = await handleTimeWindow(timeWindow, context: context, index: index, resumeContext: resumeContext)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .waitUntil(let action):
-                let result = await handleWaitUntil(action, context: context, index: index, resumeContext: resumeContext)
+            case .waitUntil(let waitUntil):
+                let result = await handleWaitUntil(waitUntil, context: context, index: index, resumeContext: resumeContext)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .condition(let action):
-                let result = await handleCondition(action, context: context)
+            case .condition(let condition):
+                let result = await handleCondition(condition, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .experiment(let action):
-                let result = await handleExperiment(action, context: context)
+            case .experiment(let experiment):
+                let result = await handleExperiment(experiment, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .sendEvent(let action):
-                await handleSendEvent(action, context: context)
+            case .sendEvent(let sendEvent):
+                await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
-            case .updateCustomer(let action):
-                handleUpdateCustomer(action, context: context)
+            case .updateCustomer(let updateCustomer):
+                handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
-            case .callDelegate(let action):
-                handleCallDelegate(action, context: context)
+            case .callDelegate(let callDelegate):
+                handleCallDelegate(callDelegate, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
-            case .remote(let action):
-                let result = await handleRemote(action, context: context, index: index)
+            case .remote(let remote):
+                let result = await handleRemote(remote, context: context, index: index)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .setViewModel(let action):
-                let result = await handleSetViewModel(action, context: context)
+            case .setViewModel(let setViewModel):
+                let result = await handleSetViewModel(setViewModel, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .fireTrigger(let action):
-                let result = await handleFireTrigger(action, context: context)
+            case .fireTrigger(let fireTrigger):
+                let result = await handleFireTrigger(fireTrigger, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .listInsert(let action):
-                let result = await handleListInsert(action, context: context)
+            case .listInsert(let listInsert):
+                let result = await handleListInsert(listInsert, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .listRemove(let action):
-                let result = await handleListRemove(action, context: context)
+            case .listRemove(let listRemove):
+                let result = await handleListRemove(listRemove, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .listSwap(let action):
-                let result = await handleListSwap(action, context: context)
+            case .listSwap(let listSwap):
+                let result = await handleListSwap(listSwap, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
-            case .exit(let action):
+            case .exit(let exitAction):
                 trackAction(action, context: context, error: nil)
-                return .exit(mapExitReason(action.reason))
+                return .exit(mapExitReason(exitAction.reason))
             case .unknown:
                 return .continue
             }

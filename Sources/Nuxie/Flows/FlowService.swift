@@ -9,6 +9,9 @@ protocol FlowServiceProtocol: AnyObject {
     
     /// Remove flows from cache
     func removeFlows(_ flowIds: [String]) async
+
+    /// Fetch flow data with products - does not create UI
+    func fetchFlow(id: String) async throws -> Flow
     
     /// Get a view controller for a flow by ID
     @MainActor

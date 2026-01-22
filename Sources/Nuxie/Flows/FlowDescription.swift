@@ -191,8 +191,12 @@ public enum InteractionTrigger: Codable {
         case .screenDismissed:
             self = .screenDismissed(method: try container.decodeIfPresent(String.self, forKey: .method))
         case .afterDelay:
-            let delayMs = (try? container.decode(Int.self, forKey: .delayMs))
-                ?? Int(try container.decode(Double.self, forKey: .delayMs))
+            let delayMs: Int
+            if let intValue = try? container.decode(Int.self, forKey: .delayMs) {
+                delayMs = intValue
+            } else {
+                delayMs = Int(try container.decode(Double.self, forKey: .delayMs))
+            }
             self = .afterDelay(delayMs: delayMs)
         case .event:
             let eventName = try container.decode(String.self, forKey: .eventName)
@@ -209,7 +213,7 @@ public enum InteractionTrigger: Codable {
             var payload: [String: AnyCodable] = [:]
             for key in container.allKeys {
                 if key == .type { continue }
-                payload[key.stringValue] = (try? container.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(nil)
+                payload[key.stringValue] = (try? container.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(NSNull())
             }
             self = .unknown(type: rawType, payload: payload)
         }
@@ -350,7 +354,7 @@ public enum InteractionAction: Codable {
             let dynamic = try decoder.container(keyedBy: DynamicCodingKey.self)
             var payload: [String: AnyCodable] = [:]
             for key in dynamic.allKeys where key.stringValue != "type" {
-                payload[key.stringValue] = (try? dynamic.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(nil)
+                payload[key.stringValue] = (try? dynamic.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(NSNull())
             }
             self = .unknown(type: rawType, payload: payload)
         }
@@ -398,7 +402,9 @@ public enum InteractionAction: Codable {
             if !payload.isEmpty {
                 var extra = encoder.container(keyedBy: DynamicCodingKey.self)
                 for (key, value) in payload {
-                    try extra.encode(value, forKey: DynamicCodingKey(stringValue: key))
+                    if let codingKey = DynamicCodingKey(stringValue: key) {
+                        try extra.encode(value, forKey: codingKey)
+                    }
                 }
             }
         }
@@ -651,7 +657,7 @@ public enum ViewModelPropertyType: String, Codable {
     case viewModel = "viewModel"
 }
 
-public struct ViewModelProperty: Codable {
+public final class ViewModelProperty: Codable {
     public let type: ViewModelPropertyType
     public let propertyId: Int?
     public let defaultValue: AnyCodable?
@@ -661,6 +667,28 @@ public struct ViewModelProperty: Codable {
     public let schema: [String: ViewModelProperty]?
     public let viewModelId: String?
     public let validation: ViewModelValidation?
+
+    public init(
+        type: ViewModelPropertyType,
+        propertyId: Int? = nil,
+        defaultValue: AnyCodable? = nil,
+        required: Bool? = nil,
+        enumValues: [String]? = nil,
+        itemType: ViewModelProperty? = nil,
+        schema: [String: ViewModelProperty]? = nil,
+        viewModelId: String? = nil,
+        validation: ViewModelValidation? = nil
+    ) {
+        self.type = type
+        self.propertyId = propertyId
+        self.defaultValue = defaultValue
+        self.required = required
+        self.enumValues = enumValues
+        self.itemType = itemType
+        self.schema = schema
+        self.viewModelId = viewModelId
+        self.validation = validation
+    }
 }
 
 public struct ViewModelValidation: Codable {
@@ -685,5 +713,4 @@ private struct DynamicCodingKey: CodingKey {
     var intValue: Int? { nil }
     init?(stringValue: String) { self.stringValue = stringValue }
     init?(intValue: Int) { return nil }
-    init(stringValue: String) { self.stringValue = stringValue }
 }

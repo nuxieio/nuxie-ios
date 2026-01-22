@@ -86,6 +86,20 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     func updateFlowIfNeeded(_ newFlow: Flow) {
         viewModel.updateFlowIfNeeded(newFlow)
     }
+
+    /// Send a runtime message to the Flow bundle
+    func sendRuntimeMessage(
+        type: String,
+        payload: [String: Any] = [:],
+        replyTo: String? = nil,
+        completion: ((Any?, Error?) -> Void)? = nil
+    ) {
+        if !runtimeReady {
+            pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
+            return
+        }
+        flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
+    }
     
     // MARK: - Setup
     
@@ -289,20 +303,6 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
 // MARK: - FlowMessageHandlerDelegate
 
 extension FlowViewController {
-    /// Send a runtime message to the Flow bundle
-    func sendRuntimeMessage(
-        type: String,
-        payload: [String: Any] = [:],
-        replyTo: String? = nil,
-        completion: ((Any?, Error?) -> Void)? = nil
-    ) {
-        if !runtimeReady {
-            pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
-            return
-        }
-        flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
-    }
-
     // Handle @nuxie/bridge messages directly
     func messageHandler(_ handler: FlowMessageHandler, didReceiveBridgeMessage type: String, payload: [String : Any], id: String?, from webView: FlowWebView) {
         switch type {
