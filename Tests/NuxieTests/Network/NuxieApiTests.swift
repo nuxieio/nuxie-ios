@@ -356,7 +356,7 @@ final class NuxieApiTests: AsyncSpec {
                 let flowId = "flow-123"
                 
                 it("should successfully fetch flow") {
-                    let flow = ResponseBuilders.buildFlowDescription(id: flowId)
+                    let flow = ResponseBuilders.buildRemoteFlow(id: flowId)
                     
                     StubURLProtocol.register(
                         matcher: RequestMatchers.get("/flows/\(flowId)"),
@@ -406,7 +406,7 @@ final class NuxieApiTests: AsyncSpec {
                         handler: { request in
                             capturedRequest = request
                             
-                            let flow = ResponseBuilders.buildFlowDescription(id: flowId)
+                            let flow = ResponseBuilders.buildRemoteFlow(id: flowId)
                             let data = try ResponseBuilders.toJSON(flow)
                             let response = HTTPURLResponse(
                                 url: request.url!,

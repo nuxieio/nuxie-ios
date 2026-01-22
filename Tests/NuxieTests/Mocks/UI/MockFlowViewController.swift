@@ -17,7 +17,7 @@ class MockFlowViewController: FlowViewController {
     
     /// Create a mock flow view controller with test data
     init(mockFlowId: String = "test-flow") {
-        let description = FlowDescription(
+        let description = RemoteFlow(
             id: mockFlowId,
             version: "v1",
             bundle: FlowBundleRef(
@@ -34,7 +34,7 @@ class MockFlowViewController: FlowViewController {
             entryScreenId: "screen-1",
             entryActions: nil,
             screens: [
-                FlowDescriptionScreen(
+                RemoteFlowScreen(
                     id: "screen-1",
                     name: nil,
                     locale: nil,
@@ -43,14 +43,14 @@ class MockFlowViewController: FlowViewController {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: FlowDescriptionInteractions(screens: [:], components: nil),
+            interactions: RemoteFlowInteractions(screens: [:], components: nil),
             viewModels: [],
             viewModelInstances: nil,
             converters: nil,
             pathIndex: nil
         )
 
-        let flow = Flow(description: description, products: [])
+        let flow = Flow(remoteFlow: description, products: [])
         // Create a mock FlowArchiver for testing
         let mockArchiver = FlowArchiver()
         super.init(flow: flow, archiveService: mockArchiver)

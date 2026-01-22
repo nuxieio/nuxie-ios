@@ -1,15 +1,15 @@
 import Foundation
 
-// MARK: - Flow Description
+// MARK: - Remote Flow
 
-public struct FlowDescription: Codable {
+public struct RemoteFlow: Codable {
     public let id: String
     public let version: String
     public let bundle: FlowBundleRef
     public let entryScreenId: String?
     public let entryActions: [InteractionAction]?
-    public let screens: [FlowDescriptionScreen]
-    public let interactions: FlowDescriptionInteractions
+    public let screens: [RemoteFlowScreen]
+    public let interactions: RemoteFlowInteractions
     public let viewModels: [ViewModel]
     public let viewModelInstances: [ViewModelInstance]?
     public let converters: [String: [String: AnyCodable]]?
@@ -21,7 +21,7 @@ public struct FlowBundleRef: Codable {
     public let manifest: BuildManifest?
 }
 
-public struct FlowDescriptionScreen: Codable {
+public struct RemoteFlowScreen: Codable {
     public let id: String
     public let name: String?
     public let locale: String?
@@ -30,7 +30,7 @@ public struct FlowDescriptionScreen: Codable {
     public let defaultInstanceId: String?
 }
 
-public struct FlowDescriptionInteractions: Codable {
+public struct RemoteFlowInteractions: Codable {
     public let screens: [String: [Interaction]]
     public let components: [String: [Interaction]]?
 }
@@ -38,6 +38,15 @@ public struct FlowDescriptionInteractions: Codable {
 public struct FlowPathIndexEntry: Codable {
     public let pathIds: [Int]
 }
+
+@available(*, deprecated, renamed: "RemoteFlow")
+public typealias FlowDescription = RemoteFlow
+
+@available(*, deprecated, renamed: "RemoteFlowScreen")
+public typealias FlowDescriptionScreen = RemoteFlowScreen
+
+@available(*, deprecated, renamed: "RemoteFlowInteractions")
+public typealias FlowDescriptionInteractions = RemoteFlowInteractions
 
 // MARK: - View Model Path References
 

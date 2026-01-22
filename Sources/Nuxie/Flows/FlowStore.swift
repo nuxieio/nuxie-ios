@@ -7,7 +7,7 @@ actor FlowStore {
     // MARK: - Properties
     
     // Client-side flow models keyed by composite hash
-    // Contains both FlowDescription data and enriched product data
+    // Contains both RemoteFlow data and enriched product data
     private var flowModels: [FlowCacheKey: Flow] = [:]
     
     // Deduplication of concurrent requests
@@ -24,32 +24,32 @@ actor FlowStore {
     
     // MARK: - Cache Management
     
-    /// Preload multiple flows with FlowDescription data (typically from warm caches)
-    /// This enriches the FlowDescriptions with products and caches them
-    func preloadFlows(_ descriptions: [FlowDescription]) async {
-        LogDebug("Preloading \(descriptions.count) flows")
+    /// Preload multiple flows with RemoteFlow data (typically from warm caches)
+    /// This enriches the RemoteFlows with products and caches them
+    func preloadFlows(_ remoteFlows: [RemoteFlow]) async {
+        LogDebug("Preloading \(remoteFlows.count) flows")
         
         // Process flows concurrently for better performance
         await withTaskGroup(of: Void.self) { group in
-            for description in descriptions {
+            for remoteFlow in remoteFlows {
                 group.addTask { [weak self] in
                     guard let self else { return }
                     
-                    let key = FlowCacheKey(id: description.id)
+                    let key = FlowCacheKey(id: remoteFlow.id)
                     
                     // Check if already cached and valid
                     if let cached = await self.flowModels[key], cached.isValid {
-                        LogDebug("Flow already cached and valid: \(description.id)")
+                        LogDebug("Flow already cached and valid: \(remoteFlow.id)")
                         return
                     }
                     
                     // Enrich and cache the flow
                     do {
-                        LogDebug("Preloading flow: \(description.id)")
-                        let flow = try await self.enrichFlow(description)
+                        LogDebug("Preloading flow: \(remoteFlow.id)")
+                        let flow = try await self.enrichFlow(remoteFlow)
                         await self.setFlow(flow, for: key)
                     } catch {
-                        LogError("Failed to preload flow \(description.id): \(error)")
+                        LogError("Failed to preload flow \(remoteFlow.id): \(error)")
                     }
                 }
             }
@@ -116,10 +116,10 @@ actor FlowStore {
             do {
                 // Fetch from API
                 LogInfo("Fetching flow from API: \(id)")
-                let description = try await self.api.fetchFlow(flowId: id)
+                let remoteFlow = try await self.api.fetchFlow(flowId: id)
                 
                 // Enrich and cache
-                let flow = try await self.enrichFlow(description)
+                let flow = try await self.enrichFlow(remoteFlow)
                 await self.setFlow(flow, for: key)
                 
                 // Clear pending after successful completion
@@ -146,24 +146,24 @@ actor FlowStore {
         flowModels[key] = flow
     }
     
-    private func enrichFlow(_ description: FlowDescription) async throws -> Flow {
+    private func enrichFlow(_ remoteFlow: RemoteFlow) async throws -> Flow {
         // Fetch products if the flow references any
-        let products = try await fetchProducts(for: description)
+        let products = try await fetchProducts(for: remoteFlow)
         
         // Create and return the flow with fetched products
         let flow = Flow(
-            description: description,
+            remoteFlow: remoteFlow,
             products: products
         )
         
-        LogDebug("Created flow with \(products.count) products: \(description.id)")
+        LogDebug("Created flow with \(products.count) products: \(remoteFlow.id)")
         return flow
     }
     
-    private func fetchProducts(for description: FlowDescription) async throws -> [FlowProduct] {
-        let productIds = extractProductIds(from: description)
+    private func fetchProducts(for remoteFlow: RemoteFlow) async throws -> [FlowProduct] {
+        let productIds = extractProductIds(from: remoteFlow)
         guard !productIds.isEmpty else {
-            LogDebug("No products referenced in flow: \(description.id)")
+            LogDebug("No products referenced in flow: \(remoteFlow.id)")
             return []
         }
         
@@ -181,11 +181,11 @@ actor FlowStore {
         return flowProducts
     }
     
-    private func extractProductIds(from description: FlowDescription) -> [String] {
+    private func extractProductIds(from remoteFlow: RemoteFlow) -> [String] {
         var ids = Set<String>()
-        let viewModelsById = Dictionary(uniqueKeysWithValues: description.viewModels.map { ($0.id, $0) })
+        let viewModelsById = Dictionary(uniqueKeysWithValues: remoteFlow.viewModels.map { ($0.id, $0) })
         
-        for instance in description.viewModelInstances ?? [] {
+        for instance in remoteFlow.viewModelInstances ?? [] {
             guard let viewModel = viewModelsById[instance.viewModelId] else { continue }
             collectProductIds(
                 schema: viewModel.properties,

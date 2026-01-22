@@ -5,7 +5,7 @@ import FactoryKit
 /// Protocol defining the FlowService interface
 protocol FlowServiceProtocol: AnyObject {
     /// Prefetch flows - triggers fetch of flow data and preloads web archives
-    func prefetchFlows(_ descriptions: [FlowDescription])
+    func prefetchFlows(_ remoteFlows: [RemoteFlow])
     
     /// Remove flows from cache
     func removeFlows(_ flowIds: [String]) async
@@ -53,16 +53,16 @@ final class FlowService: FlowServiceProtocol {
     // MARK: - Flow Lifecycle Management (called by ProfileService)
     
     /// Prefetch flows - triggers fetch of flow data and preloads web archives
-    func prefetchFlows(_ descriptions: [FlowDescription]) {
-        LogInfo("Prefetching \(descriptions.count) flows")
+    func prefetchFlows(_ remoteFlows: [RemoteFlow]) {
+        LogInfo("Prefetching \(remoteFlows.count) flows")
         
         Task {
             // Preload all flows with products into cache (concurrent)
-            await flowStore.preloadFlows(descriptions)
+            await flowStore.preloadFlows(remoteFlows)
             
             // Preload web archives for all flows
-            for description in descriptions {
-                let flow = Flow(description: description, products: [])
+            for remoteFlow in remoteFlows {
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 await flowArchiver.preloadArchive(for: flow)
             }
         }
