@@ -4,12 +4,9 @@ import Foundation
 
 public struct RemoteFlow: Codable {
     public let id: String
-    public let version: String
     public let bundle: FlowBundleRef
-    public let entryScreenId: String?
-    public let entryActions: [InteractionAction]?
     public let screens: [RemoteFlowScreen]
-    public let interactions: RemoteFlowInteractions
+    public let interactions: [String: [Interaction]]
     public let viewModels: [ViewModel]
     public let viewModelInstances: [ViewModelInstance]?
     public let converters: [String: [String: AnyCodable]]?
@@ -18,22 +15,16 @@ public struct RemoteFlow: Codable {
 
 public struct FlowBundleRef: Codable {
     public let url: String
-    public let manifest: BuildManifest?
+    public let manifest: BuildManifest
 }
 
 public struct RemoteFlowScreen: Codable {
     public let id: String
-    public let name: String?
-    public let locale: String?
-    public let route: String?
     public let defaultViewModelId: String?
     public let defaultInstanceId: String?
 }
 
-public struct RemoteFlowInteractions: Codable {
-    public let screens: [String: [Interaction]]
-    public let components: [String: [Interaction]]?
-}
+public typealias RemoteFlowInteractions = [String: [Interaction]]
 
 public struct FlowPathIndexEntry: Codable {
     public let pathIds: [Int]
@@ -50,15 +41,29 @@ public typealias FlowDescriptionInteractions = RemoteFlowInteractions
 
 // MARK: - View Model Path References
 
+public struct VmPathIds: Codable, Equatable {
+    public let pathIds: [Int]
+    public let isRelative: Bool?
+    public let nameBased: Bool?
+
+    public init(pathIds: [Int], isRelative: Bool? = nil, nameBased: Bool? = nil) {
+        self.pathIds = pathIds
+        self.isRelative = isRelative
+        self.nameBased = nameBased
+    }
+}
+
 public enum VmPathRef: Codable, Equatable {
     case path(String)
-    case ids([Int])
+    case ids(VmPathIds)
     case raw(String)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case path
         case pathIds
+        case isRelative
+        case nameBased
     }
 
     private enum Kind: String, Codable {
@@ -81,7 +86,9 @@ public enum VmPathRef: Codable, Equatable {
                 return
             case .ids:
                 let pathIds = try container.decode([Int].self, forKey: .pathIds)
-                self = .ids(pathIds)
+                let isRelative = try? container.decode(Bool.self, forKey: .isRelative)
+                let nameBased = try? container.decode(Bool.self, forKey: .nameBased)
+                self = .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
                 return
             }
         }
@@ -100,9 +107,15 @@ public enum VmPathRef: Codable, Equatable {
         case .path(let path):
             try container.encode(Kind.path, forKey: .kind)
             try container.encode(path, forKey: .path)
-        case .ids(let pathIds):
+        case .ids(let ref):
             try container.encode(Kind.ids, forKey: .kind)
-            try container.encode(pathIds, forKey: .pathIds)
+            try container.encode(ref.pathIds, forKey: .pathIds)
+            if ref.isRelative == true {
+                try container.encode(true, forKey: .isRelative)
+            }
+            if ref.nameBased == true {
+                try container.encode(true, forKey: .nameBased)
+            }
         case .raw(let raw):
             try container.encode(Kind.path, forKey: .kind)
             try container.encode(raw, forKey: .path)
@@ -113,8 +126,16 @@ public enum VmPathRef: Codable, Equatable {
         switch self {
         case .path(let path):
             return path
-        case .ids(let ids):
-            return "ids:\(ids.map(String.init).joined(separator: "."))"
+        case .ids(let ref):
+            let prefix: String
+            if ref.isRelative == true {
+                prefix = "ids:rel"
+            } else if ref.nameBased == true {
+                prefix = "ids:name"
+            } else {
+                prefix = "ids"
+            }
+            return "\(prefix):\(ref.pathIds.map(String.init).joined(separator: "."))"
         case .raw(let raw):
             return raw
         }
@@ -131,6 +152,7 @@ public struct Interaction: Codable {
 }
 
 public enum InteractionTrigger: Codable {
+    case flowEntered
     case tap
     case longPress(minMs: Int?)
     case hover
@@ -166,6 +188,7 @@ public enum InteractionTrigger: Codable {
     }
 
     private enum TriggerType: String, Codable {
+        case flowEntered = "flow_entered"
         case tap
         case longPress = "long_press"
         case hover
@@ -183,6 +206,8 @@ public enum InteractionTrigger: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let typeValue = (try? container.decode(TriggerType.self, forKey: .type))
         switch typeValue {
+        case .flowEntered:
+            self = .flowEntered
         case .tap:
             self = .tap
         case .longPress:
@@ -231,6 +256,8 @@ public enum InteractionTrigger: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .flowEntered:
+            try container.encode(TriggerType.flowEntered, forKey: .type)
         case .tap:
             try container.encode(TriggerType.tap, forKey: .type)
         case .longPress(let minMs):

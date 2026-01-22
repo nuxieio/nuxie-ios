@@ -85,13 +85,13 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: remoteFlow)
 
-                let ok = runtime.setValue(path: .ids([1, 2]), value: 7, screenId: "screen-1")
+                let ok = runtime.setValue(path: .ids(VmPathIds(pathIds: [1, 2])), value: 7, screenId: "screen-1")
                 expect(ok).to(beTrue())
 
-                let count = runtime.getValue(path: .ids([1, 2]), screenId: "screen-1") as? Int
+                let count = runtime.getValue(path: .ids(VmPathIds(pathIds: [1, 2])), screenId: "screen-1") as? Int
                 expect(count).to(equal(7))
 
-                let flag = runtime.getValue(path: .ids([0, 1]), screenId: "screen-1") as? Bool
+                let flag = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 1])), screenId: "screen-1") as? Bool
                 expect(flag).to(equal(false))
             }
 
@@ -105,50 +105,50 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
 
-                _ = runtime.setValue(path: .ids([0, 2]), value: [1, 2, 3], screenId: nil)
+                _ = runtime.setValue(path: .ids(VmPathIds(pathIds: [0, 2])), value: [1, 2, 3], screenId: nil)
                 _ = runtime.setListValue(
-                    path: .ids([0, 2]),
+                    path: .ids(VmPathIds(pathIds: [0, 2])),
                     operation: "move",
                     payload: ["from": 0, "to": 2],
                     screenId: nil
                 )
-                var list = runtime.getValue(path: .ids([0, 2]), screenId: nil) as? [Int]
+                var list = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 2])), screenId: nil) as? [Int]
                 expect(list).to(equal([2, 3, 1]))
 
                 _ = runtime.setListValue(
-                    path: .ids([0, 2]),
+                    path: .ids(VmPathIds(pathIds: [0, 2])),
                     operation: "swap",
                     payload: ["from": 0, "to": 1],
                     screenId: nil
                 )
-                list = runtime.getValue(path: .ids([0, 2]), screenId: nil) as? [Int]
+                list = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 2])), screenId: nil) as? [Int]
                 expect(list).to(equal([3, 2, 1]))
 
                 _ = runtime.setListValue(
-                    path: .ids([0, 2]),
+                    path: .ids(VmPathIds(pathIds: [0, 2])),
                     operation: "set",
                     payload: ["index": 1, "value": 9],
                     screenId: nil
                 )
-                list = runtime.getValue(path: .ids([0, 2]), screenId: nil) as? [Int]
+                list = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 2])), screenId: nil) as? [Int]
                 expect(list).to(equal([3, 9, 1]))
 
                 _ = runtime.setListValue(
-                    path: .ids([0, 2]),
+                    path: .ids(VmPathIds(pathIds: [0, 2])),
                     operation: "remove",
                     payload: ["index": 0],
                     screenId: nil
                 )
-                list = runtime.getValue(path: .ids([0, 2]), screenId: nil) as? [Int]
+                list = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 2])), screenId: nil) as? [Int]
                 expect(list).to(equal([9, 1]))
 
                 _ = runtime.setListValue(
-                    path: .ids([0, 2]),
+                    path: .ids(VmPathIds(pathIds: [0, 2])),
                     operation: "clear",
                     payload: [:],
                     screenId: nil
                 )
-                list = runtime.getValue(path: .ids([0, 2]), screenId: nil) as? [Int]
+                list = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 2])), screenId: nil) as? [Int]
                 expect(list).to(equal([]))
             }
 
@@ -165,7 +165,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
 
-                let title = runtime.getValue(path: .ids([0, 5]), screenId: "screen-1") as? String
+                let title = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 5])), screenId: "screen-1") as? String
                 expect(title).to(equal("Hello"))
             }
 
@@ -178,7 +178,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
 
-                let isTrigger = runtime.isTriggerPath(path: .ids([0, 7]), screenId: "screen-1")
+                let isTrigger = runtime.isTriggerPath(path: .ids(VmPathIds(pathIds: [0, 7])), screenId: "screen-1")
                 expect(isTrigger).to(beTrue())
             }
         }

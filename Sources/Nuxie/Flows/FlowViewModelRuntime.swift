@@ -16,6 +16,19 @@ private enum PathSegment {
     case index(String)
 }
 
+private let fnvOffsetBasis: UInt32 = 0x811c9dc5
+private let fnvPrime: UInt32 = 0x01000193
+
+private func hashNameId(_ value: String) -> Int {
+    if value.isEmpty { return Int(fnvOffsetBasis) }
+    var hash = fnvOffsetBasis
+    for byte in value.utf8 {
+        hash ^= UInt32(byte)
+        hash = hash &* fnvPrime
+    }
+    return Int(hash)
+}
+
 private struct ResolvedPathInfo {
     let instance: FlowViewModelInstanceState?
     let segments: [PathSegment]
@@ -335,8 +348,14 @@ public final class FlowViewModelRuntime {
         screenId: String?
     ) -> ResolvedPathInfo {
         switch path {
-        case .ids(let ids):
-            if let resolved = resolvePathIds(ids) {
+        case .ids(let ref):
+            let resolved: (viewModelId: String, segments: [PathSegment])?
+            if ref.isRelative == true || ref.nameBased == true {
+                resolved = resolveNamePathIds(ref, screenId: screenId)
+            } else {
+                resolved = resolvePathIds(ref.pathIds)
+            }
+            if let resolved {
                 let instance = resolveInstance(
                     screenId: screenId,
                     viewModelId: resolved.viewModelId,
@@ -408,6 +427,58 @@ public final class FlowViewModelRuntime {
         return (viewModel.id, segments)
     }
 
+    private func resolveNamePathIds(
+        _ ref: VmPathIds,
+        screenId: String?
+    ) -> (viewModelId: String, segments: [PathSegment])? {
+        let pathIds = ref.pathIds
+        guard !pathIds.isEmpty else { return nil }
+
+        let viewModel: ViewModel?
+        let propertyIds: [Int]
+
+        if ref.isRelative == true {
+            guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
+                return nil
+            }
+            viewModel = viewModels[instance.viewModelId]
+            propertyIds = pathIds
+        } else {
+            let viewModelNameId = pathIds[0]
+            viewModel = viewModelList.first { hashNameId($0.name) == viewModelNameId }
+            propertyIds = Array(pathIds.dropFirst())
+        }
+
+        guard let viewModel, !propertyIds.isEmpty else { return nil }
+
+        var schema = viewModel.properties
+        var segments: [PathSegment] = []
+
+        for (idx, nameId) in propertyIds.enumerated() {
+            guard let found = findPropertyByNameId(in: schema, nameId: nameId) else {
+                return nil
+            }
+            segments.append(.prop(found.name))
+
+            if idx == propertyIds.count - 1 { continue }
+            switch found.property.type {
+            case .object:
+                guard let nested = found.property.schema else { return nil }
+                schema = nested
+            case .viewModel:
+                guard let nestedId = found.property.viewModelId,
+                      let nested = viewModels[nestedId] else { return nil }
+                schema = nested.properties
+            case .list:
+                return nil
+            default:
+                return nil
+            }
+        }
+
+        return (viewModel.id, segments)
+    }
+
     private func findPropertyById(
         in schema: [String: ViewModelProperty],
         propertyId: Int
@@ -420,13 +491,25 @@ public final class FlowViewModelRuntime {
         return nil
     }
 
+    private func findPropertyByNameId(
+        in schema: [String: ViewModelProperty],
+        nameId: Int
+    ) -> (name: String, property: ViewModelProperty)? {
+        for (name, property) in schema {
+            if hashNameId(name) == nameId {
+                return (name, property)
+            }
+        }
+        return nil
+    }
+
     private func resolvePathString(_ path: VmPathRef) -> String {
         switch path {
         case .path(let raw):
             return raw
-        case .ids(let ids):
-            let key = "ids:\(ids.map(String.init).joined(separator: "."))"
-            return pathIndexByIds()[key] ?? key
+        case .ids(let ref):
+            let key = "ids:\(ref.pathIds.map(String.init).joined(separator: "."))"
+            return pathIndexByIds()[key] ?? path.normalizedPath
         case .raw(let raw):
             return raw
         }
