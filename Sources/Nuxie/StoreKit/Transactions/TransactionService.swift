@@ -13,7 +13,7 @@ public struct PurchaseSyncResult {
 /// Service responsible for managing StoreKit transactions
 public actor TransactionService {
     @Injected(\.productService) private var productService: ProductService
-    @Injected(\.transactionObserver) private var transactionObserver: TransactionObserver
+    @Injected(\.transactionObserver) private var transactionObserver: TransactionObserverProtocol
     
     /// Purchase delegate from configuration
     private var purchaseDelegate: NuxiePurchaseDelegate? {

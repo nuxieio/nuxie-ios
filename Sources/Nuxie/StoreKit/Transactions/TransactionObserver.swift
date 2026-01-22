@@ -2,11 +2,23 @@ import Foundation
 import StoreKit
 import FactoryKit
 
+protocol TransactionObserverProtocol: Actor {
+    func startListening()
+    func stopListening()
+    func syncTransaction(
+        transactionJws: String,
+        transactionId: String,
+        productId: String?,
+        originalTransactionId: String?
+    ) async -> Bool
+    func syncCurrentEntitlements() async
+}
+
 /// Observes StoreKit 2 Transaction.updates stream and syncs verified transactions with the backend
 ///
 /// By observing Transaction.updates directly, we catch all purchases regardless of how they
 /// were initiated (via SDK, app's own StoreKit code, or even the App Store directly).
-internal actor TransactionObserver {
+internal actor TransactionObserver: TransactionObserverProtocol {
 
     // MARK: - Dependencies
 
