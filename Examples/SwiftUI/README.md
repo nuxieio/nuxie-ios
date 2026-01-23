@@ -96,13 +96,11 @@ Instead of hardcoding when/where to show paywalls, MoodLog uses Nuxie's **flow s
 ```swift
 // User taps "Go Pro" button
 Button("Go Pro") {
-    Task {
-        NuxieSDK.shared.trigger("upgrade_tapped", properties: [
-            "source": "today_screen",
-            "current_streak": moodStore.calculateStreak()
-        ]) { update in
-            handleTriggerUpdate(update)
-        }
+    NuxieSDK.shared.trigger("upgrade_tapped", properties: [
+        "source": "today_screen",
+        "current_streak": moodStore.calculateStreak()
+    ]) { update in
+        handleTriggerUpdate(update)
     }
 }
 .buttonStyle(.borderedProminent)
@@ -333,7 +331,7 @@ Every file demonstrates:
 ### Modern SwiftUI Patterns
 - Declarative view syntax
 - @StateObject and @EnvironmentObject
-- Task {} for async operations
+- Task {} for async operations (StoreKit, async trigger streams)
 - Custom ButtonStyles and ViewModifiers
 - ShareSheet wrapper for UIKit interop
 - Dark mode support with dynamic colors

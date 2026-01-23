@@ -281,16 +281,12 @@ struct TodayView: View {
     /// When user taps "Go Pro", track the event and let Nuxie decide
     /// whether to show a flow based on dashboard configuration.
     private func handleGoProTapped() {
-        Task {
-            NuxieSDK.shared.trigger(Constants.eventUpgradeTapped, properties: [
-                "source": "today_screen",
-                "current_streak": streak,
-                "total_entries": moodStore.count
-            ]) { update in
-                DispatchQueue.main.async {
-                    handleTriggerUpdate(update)
-                }
-            }
+        NuxieSDK.shared.trigger(Constants.eventUpgradeTapped, properties: [
+            "source": "today_screen",
+            "current_streak": streak,
+            "total_entries": moodStore.count
+        ]) { update in
+            handleTriggerUpdate(update)
         }
     }
 

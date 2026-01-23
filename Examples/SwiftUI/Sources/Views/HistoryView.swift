@@ -166,16 +166,12 @@ struct HistoryView: View {
             performCSVExport()
         } else {
             /// Track gated feature attempt
-            Task {
-                NuxieSDK.shared.trigger(Constants.eventCSVExportGated, properties: [
-                    "entry_count": moodStore.count,
-                    "source": "history_toolbar"
-                ]) { [self] update in
-                    DispatchQueue.main.async {
-                        handleTriggerUpdate(update) {
-                            self.performCSVExport()
-                        }
-                    }
+            NuxieSDK.shared.trigger(Constants.eventCSVExportGated, properties: [
+                "entry_count": moodStore.count,
+                "source": "history_toolbar"
+            ]) { [self] update in
+                handleTriggerUpdate(update) {
+                    self.performCSVExport()
                 }
             }
         }
@@ -186,16 +182,12 @@ struct HistoryView: View {
     /// Demonstrates soft feature gating - free users can see 7 days, but
     /// we show a prompt to unlock unlimited history.
     private func handleUnlockHistoryTapped() {
-        Task {
-            NuxieSDK.shared.trigger(Constants.eventUnlockHistoryTapped, properties: [
-                "visible_entries": entries.count,
-                "total_entries": moodStore.count,
-                "source": "history_screen"
-            ]) { update in
-                DispatchQueue.main.async {
-                    handleTriggerUpdate(update)
-                }
-            }
+        NuxieSDK.shared.trigger(Constants.eventUnlockHistoryTapped, properties: [
+            "visible_entries": entries.count,
+            "total_entries": moodStore.count,
+            "source": "history_screen"
+        ]) { update in
+            handleTriggerUpdate(update)
         }
     }
 

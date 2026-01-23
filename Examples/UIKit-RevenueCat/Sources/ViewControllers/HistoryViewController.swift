@@ -171,28 +171,9 @@ final class HistoryViewController: UIViewController {
             NuxieSDK.shared.trigger("csv_export_gated", properties: [
                 "entry_count": moodStore.count,
                 "source": "history_toolbar"
-            ]) { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-
-                    switch result {
-                    case .flow(let completion):
-                        // Flow was shown and completed
-                        if case .purchased = completion.outcome {
-                            // User just purchased! Now export
-                            self.performCSVExport()
-                        } else if case .trialStarted = completion.outcome {
-                            // Trial started, export now
-                            self.performCSVExport()
-                        }
-
-                    case .noInteraction:
-                        // No flow configured - show message
-                        self.showError("CSV export is a Pro feature")
-
-                    case .failed(let error):
-                        self.showError(error.localizedDescription)
-                    }
+            ]) { [weak self] update in
+                self?.handleTriggerUpdate(update) { [weak self] in
+                    self?.performCSVExport()
                 }
             }
         }
@@ -249,15 +230,14 @@ final class HistoryViewController: UIViewController {
     /// **Nuxie Integration: Track unlock event**
     /// When user wants to unlock history, track event and let Nuxie show configured flow
     private func requestHistoryUnlock() {
-        Task {
-            NuxieSDK.shared.trigger("unlock_history_tapped", properties: [
-                "visible_entries": entries.count,
-                "total_entries": moodStore.count,
-                "source": "history_screen"
-            ]) { [weak self] update in
-                DispatchQueue.main.async {
-                    self?.handleTriggerUpdate(update)
-                }
+        NuxieSDK.shared.trigger("unlock_history_tapped", properties: [
+            "visible_entries": entries.count,
+            "total_entries": moodStore.count,
+            "source": "history_screen"
+        ]) { [weak self] update in
+            self?.handleTriggerUpdate(update) { [weak self] in
+                self?.loadEntries()
+                self?.showSuccessMessage()
             }
         }
     }
@@ -265,21 +245,25 @@ final class HistoryViewController: UIViewController {
     // MARK: - Nuxie Flow Handling
 
     /// Handles the result of a tracked event that may trigger a flow
-    private func handleTriggerUpdate(_ update: TriggerUpdate) {
+    private func handleTriggerUpdate(_ update: TriggerUpdate, onAllowed: (() -> Void)? = nil) {
         switch update {
         case .entitlement(let entitlement):
             switch entitlement {
             case .allowed:
-                loadEntries()
-                showSuccessMessage()
+                onAllowed?()
             case .denied:
-                showError("Access denied.")
+                showError("This is a Pro feature")
             case .pending:
                 break
             }
         case .decision(let decision):
-            if case .noMatch = decision {
-                print("[MoodLog] No flow shown - configure a campaign in Nuxie dashboard")
+            switch decision {
+            case .allowedImmediate:
+                onAllowed?()
+            case .deniedImmediate, .noMatch, .suppressed:
+                showError("This is a Pro feature")
+            default:
+                break
             }
         case .error(let error):
             showError("Unable to load: \(error.message)")
