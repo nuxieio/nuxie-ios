@@ -75,6 +75,18 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             )
         }
 
+        func nameId(_ value: String) -> Int {
+            let fnvOffsetBasis: UInt32 = 0x811c9dc5
+            let fnvPrime: UInt32 = 0x01000193
+            if value.isEmpty { return Int(fnvOffsetBasis) }
+            var hash = fnvOffsetBasis
+            for byte in value.utf8 {
+                hash ^= UInt32(byte)
+                hash = hash &* fnvPrime
+            }
+            return Int(hash)
+        }
+
         describe("FlowJourneyRunner") {
             it("pauses on entry delay") {
                 let flowId = "flow-delay"
@@ -357,17 +369,20 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         "selectedIndex": AnyCodable(2)
                     ]
                 )
+                let viewModelNameId = nameId(viewModel.name)
+                let productNameId = nameId("selectedProductId")
+                let indexNameId = nameId("selectedIndex")
                 let purchaseAction = InteractionAction.purchase(
                     PurchaseAction(
                         placementIndex: AnyCodable([
                             "ref": [
-                                "pathIds": [0, 2],
+                                "pathIds": [viewModelNameId, indexNameId],
                                 "nameBased": true
                             ]
                         ]),
                         productId: AnyCodable([
                             "ref": [
-                                "pathIds": [0, 1],
+                                "pathIds": [viewModelNameId, productNameId],
                                 "nameBased": true
                             ]
                         ])
