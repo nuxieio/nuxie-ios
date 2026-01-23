@@ -118,7 +118,7 @@ NuxieSDK.shared.trigger(
 )
 
 Task {
-  await NuxieSDK.shared.trigger(
+  NuxieSDK.shared.trigger(
     "premium_feature_tapped",
     properties: ["feature": "pro_filters"]
   ) { update in
