@@ -1248,7 +1248,7 @@ final class FlowJourneyRunner {
             payload["transition"] = transition.value
         }
         await MainActor.run {
-            controller.sendRuntimeMessage(type: "runtime/show_screen", payload: payload)
+            controller.sendRuntimeMessage(type: "runtime/navigate", payload: payload)
         }
     }
 
