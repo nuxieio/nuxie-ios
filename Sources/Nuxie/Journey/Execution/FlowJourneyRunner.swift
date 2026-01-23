@@ -390,6 +390,22 @@ final class FlowJourneyRunner {
                 handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
+            case .purchase(let purchase):
+                let result = await handlePurchase(purchase, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .restore(let restore):
+                let result = await handleRestore(restore, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .openLink(let openLink):
+                let result = await handleOpenLink(openLink, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .dismiss(let dismiss):
+                let result = await handleDismiss(dismiss, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .callDelegate(let callDelegate):
                 handleCallDelegate(callDelegate, context: context)
                 trackAction(action, context: context, error: nil)
@@ -743,6 +759,59 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
+    }
+
+    private func handlePurchase(
+        _ action: PurchaseAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        let resolvedProductId = resolveValueRefs(action.productId.value, context: context)
+        guard let productId = resolvedProductId as? String, !productId.isEmpty else {
+            return .continue
+        }
+        let placementIndex = resolveValueRefs(action.placementIndex.value, context: context)
+        await MainActor.run {
+            controller.performPurchase(productId: productId, placementIndex: placementIndex)
+        }
+        return .continue
+    }
+
+    private func handleRestore(
+        _ action: RestoreAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        await MainActor.run {
+            controller.performRestore()
+        }
+        return .continue
+    }
+
+    private func handleOpenLink(
+        _ action: OpenLinkAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        let resolvedUrl = resolveValueRefs(action.url.value, context: context)
+        guard let urlString = resolvedUrl as? String, !urlString.isEmpty else {
+            return .continue
+        }
+        await MainActor.run {
+            controller.performOpenLink(urlString: urlString, target: action.target)
+        }
+        return .continue
+    }
+
+    private func handleDismiss(
+        _ action: DismissAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        await MainActor.run {
+            controller.performDismiss(reason: .userDismissed)
+        }
+        return .continue
     }
 
     private func handleRemote(
@@ -1516,6 +1585,10 @@ private extension InteractionAction {
         case .experiment: return "experiment"
         case .sendEvent: return "send_event"
         case .updateCustomer: return "update_customer"
+        case .purchase: return "purchase"
+        case .restore: return "restore"
+        case .openLink: return "open_link"
+        case .dismiss: return "dismiss"
         case .callDelegate: return "call_delegate"
         case .remote: return "remote"
         case .setViewModel: return "set_view_model"
