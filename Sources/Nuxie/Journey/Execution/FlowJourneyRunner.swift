@@ -58,6 +58,7 @@ final class FlowJourneyRunner {
     private var isPaused = false
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
+    private var didWarnConverters = false
 
     init(
         journey: Journey,
@@ -1257,6 +1258,7 @@ final class FlowJourneyRunner {
 
     private func sendViewModelInit() {
         guard let controller = viewController else { return }
+        warnConvertersIfNeeded()
         let payload: [String: Any] = [
             "viewModels": encodeJSON(remoteFlow.viewModels) ?? [],
             "instances": encodeJSON(viewModels.allInstances()) ?? [],
@@ -1269,6 +1271,13 @@ final class FlowJourneyRunner {
         Task { @MainActor in
             controller.sendRuntimeMessage(type: "runtime/view_model_init", payload: payload)
         }
+    }
+
+    private func warnConvertersIfNeeded() {
+        if didWarnConverters { return }
+        guard let converters = remoteFlow.converters, !converters.isEmpty else { return }
+        didWarnConverters = true
+        LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters; ensure converter-dependent logic runs in the web bundle.")
     }
 
     private func sendViewModelPatch(path: VmPathRef, value: Any, source: String?) {
