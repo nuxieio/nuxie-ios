@@ -83,21 +83,19 @@ Instead of hardcoding when/where to show paywalls, MoodLog uses Nuxie's **flow s
 
 ```swift
 // User taps "Go Pro" button
-Task {
-    NuxieSDK.shared.trigger("upgrade_tapped", properties: [
-        "source": "today_screen",
-        "current_streak": streak
-    ]) { update in
-        switch update {
-        case .entitlement(.allowed):
-            unlockProFeatures()
-        case .decision(.noMatch):
-            break
-        case .error(let error):
-            print("Trigger failed: \(error.message)")
-        default:
-            break
-        }
+NuxieSDK.shared.trigger("upgrade_tapped", properties: [
+    "source": "today_screen",
+    "current_streak": streak
+]) { update in
+    switch update {
+    case .entitlement(.allowed):
+        unlockProFeatures()
+    case .decision(.noMatch):
+        break
+    case .error(let error):
+        print("Trigger failed: \(error.message)")
+    default:
+        break
     }
 }
 ```

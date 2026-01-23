@@ -346,16 +346,12 @@ final class TodayViewController: UIViewController {
         /// configured in the dashboard.
         ///
         /// The handler receives TriggerUpdate events with decisions and entitlements
-        Task {
-            NuxieSDK.shared.trigger("upgrade_tapped", properties: [
-                "source": "today_screen",
-                "current_streak": moodStore.calculateStreak(),
-                "total_entries": moodStore.count
-            ]) { [weak self] update in
-                DispatchQueue.main.async {
-                    self?.handleTriggerUpdate(update)
-                }
-            }
+        NuxieSDK.shared.trigger("upgrade_tapped", properties: [
+            "source": "today_screen",
+            "current_streak": moodStore.calculateStreak(),
+            "total_entries": moodStore.count
+        ]) { [weak self] update in
+            self?.handleTriggerUpdate(update)
         }
     }
 
