@@ -67,7 +67,7 @@ public actor TriggerService: TriggerServiceProtocol {
           return true
         case .decision(let decision):
           switch decision {
-          case .allowedImmediate, .deniedImmediate, .noMatch:
+          case .allowedImmediate, .deniedImmediate, .noMatch, .suppressed:
             return true
           default:
             return false

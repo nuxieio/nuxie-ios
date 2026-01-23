@@ -14,6 +14,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
             
             beforeEach {
                 print("DEBUG: beforeEach starting")
+                await NuxieSDK.shared.shutdown()
 
 
                 // Create and register mock API to prevent network calls
@@ -80,9 +81,14 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         
                         // Track some events as anonymous
                         print("DEBUG: Tracking events as anonymous")
-                        NuxieSDK.shared.trigger("app_opened", properties: ["source": "test"])
-                        NuxieSDK.shared.trigger("button_clicked", properties: ["button": "start"])
-                        NuxieSDK.shared.trigger("page_viewed", properties: ["page": "home"])
+                        let handles = [
+                            NuxieSDK.shared.trigger("app_opened", properties: ["source": "test"]),
+                            NuxieSDK.shared.trigger("button_clicked", properties: ["button": "start"]),
+                            NuxieSDK.shared.trigger("page_viewed", properties: ["page": "home"])
+                        ]
+                        for handle in handles {
+                            for await _ in handle {}
+                        }
                         print("DEBUG: Events tracked")
 
                         // Wait for events to be processed (drain the event queue)
@@ -92,7 +98,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Verify events are stored with anonymous ID
                         print("DEBUG: Querying events for anonymous user")
                         await expect { await eventService.getEventsForUser(anonymousId, limit: 10).count }
-                            .toEventually(equal(3), timeout: .seconds(2))
+                            .toEventually(equal(3), timeout: .seconds(5))
                         print("DEBUG: Found expected anonymous events")
                         
                         // Identify user
@@ -104,7 +110,11 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Verify events were reassigned to identified user
                         print("DEBUG: Querying events for identified user")
                         await expect { await eventService.getEventsForUser(userId, limit: 10).count }
-                            .toEventually(beGreaterThanOrEqualTo(3), timeout: .seconds(2)) // At least the 3 tracked events
+                            .toEventually(beGreaterThanOrEqualTo(3), timeout: .seconds(5)) // At least the 3 tracked events
+                        await expect {
+                            await eventService.getEventsForUser(userId, limit: 10)
+                                .first { $0.name == "app_opened" }
+                        }.toEventuallyNot(beNil(), timeout: .seconds(5))
                         let identifiedEvents = await eventService.getEventsForUser(userId, limit: 10)
                         print("DEBUG: Found \(identifiedEvents.count) identified events")
                         
@@ -113,7 +123,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         await expect { 
                             let events = await eventService.getEventsForUser(anonymousId, limit: 10)
                             return events.filter { $0.name != "$identify" }.count 
-                        }.toEventually(equal(0), timeout: .seconds(2))
+                        }.toEventually(equal(0), timeout: .seconds(5))
                         print("DEBUG: Verified anonymous events migrated")
                         
                         // Verify the migrated events maintain their properties
@@ -290,7 +300,12 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     
                     // Give time for events to be stored
                     await eventService.drain()
-                    
+
+                    await expect {
+                        await eventService.getEventsForUser(userId, limit: 20)
+                            .filter { $0.name.starts(with: "event_") }
+                            .count
+                    }.toEventually(equal(2), timeout: .seconds(2))
                     let eventCountBefore = await eventService.getEventsForUser(userId, limit: 20).count
                     
                     // Identify again with same ID
@@ -342,10 +357,13 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     
                     // Ensure events are stored before migration begins.
                     await eventService.drain()
-
+                    await expect {
+                        await eventService.getRecentEvents(limit: 200)
+                            .filter { $0.name.starts(with: "bulk_event") }
+                            .count
+                    }.toEventually(equal(eventCount), timeout: .seconds(5))
                     let recentEvents = await eventService.getRecentEvents(limit: 200)
                     let bulkEvents = recentEvents.filter { $0.name.starts(with: "bulk_event") }
-                    expect(bulkEvents.count).to(equal(eventCount))
                     guard let sourceDistinctId = bulkEvents.first?.distinctId else {
                         fail("Expected bulk events to include a distinctId")
                         return

@@ -105,6 +105,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "flag": ViewModelProperty(
                             type: .boolean,
@@ -193,6 +194,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "items": listProperty,
                         "pulse": triggerProperty
@@ -264,6 +266,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "items": listProperty
                     ]
@@ -319,6 +322,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "flag": ViewModelProperty(
                             type: .boolean,
@@ -373,6 +377,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "flag": ViewModelProperty(
                             type: .boolean,
@@ -457,6 +462,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "flag": ViewModelProperty(
                             type: .boolean,
@@ -513,6 +519,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "variant": ViewModelProperty(
                             type: .string,
@@ -575,6 +582,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
+                    viewModelPathId: 0,
                     properties: [
                         "variant": ViewModelProperty(
                             type: .string,
@@ -631,7 +639,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let assignment = ExperimentAssignment(
                     experimentId: "exp-1",
                     variantId: "b",
-                    flowId: nil
+                    flowId: nil,
+                    status: "running"
                 )
                 let profile = ProfileResponse(
                     campaigns: [],

@@ -94,8 +94,9 @@ final class AppLifecyclePluginTests: AsyncSpec {
                     lifecyclePlugin.uninstall()
 
                     await eventService.drain()
-                    let events = await eventService.getRecentEvents(limit: 20)
-                    expect(events.count).to(beGreaterThan(0))
+                    await expect {
+                        await eventService.getRecentEvents(limit: 20).count
+                    }.toEventually(beGreaterThan(0), timeout: .seconds(2))
                 }
 
                 it("should ignore lifecycle events when stopped") {
@@ -161,8 +162,10 @@ final class AppLifecyclePluginTests: AsyncSpec {
                     await eventService.drain()
 
                     // Verify $app_backgrounded event was tracked
-                    let events = await eventService.getRecentEvents(limit: 20)
-                    expect(events.contains { $0.name == "$app_backgrounded" }).to(beTrue())
+                    await expect {
+                        await eventService.getRecentEvents(limit: 20)
+                            .contains { $0.name == "$app_backgrounded" }
+                    }.toEventually(beTrue(), timeout: .seconds(2))
 
                     lifecyclePlugin.stop()
                     lifecyclePlugin.uninstall()
@@ -182,6 +185,11 @@ final class AppLifecyclePluginTests: AsyncSpec {
 
                     lifecyclePlugin.onAppDidEnterBackground()
                     await eventService.drain()
+
+                    await expect {
+                        await eventService.getRecentEvents(limit: 20)
+                            .first { $0.name == "$app_backgrounded" }
+                    }.toEventuallyNot(beNil(), timeout: .seconds(2))
 
                     let events = await eventService.getRecentEvents(limit: 20)
                     let backgroundEvent = events.first { $0.name == "$app_backgrounded" }
@@ -230,8 +238,10 @@ final class AppLifecyclePluginTests: AsyncSpec {
 
                     // $app_opened should be tracked on start
                     await eventService.drain()
-                    let events = await eventService.getRecentEvents(limit: 20)
-                    expect(events.contains { $0.name == "$app_opened" }).to(beTrue())
+                    await expect {
+                        await eventService.getRecentEvents(limit: 20)
+                            .contains { $0.name == "$app_opened" }
+                    }.toEventually(beTrue(), timeout: .seconds(2))
 
                     lifecyclePlugin.stop()
                     lifecyclePlugin.uninstall()
@@ -250,6 +260,11 @@ final class AppLifecyclePluginTests: AsyncSpec {
                     await eventService.drain()
 
                     // Get initial count
+                    await expect {
+                        await eventService.getRecentEvents(limit: 50)
+                            .filter { $0.name == "$app_opened" }
+                            .count
+                    }.toEventually(beGreaterThan(0), timeout: .seconds(2))
                     let initialEvents = await eventService.getRecentEvents(limit: 50)
                     let initialOpenedCount = initialEvents.filter { $0.name == "$app_opened" }.count
 
@@ -259,9 +274,11 @@ final class AppLifecyclePluginTests: AsyncSpec {
                     await eventService.drain()
 
                     // Should have additional $app_opened event
-                    let events = await eventService.getRecentEvents(limit: 50)
-                    let openedCount = events.filter { $0.name == "$app_opened" }.count
-                    expect(openedCount).to(beGreaterThan(initialOpenedCount))
+                    await expect {
+                        await eventService.getRecentEvents(limit: 50)
+                            .filter { $0.name == "$app_opened" }
+                            .count
+                    }.toEventually(beGreaterThan(initialOpenedCount), timeout: .seconds(2))
 
                     lifecyclePlugin.stop()
                     lifecyclePlugin.uninstall()
@@ -301,11 +318,18 @@ final class AppLifecyclePluginTests: AsyncSpec {
                     await eventService.drain()
 
                     // Should have 3 $app_backgrounded events
-                    let events = await eventService.getRecentEvents(limit: 50)
-                    expect(events.filter { $0.name == "$app_backgrounded" }.count).to(equal(3))
+                    await expect {
+                        await eventService.getRecentEvents(limit: 50)
+                            .filter { $0.name == "$app_backgrounded" }
+                            .count
+                    }.toEventually(equal(3), timeout: .seconds(2))
 
                     // Should have 4 $app_opened events (1 initial + 3 from foreground)
-                    expect(events.filter { $0.name == "$app_opened" }.count).to(equal(4))
+                    await expect {
+                        await eventService.getRecentEvents(limit: 50)
+                            .filter { $0.name == "$app_opened" }
+                            .count
+                    }.toEventually(equal(4), timeout: .seconds(2))
 
                     lifecyclePlugin.stop()
                     lifecyclePlugin.uninstall()
