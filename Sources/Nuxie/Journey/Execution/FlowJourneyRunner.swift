@@ -1277,7 +1277,16 @@ final class FlowJourneyRunner {
         if didWarnConverters { return }
         guard let converters = remoteFlow.converters, !converters.isEmpty else { return }
         didWarnConverters = true
-        LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters; ensure converter-dependent logic runs in the web bundle.")
+        let hasViewModelTriggers = remoteFlow.interactions.values.contains { interactions in
+            interactions.contains { interaction in
+                if case .viewModelChanged = interaction.trigger {
+                    return true
+                }
+                return false
+            }
+        }
+        let triggerNote = hasViewModelTriggers ? " View-model triggers evaluate raw values on native." : ""
+        LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters; ensure converter-dependent logic runs in the web bundle.\(triggerNote)")
     }
 
     private func sendViewModelPatch(path: VmPathRef, value: Any, source: String?) {
