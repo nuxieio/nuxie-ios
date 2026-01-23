@@ -250,7 +250,7 @@ final class HistoryViewController: UIViewController {
     /// When user wants to unlock history, track event and let Nuxie show configured flow
     private func requestHistoryUnlock() {
         Task {
-            await NuxieSDK.shared.trigger("unlock_history_tapped", properties: [
+            NuxieSDK.shared.trigger("unlock_history_tapped", properties: [
                 "visible_entries": entries.count,
                 "total_entries": moodStore.count,
                 "source": "history_screen"

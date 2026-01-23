@@ -167,7 +167,7 @@ struct HistoryView: View {
         } else {
             /// Track gated feature attempt
             Task {
-                await NuxieSDK.shared.trigger(Constants.eventCSVExportGated, properties: [
+                NuxieSDK.shared.trigger(Constants.eventCSVExportGated, properties: [
                     "entry_count": moodStore.count,
                     "source": "history_toolbar"
                 ]) { [self] update in
@@ -187,7 +187,7 @@ struct HistoryView: View {
     /// we show a prompt to unlock unlimited history.
     private func handleUnlockHistoryTapped() {
         Task {
-            await NuxieSDK.shared.trigger(Constants.eventUnlockHistoryTapped, properties: [
+            NuxieSDK.shared.trigger(Constants.eventUnlockHistoryTapped, properties: [
                 "visible_entries": entries.count,
                 "total_entries": moodStore.count,
                 "source": "history_screen"

@@ -282,7 +282,7 @@ struct TodayView: View {
     /// whether to show a flow based on dashboard configuration.
     private func handleGoProTapped() {
         Task {
-            await NuxieSDK.shared.trigger(Constants.eventUpgradeTapped, properties: [
+            NuxieSDK.shared.trigger(Constants.eventUpgradeTapped, properties: [
                 "source": "today_screen",
                 "current_streak": streak,
                 "total_entries": moodStore.count
