@@ -29,6 +29,11 @@ private func hashNameId(_ value: String) -> Int {
     return Int(hash)
 }
 
+private func viewModelPathId(_ viewModel: ViewModel) -> Int {
+    if let pathId = viewModel.viewModelPathId { return pathId }
+    return hashNameId(viewModel.id)
+}
+
 private struct ResolvedPathInfo {
     let instance: FlowViewModelInstanceState?
     let segments: [PathSegment]
@@ -159,6 +164,7 @@ public final class FlowViewModelRuntime {
             instance.values = dict
         }
         instances[instance.instanceId] = instance
+        syncListIndexValues(viewModel: resolved.viewModel, segments: segments, listValue: resolvedValue)
         return true
     }
 
@@ -278,6 +284,7 @@ public final class FlowViewModelRuntime {
 
             instance.values[name] = AnyCodable(array)
             instances[instance.instanceId] = instance
+            syncListIndexValues(viewModel: resolved.viewModel, segments: segments, listValue: array)
             return true
         }
 
@@ -384,9 +391,10 @@ public final class FlowViewModelRuntime {
     private func resolvePathIds(
         _ pathIds: [Int]
     ) -> (viewModelId: String, segments: [PathSegment])? {
-        guard let viewModelIndex = pathIds.first else { return nil }
-        guard viewModelIndex >= 0, viewModelIndex < viewModelList.count else { return nil }
-        let viewModel = viewModelList[viewModelIndex]
+        guard let rootPathId = pathIds.first else { return nil }
+        guard let viewModel = viewModelList.first(where: { viewModelPathId($0) == rootPathId }) else {
+            return nil
+        }
         let propertyIds = Array(pathIds.dropFirst())
         guard !propertyIds.isEmpty else { return nil }
 
@@ -416,6 +424,66 @@ public final class FlowViewModelRuntime {
         }
 
         return (viewModel.id, segments)
+    }
+
+    private func resolveListItemInstanceId(_ value: Any) -> String? {
+        if let dict = value as? [String: Any] {
+            if let id = dict["vmInstanceId"] as? String { return id }
+            if let id = dict["instanceId"] as? String { return id }
+        }
+        if let dict = value as? [String: AnyCodable] {
+            if let id = dict["vmInstanceId"]?.value as? String { return id }
+            if let id = dict["instanceId"]?.value as? String { return id }
+        }
+        return nil
+    }
+
+    private func syncListIndexValues(
+        viewModel: ViewModel?,
+        segments: [PathSegment],
+        listValue: Any
+    ) {
+        guard let viewModel else { return }
+        let list: [Any]
+        if let array = listValue as? [Any] {
+            list = array
+        } else if let array = listValue as? [AnyCodable] {
+            list = array.map { $0.value }
+        } else {
+            return
+        }
+
+        guard let property = resolveProperty(in: viewModel.properties, segments: segments),
+              property.type == .list,
+              let itemType = property.itemType,
+              itemType.type == .viewModel,
+              let itemViewModelId = itemType.viewModelId,
+              let itemViewModel = viewModels[itemViewModelId] else {
+            return
+        }
+
+        let indexKeys = itemViewModel.properties.compactMap { key, property in
+            property.type == .list_index ? key : nil
+        }
+        guard !indexKeys.isEmpty else { return }
+
+        for (index, entry) in list.enumerated() {
+            guard let instanceId = resolveListItemInstanceId(entry),
+                  var instance = instances[instanceId] else {
+                continue
+            }
+            var didChange = false
+            for key in indexKeys {
+                let current = instance.values[key]?.value as? Int
+                if current != index {
+                    instance.values[key] = AnyCodable(index)
+                    didChange = true
+                }
+            }
+            if didChange {
+                instances[instanceId] = instance
+            }
+        }
     }
 
     private func resolveNamePathIds(
