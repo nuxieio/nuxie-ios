@@ -630,24 +630,27 @@ final class FlowJourneyRunner {
         context: TriggerContext
     ) async -> ActionResult {
         guard !action.variants.isEmpty else { return .continue }
-
-        guard let variant = await resolveExperimentVariant(action) else {
+        let assignment = await getServerAssignment(experimentId: action.experimentId)
+        guard let variant = resolveExperimentVariant(action, assignment: assignment) else {
             return .continue
         }
 
         journey.setContext("_experiment_id", value: action.experimentId)
         journey.setContext("_variant_id", value: variant.id)
 
-        eventService.track(
-            JourneyEvents.experimentVariantAssigned,
-            properties: JourneyEvents.experimentVariantAssignedProperties(
-                journey: journey,
-                experimentId: action.experimentId,
-                variantId: variant.id
-            ),
-            userProperties: nil,
-            userPropertiesSetOnce: nil
-        )
+        let status = assignment?.status
+        if status == "running" || status == "concluded" {
+            eventService.track(
+                JourneyEvents.experimentVariantAssigned,
+                properties: JourneyEvents.experimentVariantAssignedProperties(
+                    journey: journey,
+                    experimentId: action.experimentId,
+                    variantId: variant.id
+                ),
+                userProperties: nil,
+                userPropertiesSetOnce: nil
+            )
+        }
 
         let result = await runNestedActions(variant.actions, context: context)
         return result
@@ -1405,14 +1408,23 @@ final class FlowJourneyRunner {
         return await irRuntime.eval(envelope, config)
     }
 
-    private func resolveExperimentVariant(_ action: ExperimentAction) async -> ExperimentVariant? {
-        if let assignment = await getServerAssignment(experimentId: action.experimentId) {
+    private func resolveExperimentVariant(
+        _ action: ExperimentAction,
+        assignment: ExperimentAssignment?
+    ) -> ExperimentVariant? {
+        guard let assignment else {
+            return action.variants.first
+        }
+
+        switch assignment.status {
+        case "running", "concluded":
             if let variant = action.variants.first(where: { $0.id == assignment.variantId }) {
                 return variant
             }
+            return action.variants.first
+        default:
+            return action.variants.first
         }
-
-        return computeVariantLocally(action)
     }
 
     private func getServerAssignment(experimentId: String) async -> ExperimentAssignment? {
@@ -1420,30 +1432,6 @@ final class FlowJourneyRunner {
             return nil
         }
         return profile.experiments?[experimentId]
-    }
-
-    private func computeVariantLocally(_ action: ExperimentAction) -> ExperimentVariant? {
-        let seed = "\(journey.distinctId):\(action.experimentId)"
-        let bucket = stableHash(seed) % 100
-
-        var cumulative: Double = 0
-        for variant in action.variants {
-            cumulative += variant.percentage
-            if Double(bucket) < cumulative {
-                return variant
-            }
-        }
-
-        return action.variants.first
-    }
-
-    private func stableHash(_ input: String) -> Int {
-        var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in input.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return Int(hash & 0x7FFF_FFFF_FFFF_FFFF)
     }
 
     private func parseTime(_ timeString: String) -> DateComponents? {
