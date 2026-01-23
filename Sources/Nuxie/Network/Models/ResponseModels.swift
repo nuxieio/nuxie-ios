@@ -107,6 +107,7 @@ public struct ExperimentAssignment: Codable {
     public let experimentId: String
     public let variantId: String
     public let flowId: String? // nil = holdout (control group that shows nothing)
+    public let status: String
 }
 
 // MARK: - Campaign Models
