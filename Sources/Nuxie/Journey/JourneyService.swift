@@ -538,7 +538,7 @@ public actor JourneyService: JourneyServiceProtocol {
             if let transition {
               payload["transition"] = transition.value
             }
-            controller.sendRuntimeMessage(type: "runtime/show_screen", payload: payload)
+            controller.sendRuntimeMessage(type: "runtime/navigate", payload: payload)
           }
         }
       }
