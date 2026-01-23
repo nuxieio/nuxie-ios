@@ -1,5 +1,6 @@
 import Quick
 import Nimble
+import SafariServices
 import WebKit
 import FactoryKit
 @testable import Nuxie
@@ -167,6 +168,23 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(match).toNot(beNil())
                 let pl = match?["payload"] as? [String: Any]
                 expect(pl?["error"] as? String).toNot(beNil())
+            }
+
+            it("presents in-app Safari for open_link target") {
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                let window = UIWindow(frame: UIScreen.main.bounds)
+                window.rootViewController = vc
+                window.makeKeyAndVisible()
+                _ = vc.view
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.async {
+                        vc.performOpenLink(urlString: "https://nuxie.com", target: "in_app")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { done() }
+                    }
+                }
+
+                expect(vc.presentedViewController).to(beAKindOf(SFSafariViewController.self))
             }
         }
     }

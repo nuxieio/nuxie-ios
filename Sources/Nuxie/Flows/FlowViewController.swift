@@ -1,4 +1,5 @@
 import Foundation
+import SafariServices
 import UIKit
 import WebKit
 import FactoryKit
@@ -103,8 +104,16 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     }
 
     func performOpenLink(urlString: String, target: String? = nil) {
-        guard let url = URL(string: urlString),
-              UIApplication.shared.canOpenURL(url) else { return }
+        guard let url = URL(string: urlString) else { return }
+        let normalizedTarget = target?.lowercased()
+        if normalizedTarget == "in_app" {
+            let scheme = url.scheme?.lowercased()
+            guard scheme == "http" || scheme == "https" else { return }
+            let safariViewController = SFSafariViewController(url: url)
+            present(safariViewController, animated: true)
+            return
+        }
+        guard UIApplication.shared.canOpenURL(url) else { return }
         UIApplication.shared.open(url)
     }
 
