@@ -707,6 +707,7 @@ public struct ExitAction: Codable {
 public struct ViewModel: Codable {
     public let id: String
     public let name: String
+    public let viewModelPathId: Int?
     public let properties: [String: ViewModelProperty]
 }
 
@@ -717,6 +718,7 @@ public enum ViewModelPropertyType: String, Codable {
     case color
     case `enum`
     case list
+    case list_index
     case object
     case image
     case product
