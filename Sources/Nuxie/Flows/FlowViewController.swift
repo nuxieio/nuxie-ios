@@ -87,6 +87,27 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
         viewModel.updateFlowIfNeeded(newFlow)
     }
 
+    func performPurchase(productId: String, placementIndex: Any? = nil) {
+        handleBridgePurchase(productId: productId, requestId: nil)
+    }
+
+    func performRestore() {
+        handleBridgeRestore(requestId: nil)
+    }
+
+    func performDismiss(reason: CloseReason = .userDismissed) {
+        runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: reason)
+        dismiss(animated: true) { [weak self] in
+            self?.onClose?(reason)
+        }
+    }
+
+    func performOpenLink(urlString: String, target: String? = nil) {
+        guard let url = URL(string: urlString),
+              UIApplication.shared.canOpenURL(url) else { return }
+        UIApplication.shared.open(url)
+    }
+
     /// Send a runtime message to the Flow bundle
     func sendRuntimeMessage(
         type: String,

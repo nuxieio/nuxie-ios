@@ -317,6 +317,99 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_clear"))
             }
 
+            it("executes system actions on screen shown") {
+                let flowId = "flow-system-actions"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "selectedProductId": ViewModelProperty(
+                            type: .string,
+                            propertyId: 1,
+                            defaultValue: nil,
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        ),
+                        "selectedIndex": ViewModelProperty(
+                            type: .number,
+                            propertyId: 2,
+                            defaultValue: nil,
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let instance = ViewModelInstance(
+                    viewModelId: "vm-1",
+                    instanceId: "vmi-1",
+                    name: "Default",
+                    values: [
+                        "selectedProductId": AnyCodable("prod_1"),
+                        "selectedIndex": AnyCodable(2)
+                    ]
+                )
+                let purchaseAction = InteractionAction.purchase(
+                    PurchaseAction(
+                        placementIndex: AnyCodable([
+                            "ref": [
+                                "pathIds": [0, 2],
+                                "nameBased": true
+                            ]
+                        ]),
+                        productId: AnyCodable([
+                            "ref": [
+                                "pathIds": [0, 1],
+                                "nameBased": true
+                            ]
+                        ])
+                    )
+                )
+                let interaction = Interaction(
+                    id: "int-1",
+                    trigger: .screenShown,
+                    actions: [
+                        purchaseAction,
+                        .restore(RestoreAction()),
+                        .openLink(OpenLinkAction(url: AnyCodable("https://example.com"), target: "external")),
+                        .dismiss(DismissAction())
+                    ],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-1": [interaction]],
+                    viewModels: [viewModel],
+                    viewModelInstances: [instance]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleScreenChanged("screen-1")
+
+                expect(controller.purchaseRequests.map(\.productId)).to(equal(["prod_1"]))
+                expect(controller.purchaseRequests.first?.placementIndex as? Int).to(equal(2))
+                expect(controller.restoreRequests).to(equal(1))
+                expect(controller.openLinkRequests.map(\.urlString)).to(equal(["https://example.com"]))
+                expect(controller.dismissRequests).to(equal([.userDismissed]))
+            }
+
             it("executes after_delay interactions and clears pending snapshot") {
                 let flowId = "flow-after-delay"
                 let viewModel = ViewModel(
@@ -789,7 +882,21 @@ private final class SpyFlowViewController: FlowViewController {
         let payload: [String: Any]
     }
 
+    struct PurchaseRequest {
+        let productId: String
+        let placementIndex: Any?
+    }
+
+    struct OpenLinkRequest {
+        let urlString: String
+        let target: String?
+    }
+
     private(set) var messages: [Message] = []
+    private(set) var purchaseRequests: [PurchaseRequest] = []
+    private(set) var restoreRequests = 0
+    private(set) var dismissRequests: [CloseReason] = []
+    private(set) var openLinkRequests: [OpenLinkRequest] = []
 
     init(flow: Flow) {
         super.init(flow: flow, archiveService: FlowArchiver())
@@ -806,5 +913,21 @@ private final class SpyFlowViewController: FlowViewController {
         completion: ((Any?, Error?) -> Void)? = nil
     ) {
         messages.append(Message(type: type, payload: payload))
+    }
+
+    override func performPurchase(productId: String, placementIndex: Any? = nil) {
+        purchaseRequests.append(PurchaseRequest(productId: productId, placementIndex: placementIndex))
+    }
+
+    override func performRestore() {
+        restoreRequests += 1
+    }
+
+    override func performDismiss(reason: CloseReason = .userDismissed) {
+        dismissRequests.append(reason)
+    }
+
+    override func performOpenLink(urlString: String, target: String? = nil) {
+        openLinkRequests.append(OpenLinkRequest(urlString: urlString, target: target))
     }
 }

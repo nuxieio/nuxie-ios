@@ -288,6 +288,10 @@ public enum InteractionAction: Codable {
     case experiment(ExperimentAction)
     case sendEvent(SendEventAction)
     case updateCustomer(UpdateCustomerAction)
+    case purchase(PurchaseAction)
+    case restore(RestoreAction)
+    case openLink(OpenLinkAction)
+    case dismiss(DismissAction)
     case callDelegate(CallDelegateAction)
     case remote(RemoteAction)
     case setViewModel(SetViewModelAction)
@@ -315,6 +319,10 @@ public enum InteractionAction: Codable {
         case experiment
         case sendEvent = "send_event"
         case updateCustomer = "update_customer"
+        case purchase
+        case restore
+        case openLink = "open_link"
+        case dismiss
         case callDelegate = "call_delegate"
         case remote
         case setViewModel = "set_view_model"
@@ -350,6 +358,14 @@ public enum InteractionAction: Codable {
             self = .sendEvent(try SendEventAction(from: decoder))
         case .updateCustomer:
             self = .updateCustomer(try UpdateCustomerAction(from: decoder))
+        case .purchase:
+            self = .purchase(try PurchaseAction(from: decoder))
+        case .restore:
+            self = .restore(try RestoreAction(from: decoder))
+        case .openLink:
+            self = .openLink(try OpenLinkAction(from: decoder))
+        case .dismiss:
+            self = .dismiss(try DismissAction(from: decoder))
         case .callDelegate:
             self = .callDelegate(try CallDelegateAction(from: decoder))
         case .remote:
@@ -402,6 +418,14 @@ public enum InteractionAction: Codable {
         case .sendEvent(let action):
             try action.encode(to: encoder)
         case .updateCustomer(let action):
+            try action.encode(to: encoder)
+        case .purchase(let action):
+            try action.encode(to: encoder)
+        case .restore(let action):
+            try action.encode(to: encoder)
+        case .openLink(let action):
+            try action.encode(to: encoder)
+        case .dismiss(let action):
             try action.encode(to: encoder)
         case .callDelegate(let action):
             try action.encode(to: encoder)
@@ -563,6 +587,48 @@ public struct UpdateCustomerAction: Codable {
     public init(type: String = "update_customer", attributes: [String: AnyCodable]) {
         self.type = type
         self.attributes = attributes
+    }
+}
+
+public struct PurchaseAction: Codable {
+    public let type: String
+    public let placementIndex: AnyCodable
+    public let productId: AnyCodable
+
+    public init(type: String = "purchase", placementIndex: AnyCodable, productId: AnyCodable) {
+        self.type = type
+        self.placementIndex = placementIndex
+        self.productId = productId
+    }
+}
+
+public struct RestoreAction: Codable {
+    public let type: String
+
+    public init(type: String = "restore") {
+        self.type = type
+    }
+}
+
+public struct OpenLinkAction: Codable {
+    public let type: String
+    public let url: AnyCodable
+    public let target: String?
+
+    public init(type: String = "open_link", url: AnyCodable, target: String? = nil) {
+        self.type = type
+        self.url = url
+        self.target = target
+    }
+}
+
+public struct DismissAction: Codable {
+    public let type: String
+    public let reason: String?
+
+    public init(type: String = "dismiss", reason: String? = nil) {
+        self.type = type
+        self.reason = reason
     }
 }
 
