@@ -164,49 +164,89 @@ public final class NuxieSDK {
 
   // MARK: - Trigger (Event) API
 
-  /// Trigger an event (analytics-only)
+  /// Trigger an event. Returns a handle that can be ignored (fire-and-forget),
+  /// observed via callback, or consumed as an async stream.
   /// - Parameters:
   ///   - event: Event name
   ///   - properties: Event properties
   ///   - userProperties: Properties to set on the user profile (mapped to $set)
   ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
-  public func trigger(
-    _ event: String,
-    properties: [String: Any]? = nil,
-    userProperties: [String: Any]? = nil,
-    userPropertiesSetOnce: [String: Any]? = nil
-  ) {
-    container.eventService().track(
-      event,
-      properties: properties,
-      userProperties: userProperties,
-      userPropertiesSetOnce: userPropertiesSetOnce
-    )
-  }
-
-  /// Trigger an event with journey/entitlement outcomes
-  /// - Parameters:
-  ///   - event: Event name
-  ///   - properties: Event properties
-  ///   - userProperties: Properties to set on the user profile (mapped to $set)
-  ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
-  ///   - handler: Receives progressive TriggerUpdate events
+  ///   - handler: Optional callback for progressive TriggerUpdate events
+  @discardableResult
   public func trigger(
     _ event: String,
     properties: [String: Any]? = nil,
     userProperties: [String: Any]? = nil,
     userPropertiesSetOnce: [String: Any]? = nil,
-    handler: @escaping (TriggerUpdate) -> Void
-  ) async {
-    guard isSetup else { return }
+    handler: ((TriggerUpdate) -> Void)? = nil
+  ) -> TriggerHandle {
+    guard isSetup else { return .empty }
+
     let triggerService = container.triggerService()
-    await triggerService.trigger(
-      event,
-      properties: properties,
-      userProperties: userProperties,
-      userPropertiesSetOnce: userPropertiesSetOnce,
-      handler: handler
-    )
+    var continuation: AsyncStream<TriggerUpdate>.Continuation?
+    var didFinish = false
+
+    func finishStream() {
+      guard !didFinish else { return }
+      didFinish = true
+      continuation?.finish()
+    }
+
+    let stream = AsyncStream<TriggerUpdate> { streamContinuation in
+      continuation = streamContinuation
+      streamContinuation.onTermination = { _ in
+        Task { @MainActor in
+          finishStream()
+        }
+      }
+    }
+
+    let task = Task { @MainActor in
+      await triggerService.trigger(
+        event,
+        properties: properties,
+        userProperties: userProperties,
+        userPropertiesSetOnce: userPropertiesSetOnce
+      ) { update in
+        handler?(update)
+        continuation?.yield(update)
+        if NuxieSDK.isTerminalTriggerUpdate(update) {
+          finishStream()
+        }
+      }
+
+      finishStream()
+    }
+
+    return TriggerHandle(stream: stream) {
+      task.cancel()
+      Task { @MainActor in
+        finishStream()
+      }
+    }
+  }
+
+  private static func isTerminalTriggerUpdate(_ update: TriggerUpdate) -> Bool {
+    switch update {
+    case .error:
+      return true
+    case .decision(let decision):
+      switch decision {
+      case .allowedImmediate, .deniedImmediate, .noMatch, .suppressed:
+        return true
+      default:
+        return false
+      }
+    case .entitlement(let entitlement):
+      switch entitlement {
+      case .allowed, .denied:
+        return true
+      case .pending:
+        return false
+      }
+    case .journey:
+      return true
+    }
   }
 
   // MARK: - User Management

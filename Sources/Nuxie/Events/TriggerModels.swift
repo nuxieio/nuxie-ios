@@ -1,3 +1,4 @@
+import _Concurrency
 import Foundation
 
 /// Progressive updates emitted by `trigger(...)`.
@@ -90,5 +91,32 @@ public struct TriggerError: Error, Equatable {
   public init(code: String, message: String) {
     self.code = code
     self.message = message
+  }
+}
+
+public struct TriggerHandle: AsyncSequence {
+  public typealias Element = TriggerUpdate
+
+  private let stream: AsyncStream<TriggerUpdate>
+  private let cancelHandler: (() -> Void)?
+
+  public init(stream: AsyncStream<TriggerUpdate>, cancel: (() -> Void)? = nil) {
+    self.stream = stream
+    self.cancelHandler = cancel
+  }
+
+  public func makeAsyncIterator() -> AsyncStream<TriggerUpdate>.Iterator {
+    stream.makeAsyncIterator()
+  }
+
+  public func cancel() {
+    cancelHandler?()
+  }
+
+  public static var empty: TriggerHandle {
+    let stream = AsyncStream<TriggerUpdate> { continuation in
+      continuation.finish()
+    }
+    return TriggerHandle(stream: stream)
   }
 }

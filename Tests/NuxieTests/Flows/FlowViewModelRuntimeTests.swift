@@ -64,11 +64,13 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 let viewModelA = ViewModel(
                     id: "vm-a",
                     name: "A",
+                    viewModelPathId: 0,
                     properties: ["flag": flagProperty]
                 )
                 let viewModelB = ViewModel(
                     id: "vm-b",
                     name: "B",
+                    viewModelPathId: 1,
                     properties: ["count": countProperty]
                 )
 
@@ -94,6 +96,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 let viewModel = ViewModel(
                     id: "vm-list",
                     name: "List",
+                    viewModelPathId: 0,
                     properties: ["items": listProperty]
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
@@ -154,6 +157,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 let viewModel = ViewModel(
                     id: "vm-default",
                     name: "Default",
+                    viewModelPathId: 0,
                     properties: ["title": titleProperty]
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
@@ -167,6 +171,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 let viewModel = ViewModel(
                     id: "vm-trigger",
                     name: "Trigger",
+                    viewModelPathId: 0,
                     properties: ["pulse": triggerProperty]
                 )
                 let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
