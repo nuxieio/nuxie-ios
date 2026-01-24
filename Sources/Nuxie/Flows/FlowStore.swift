@@ -276,21 +276,12 @@ actor FlowStore {
     ) {
         for (key, property) in schema {
             let value = values[key]?.value
+            if key == "productId", let productId = extractProductId(from: value) {
+                ids.insert(productId)
+            }
             switch property.type {
-            case .product:
-                if let productId = extractProductId(from: value) {
-                    ids.insert(productId)
-                }
             case .list:
-                if let itemType = property.itemType, itemType.type == .product {
-                    if let list = value as? [Any] {
-                        for entry in list {
-                            if let productId = extractProductId(from: entry) {
-                                ids.insert(productId)
-                            }
-                        }
-                    }
-                } else if let itemType = property.itemType, itemType.type == .object,
+                if let itemType = property.itemType, itemType.type == .object,
                           let list = value as? [Any],
                           let schema = itemType.schema {
                     for entry in list {

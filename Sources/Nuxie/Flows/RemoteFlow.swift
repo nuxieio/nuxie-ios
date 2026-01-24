@@ -789,7 +789,6 @@ public enum ViewModelPropertyType: String, Codable {
     case list_index
     case object
     case image
-    case product
     case trigger
     case viewModel = "viewModel"
 }
