@@ -37,7 +37,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             entryActions: [InteractionAction]? = nil,
             interactionsByScreen: [String: [Interaction]] = [:],
             viewModels: [ViewModel] = [],
-            viewModelInstances: [ViewModelInstance]? = nil
+            viewModelInstances: [ViewModelInstance]? = nil,
+            screens: [RemoteFlowScreen]? = nil
         ) -> RemoteFlow {
             var interactions = interactionsByScreen
             if let entryActions, !entryActions.isEmpty {
@@ -50,6 +51,14 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     )
                 ]
             }
+            let resolvedScreens = screens ?? [
+                RemoteFlowScreen(
+                    id: "screen-1",
+                    defaultViewModelId: viewModels.first?.id,
+                    defaultInstanceId: nil
+                )
+            ]
+
             return RemoteFlow(
                 id: flowId,
                 bundle: FlowBundleRef(
@@ -61,13 +70,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
                     )
                 ),
-                screens: [
-                    RemoteFlowScreen(
-                        id: "screen-1",
-                        defaultViewModelId: viewModels.first?.id,
-                        defaultInstanceId: nil
-                    )
-                ],
+                screens: resolvedScreens,
                 interactions: interactions,
                 viewModels: viewModels,
                 viewModelInstances: viewModelInstances,
@@ -860,6 +863,108 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 } else {
                     fail("Expected remote retry to pause")
                 }
+            }
+
+            it("uses explicit back transitions when provided") {
+                let flowId = "flow-back-transition"
+                let transition = AnyCodable(["type": "push", "direction": "left"])
+                let interaction = Interaction(
+                    id: "int-back",
+                    trigger: .screenShown,
+                    actions: [.back(BackAction(steps: 1, transition: transition))],
+                    enabled: true
+                )
+                let screens = [
+                    RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
+                    RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil)
+                ]
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-2": [interaction]],
+                    screens: screens
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.navigationStack = ["screen-1"]
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleScreenChanged("screen-2")
+
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
+                let payload = controller.messages.last?.payload
+                let transitionPayload = payload?["transition"] as? [String: Any]
+                expect(payload?["screenId"] as? String).to(equal("screen-1"))
+                expect(transitionPayload?["type"] as? String).to(equal("push"))
+                expect(transitionPayload?["direction"] as? String).to(equal("left"))
+            }
+
+            it("omits back transitions when not configured") {
+                let flowId = "flow-back-no-transition"
+                let interaction = Interaction(
+                    id: "int-back",
+                    trigger: .screenShown,
+                    actions: [.back(BackAction(steps: 1))],
+                    enabled: true
+                )
+                let screens = [
+                    RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
+                    RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil)
+                ]
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-2": [interaction]],
+                    screens: screens
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.navigationStack = ["screen-1"]
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleScreenChanged("screen-2")
+
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
+                let payload = controller.messages.last?.payload
+                expect(payload?["screenId"] as? String).to(equal("screen-1"))
+                expect(payload?["transition"]).to(beNil())
+            }
+
+            it("no-ops back when history is empty") {
+                let flowId = "flow-back-empty"
+                let interaction = Interaction(
+                    id: "int-back",
+                    trigger: .screenShown,
+                    actions: [.back(BackAction(steps: 1))],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-1": [interaction]]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleScreenChanged("screen-1")
+
+                expect(controller.messages.isEmpty).to(beTrue())
             }
 
             it("tracks send_event and updates customer properties") {
