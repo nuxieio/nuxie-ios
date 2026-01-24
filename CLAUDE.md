@@ -97,14 +97,14 @@ packages/nuxie-ios/
 ## API Endpoints
 
 Currently implemented:
-- `POST /api/i/profile` - Get campaigns, segments, and flows with workflow execution data
+- `POST /api/i/profile` - Get campaigns, segments, and flows with flow execution data
 - `POST /api/i/event` - Track events
 
 Authentication: API key in request body for all POST endpoints.
 
 ### Profile Response Structure
 The `/profile` endpoint now returns campaign-centric data optimized for client-side execution:
-- `campaigns`: Array of `Campaign` objects with flattened current version data and workflow execution graphs
+- `campaigns`: Array of `Campaign` objects with flattened current version data and flow execution graphs
 - `segments`: Array of `Segment` objects with compiled CEL expressions for client-side evaluation  
 - `flows`: Array of `FlowManifest` objects with build URLs and product information
 
@@ -121,7 +121,7 @@ The `/profile` endpoint now returns campaign-centric data optimized for client-s
 1. Extend `StoredEvent` model if new fields needed
 2. Update `EventStore` for new database operations (with migrations if needed)
 3. Add business logic to `EventStoreManager`
-4. Expose through `NuxieSDK` internal methods for workflow evaluation
+4. Expose through `NuxieSDK` internal methods for flow evaluation
 5. Add comprehensive tests covering all layers
 
 ### Error Handling
@@ -323,7 +323,7 @@ try eventStoreManager.storeEvent(name: "test", properties: [:])
 
 ### Event History Access (Internal)
 ```swift
-// Get recent events for workflow evaluation
+// Get recent events for flow evaluation
 let recentEvents = NuxieSDK.shared.getRecentEvents(limit: 50)
 let userEvents = NuxieSDK.shared.getCurrentUserEvents(limit: 100)
 let sessionEvents = NuxieSDK.shared.getCurrentSessionEvents()
@@ -364,7 +364,7 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 - **Plugin System**: Simple install/uninstall/start/stop plugin architecture
 - **App Lifecycle Plugin**: Auto-installed plugin tracking App Installed, App Updated, App Opened, App Backgrounded
 - **Event Tracking**: Full `trigger()` implementation with local storage + remote sync
-- **Campaign-Centric API**: Updated `/profile` endpoint response models to support new workflow-based campaigns
+- **Campaign-Centric API**: Updated `/profile` endpoint response models to support new flow-based campaigns
 - **Session Management**: Automatic session tracking with unique identifiers
 - **User Management**: User identification, attribution, and event filtering
 - **Test Suite**: Comprehensive Quick/Nimble tests covering all functionality
@@ -373,7 +373,7 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 
 ### 🚧 Next Phase Implementation
 - **Workflow Evaluation Engine**: Rule engine for processing campaigns against event history
-- **Campaign Management**: Enhanced FlowManager for workflow processing and caching
+- **Campaign Management**: Enhanced FlowManager for flow processing and caching
 - **Feature Gating Logic**: Real paywall/feature access decisions based on rules
 - **Background Sync**: Event queue with batching and offline resilience
 
