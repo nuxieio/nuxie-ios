@@ -151,6 +151,64 @@ final class FlowJourneyRunner {
         return outcome
     }
 
+    func resolveRuntimeValue(
+        _ value: Any,
+        screenId: String?,
+        instanceId: String?
+    ) -> Any {
+        return resolveValueRefs(
+            value,
+            context: TriggerContext(
+                screenId: screenId,
+                componentId: nil,
+                interactionId: nil,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    func handleRuntimeBack(steps: Int?, transition: AnyCodable?) async {
+        await handleBack(BackAction(steps: steps, transition: transition))
+    }
+
+    func handleRuntimeOpenLink(
+        url: Any,
+        target: String?,
+        screenId: String?,
+        instanceId: String?
+    ) async {
+        guard let controller = viewController else { return }
+        let resolved = resolveValueRefs(
+            url,
+            context: TriggerContext(
+                screenId: screenId,
+                componentId: nil,
+                interactionId: nil,
+                instanceId: instanceId
+            )
+        )
+        guard let urlString = resolved as? String, !urlString.isEmpty else { return }
+        await MainActor.run {
+            controller.performOpenLink(urlString: urlString, target: target)
+        }
+        var userInfo: [String: Any] = [
+            "journeyId": journey.id,
+            "campaignId": journey.campaignId,
+            "url": urlString
+        ]
+        if let target {
+            userInfo["target"] = target
+        }
+        if let resolvedScreenId = screenId ?? journey.flowState.currentScreenId {
+            userInfo["screenId"] = resolvedScreenId
+        }
+        NotificationCenter.default.post(
+            name: .nuxieOpenLink,
+            object: nil,
+            userInfo: userInfo
+        )
+    }
+
     func dispatchEventTrigger(_ event: NuxieEvent) async -> RunOutcome? {
         return await dispatchTrigger(
             trigger: .event(eventName: event.name, filter: nil),
@@ -501,6 +559,17 @@ final class FlowJourneyRunner {
         stack = Array(stack.prefix(targetIndex))
         journey.flowState.navigationStack = stack
         await sendShowScreen(target, transition: action.transition)
+
+        NotificationCenter.default.post(
+            name: .nuxieBack,
+            object: nil,
+            userInfo: [
+                "journeyId": journey.id,
+                "campaignId": journey.campaignId,
+                "steps": steps,
+                "screenId": target
+            ]
+        )
     }
 
     private func handleDelay(
@@ -793,6 +862,21 @@ final class FlowJourneyRunner {
         await MainActor.run {
             controller.performPurchase(productId: productId, placementIndex: placementIndex)
         }
+
+        var userInfo: [String: Any] = [
+            "journeyId": journey.id,
+            "campaignId": journey.campaignId,
+            "productId": productId
+        ]
+        if let screenId = context.screenId ?? journey.flowState.currentScreenId {
+            userInfo["screenId"] = screenId
+        }
+        userInfo["placementIndex"] = placementIndex
+        NotificationCenter.default.post(
+            name: .nuxiePurchase,
+            object: nil,
+            userInfo: userInfo
+        )
         return .continue
     }
 
@@ -804,6 +888,18 @@ final class FlowJourneyRunner {
         await MainActor.run {
             controller.performRestore()
         }
+        var userInfo: [String: Any] = [
+            "journeyId": journey.id,
+            "campaignId": journey.campaignId
+        ]
+        if let screenId = context.screenId ?? journey.flowState.currentScreenId {
+            userInfo["screenId"] = screenId
+        }
+        NotificationCenter.default.post(
+            name: .nuxieRestore,
+            object: nil,
+            userInfo: userInfo
+        )
         return .continue
     }
 
@@ -819,6 +915,22 @@ final class FlowJourneyRunner {
         await MainActor.run {
             controller.performOpenLink(urlString: urlString, target: action.target)
         }
+        var userInfo: [String: Any] = [
+            "journeyId": journey.id,
+            "campaignId": journey.campaignId,
+            "url": urlString
+        ]
+        if let target = action.target {
+            userInfo["target"] = target
+        }
+        if let screenId = context.screenId ?? journey.flowState.currentScreenId {
+            userInfo["screenId"] = screenId
+        }
+        NotificationCenter.default.post(
+            name: .nuxieOpenLink,
+            object: nil,
+            userInfo: userInfo
+        )
         return .continue
     }
 

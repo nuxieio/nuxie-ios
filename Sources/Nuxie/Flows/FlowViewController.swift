@@ -354,6 +354,18 @@ extension FlowViewController {
             } else {
                 self.handleBridgeRestore(requestId: id)
             }
+        case "action/open_link":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else if let urlString = payload["url"] as? String {
+                performOpenLink(urlString: urlString, target: payload["target"] as? String)
+            }
+        case "action/back":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else {
+                LogDebug("FlowViewController: Unhandled runtime back action")
+            }
         case "action/dismiss":
             runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
             dismiss(animated: true) { self.onClose?(.userDismissed) }

@@ -468,21 +468,76 @@ public actor JourneyService: JourneyServiceProtocol {
       }
 
     case "action/purchase":
-      if let productId = payload["productId"] as? String {
+      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+      let instanceId = payload["instanceId"] as? String
+      let resolvedProductId = runner.resolveRuntimeValue(
+        payload["productId"] ?? "",
+        screenId: screenId,
+        instanceId: instanceId
+      )
+      if let productId = resolvedProductId as? String, !productId.isEmpty {
+        var userInfo: [String: Any] = [
+          "journeyId": journey.id,
+          "campaignId": journey.campaignId,
+          "productId": productId
+        ]
+        if let screenId {
+          userInfo["screenId"] = screenId
+        }
+        if let placementIndex = payload["placementIndex"] {
+          let resolvedPlacement = runner.resolveRuntimeValue(
+            placementIndex,
+            screenId: screenId,
+            instanceId: instanceId
+          )
+          userInfo["placementIndex"] = resolvedPlacement
+        }
+        NotificationCenter.default.post(
+          name: .nuxiePurchase,
+          object: nil,
+          userInfo: userInfo
+        )
         await handlePurchase(productId: productId, controller: controller)
       }
 
     case "action/restore":
+      NotificationCenter.default.post(
+        name: .nuxieRestore,
+        object: nil,
+        userInfo: [
+          "journeyId": journey.id,
+          "campaignId": journey.campaignId,
+          "screenId": journey.flowState.currentScreenId as Any
+        ]
+      )
       await handleRestore(controller: controller)
+
+    case "action/open_link":
+      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+      let instanceId = payload["instanceId"] as? String
+      let target = payload["target"] as? String
+      await runner.handleRuntimeOpenLink(
+        url: payload["url"] ?? "",
+        target: target,
+        screenId: screenId,
+        instanceId: instanceId
+      )
+
+    case "action/back":
+      let steps = parseInt(payload["steps"] ?? payload["step"])
+      let transition = payload["transition"].map { AnyCodable($0) }
+      await runner.handleRuntimeBack(steps: steps, transition: transition)
 
     case let action where action.hasPrefix("action/"):
       if let trigger = parseRuntimeTrigger(type: action, payload: payload) {
         let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
         let componentId = payload["componentId"] as? String
+        let instanceId = payload["instanceId"] as? String
         let outcome = await runner.dispatchTrigger(
           trigger: trigger,
           screenId: screenId,
           componentId: componentId,
+          instanceId: instanceId,
           event: nil
         )
         handleOutcome(outcome, journey: journey)
@@ -502,10 +557,35 @@ public actor JourneyService: JourneyServiceProtocol {
     guard let journey = inMemoryJourneysById[journeyId],
           let runner = flowRunners[journeyId] else { return }
 
+    var userInfo: [String: Any] = [
+      "journeyId": journey.id,
+      "campaignId": journey.campaignId
+    ]
+    if let screenId = journey.flowState.currentScreenId {
+      userInfo["screenId"] = screenId
+    }
+    switch reason {
+    case .userDismissed:
+      userInfo["reason"] = "user_dismissed"
+    case .purchaseCompleted:
+      userInfo["reason"] = "purchase_completed"
+    case .timeout:
+      userInfo["reason"] = "timeout"
+    case .error(let error):
+      userInfo["reason"] = "error"
+      userInfo["error"] = error.localizedDescription
+    }
+    NotificationCenter.default.post(
+      name: .nuxieDismiss,
+      object: nil,
+      userInfo: userInfo
+    )
+
     let outcome = await runner.dispatchTrigger(
       trigger: .screenDismissed(method: nil),
       screenId: journey.flowState.currentScreenId,
       componentId: nil,
+      instanceId: nil,
       event: nil
     )
     handleOutcome(outcome, journey: journey)
