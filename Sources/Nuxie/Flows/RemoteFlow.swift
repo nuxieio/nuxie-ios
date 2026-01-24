@@ -479,10 +479,12 @@ public struct NavigateAction: Codable {
 public struct BackAction: Codable {
     public let type: String
     public let steps: Int?
+    public let transition: AnyCodable?
 
-    public init(type: String = "back", steps: Int? = nil) {
+    public init(type: String = "back", steps: Int? = nil, transition: AnyCodable? = nil) {
         self.type = type
         self.steps = steps
+        self.transition = transition
     }
 }
 

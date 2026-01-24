@@ -6,6 +6,7 @@ final class FlowJourneyRunner {
         let screenId: String?
         let componentId: String?
         let interactionId: String?
+        let instanceId: String?
     }
 
     enum RunOutcome {
@@ -119,6 +120,7 @@ final class FlowJourneyRunner {
             trigger: .screenShown,
             screenId: screenId,
             componentId: nil,
+            instanceId: nil,
             event: nil
         )
     }
@@ -139,8 +141,13 @@ final class FlowJourneyRunner {
         )
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
-        let outcome = await dispatchViewModelChanged(path: path, value: value, screenId: resolvedScreenId)
-        scheduleTriggerReset(path: path, screenId: resolvedScreenId)
+        let outcome = await dispatchViewModelChanged(
+            path: path,
+            value: value,
+            screenId: resolvedScreenId,
+            instanceId: instanceId
+        )
+        scheduleTriggerReset(path: path, screenId: resolvedScreenId, instanceId: instanceId)
         return outcome
     }
 
@@ -149,6 +156,7 @@ final class FlowJourneyRunner {
             trigger: .event(eventName: event.name, filter: nil),
             screenId: journey.flowState.currentScreenId,
             componentId: nil,
+            instanceId: nil,
             event: event
         )
     }
@@ -157,6 +165,7 @@ final class FlowJourneyRunner {
         trigger: InteractionTrigger,
         screenId: String?,
         componentId: String?,
+        instanceId: String?,
         event: NuxieEvent?
     ) async -> RunOutcome? {
         if isPaused { return nil }
@@ -193,7 +202,8 @@ final class FlowJourneyRunner {
                 context: TriggerContext(
                     screenId: screenId,
                     componentId: componentId,
-                    interactionId: interaction.id
+                    interactionId: interaction.id,
+                    instanceId: instanceId
                 )
             )
         }
@@ -218,7 +228,8 @@ final class FlowJourneyRunner {
         let context = TriggerContext(
             screenId: pending.screenId,
             componentId: pending.componentId,
-            interactionId: pending.interactionId
+            interactionId: pending.interactionId,
+            instanceId: nil
         )
 
         activeRequest = ActionRequest(actions: actions, context: context)
@@ -245,7 +256,8 @@ final class FlowJourneyRunner {
             context: TriggerContext(
                 screenId: screenId,
                 componentId: nil,
-                interactionId: interactionId
+                interactionId: interactionId,
+                instanceId: nil
             )
         )
         return await processQueue(resumeContext: nil)
@@ -277,7 +289,8 @@ final class FlowJourneyRunner {
                     context: TriggerContext(
                         screenId: journey.flowState.currentScreenId,
                         componentId: nil,
-                        interactionId: interaction.id
+                        interactionId: interaction.id,
+                        instanceId: nil
                     )
                 )
             }
@@ -470,6 +483,7 @@ final class FlowJourneyRunner {
                 trigger: .screenDismissed(method: nil),
                 screenId: current,
                 componentId: nil,
+                instanceId: nil,
                 event: nil
             )
             journey.flowState.navigationStack.append(current)
@@ -486,7 +500,7 @@ final class FlowJourneyRunner {
         let target = stack[targetIndex]
         stack = Array(stack.prefix(targetIndex))
         journey.flowState.navigationStack = stack
-        await sendShowScreen(target, transition: nil)
+        await sendShowScreen(target, transition: action.transition)
     }
 
     private func handleDelay(
@@ -656,13 +670,17 @@ final class FlowJourneyRunner {
         journey.setContext("_variant_id", value: variant.id)
 
         let status = assignment?.status
-        if status == "running" || status == "concluded" {
+        if status == "running" {
+            let variantIndex = action.variants.firstIndex { $0.id == variant.id }
             eventService.track(
                 JourneyEvents.experimentVariantAssigned,
                 properties: JourneyEvents.experimentVariantAssignedProperties(
                     journey: journey,
                     experimentId: action.experimentId,
-                    variantId: variant.id
+                    variantId: variant.id,
+                    variantName: variant.name,
+                    variantIndex: variantIndex,
+                    flowId: journey.flowId
                 ),
                 userProperties: nil,
                 userPropertiesSetOnce: nil
@@ -900,13 +918,23 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         let resolvedValue = resolveValueRefs(action.value.value, context: context)
         let screenId = context.screenId ?? journey.flowState.currentScreenId
-        _ = viewModels.setValue(path: action.path, value: resolvedValue, screenId: screenId)
+        _ = viewModels.setValue(
+            path: action.path,
+            value: resolvedValue,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
-        sendViewModelPatch(path: action.path, value: resolvedValue, source: "host")
+        sendViewModelPatch(path: action.path, value: resolvedValue, source: "host", instanceId: context.instanceId)
 
-        _ = await dispatchViewModelChanged(path: action.path, value: resolvedValue, screenId: screenId)
-        scheduleTriggerReset(path: action.path, screenId: screenId)
+        _ = await dispatchViewModelChanged(
+            path: action.path,
+            value: resolvedValue,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
+        scheduleTriggerReset(path: action.path, screenId: screenId, instanceId: context.instanceId)
 
         return .continue
     }
@@ -917,13 +945,23 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         let screenId = context.screenId ?? journey.flowState.currentScreenId
         let timestamp = Int(dateProvider.now().timeIntervalSince1970 * 1000)
-        _ = viewModels.setValue(path: action.path, value: timestamp, screenId: screenId)
+        _ = viewModels.setValue(
+            path: action.path,
+            value: timestamp,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
-        sendViewModelTrigger(path: action.path, value: timestamp)
+        sendViewModelTrigger(path: action.path, value: timestamp, instanceId: context.instanceId)
 
-        _ = await dispatchViewModelChanged(path: action.path, value: timestamp, screenId: screenId)
-        scheduleTriggerReset(path: action.path, screenId: screenId)
+        _ = await dispatchViewModelChanged(
+            path: action.path,
+            value: timestamp,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
+        scheduleTriggerReset(path: action.path, screenId: screenId, instanceId: context.instanceId)
 
         return .continue
     }
@@ -943,14 +981,20 @@ final class FlowJourneyRunner {
             path: action.path,
             operation: "insert",
             payload: payload,
-            screenId: screenId
+            screenId: screenId,
+            instanceId: context.instanceId
         )
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "insert", path: action.path, payload: payload)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
-            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+            sendViewModelListOperation(op: "insert", path: action.path, payload: payload, instanceId: context.instanceId)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            _ = await dispatchViewModelChanged(
+                path: action.path,
+                value: updatedValue,
+                screenId: screenId,
+                instanceId: context.instanceId
+            )
         }
 
         return .continue
@@ -967,14 +1011,20 @@ final class FlowJourneyRunner {
             path: action.path,
             operation: "remove",
             payload: payload,
-            screenId: screenId
+            screenId: screenId,
+            instanceId: context.instanceId
         )
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "remove", path: action.path, payload: payload)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
-            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+            sendViewModelListOperation(op: "remove", path: action.path, payload: payload, instanceId: context.instanceId)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            _ = await dispatchViewModelChanged(
+                path: action.path,
+                value: updatedValue,
+                screenId: screenId,
+                instanceId: context.instanceId
+            )
         }
 
         return .continue
@@ -994,14 +1044,20 @@ final class FlowJourneyRunner {
             path: action.path,
             operation: "swap",
             payload: payload,
-            screenId: screenId
+            screenId: screenId,
+            instanceId: context.instanceId
         )
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "swap", path: action.path, payload: payload)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
-            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+            sendViewModelListOperation(op: "swap", path: action.path, payload: payload, instanceId: context.instanceId)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            _ = await dispatchViewModelChanged(
+                path: action.path,
+                value: updatedValue,
+                screenId: screenId,
+                instanceId: context.instanceId
+            )
         }
 
         return .continue
@@ -1021,14 +1077,20 @@ final class FlowJourneyRunner {
             path: action.path,
             operation: "move",
             payload: payload,
-            screenId: screenId
+            screenId: screenId,
+            instanceId: context.instanceId
         )
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "move", path: action.path, payload: payload)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
-            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+            sendViewModelListOperation(op: "move", path: action.path, payload: payload, instanceId: context.instanceId)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            _ = await dispatchViewModelChanged(
+                path: action.path,
+                value: updatedValue,
+                screenId: screenId,
+                instanceId: context.instanceId
+            )
         }
 
         return .continue
@@ -1049,14 +1111,20 @@ final class FlowJourneyRunner {
             path: action.path,
             operation: "set",
             payload: payload,
-            screenId: screenId
+            screenId: screenId,
+            instanceId: context.instanceId
         )
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "set", path: action.path, payload: payload)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
-            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+            sendViewModelListOperation(op: "set", path: action.path, payload: payload, instanceId: context.instanceId)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            _ = await dispatchViewModelChanged(
+                path: action.path,
+                value: updatedValue,
+                screenId: screenId,
+                instanceId: context.instanceId
+            )
         }
 
         return .continue
@@ -1073,14 +1141,20 @@ final class FlowJourneyRunner {
             path: action.path,
             operation: "clear",
             payload: payload,
-            screenId: screenId
+            screenId: screenId,
+            instanceId: context.instanceId
         )
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "clear", path: action.path, payload: payload)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId) ?? NSNull()
-            _ = await dispatchViewModelChanged(path: action.path, value: updatedValue, screenId: screenId)
+            sendViewModelListOperation(op: "clear", path: action.path, payload: payload, instanceId: context.instanceId)
+            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            _ = await dispatchViewModelChanged(
+                path: action.path,
+                value: updatedValue,
+                screenId: screenId,
+                instanceId: context.instanceId
+            )
         }
 
         return .continue
@@ -1108,7 +1182,8 @@ final class FlowJourneyRunner {
     private func dispatchViewModelChanged(
         path: VmPathRef,
         value: Any,
-        screenId: String?
+        screenId: String?,
+        instanceId: String?
     ) async -> RunOutcome? {
         let interactions = (screenId != nil) ? (interactionsById[screenId!] ?? []) : []
         if interactions.isEmpty { return nil }
@@ -1129,7 +1204,8 @@ final class FlowJourneyRunner {
                         context: TriggerContext(
                             screenId: screenId,
                             componentId: nil,
-                            interactionId: interaction.id
+                            interactionId: interaction.id,
+                            instanceId: instanceId
                         )
                     )
                     _ = await self.processQueue(resumeContext: nil)
@@ -1140,7 +1216,8 @@ final class FlowJourneyRunner {
                     context: TriggerContext(
                         screenId: screenId,
                         componentId: nil,
-                        interactionId: interaction.id
+                        interactionId: interaction.id,
+                        instanceId: instanceId
                     )
                 )
             }
@@ -1149,16 +1226,16 @@ final class FlowJourneyRunner {
         return await processQueue(resumeContext: nil)
     }
 
-    private func scheduleTriggerReset(path: VmPathRef, screenId: String?) {
+    private func scheduleTriggerReset(path: VmPathRef, screenId: String?, instanceId: String?) {
         guard viewModels.isTriggerPath(path: path, screenId: screenId) else { return }
         let key = path.normalizedPath
         triggerResetTasks[key]?.cancel()
         triggerResetTasks[key] = Task { [weak self] in
             await Task.yield()
             guard let self else { return }
-            _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId)
+            _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
             self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
-            self.sendViewModelTrigger(path: path, value: 0)
+            self.sendViewModelTrigger(path: path, value: 0, instanceId: instanceId)
         }
     }
 
@@ -1289,7 +1366,7 @@ final class FlowJourneyRunner {
         LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters; ensure converter-dependent logic runs in the web bundle.\(triggerNote)")
     }
 
-    private func sendViewModelPatch(path: VmPathRef, value: Any, source: String?) {
+    private func sendViewModelPatch(path: VmPathRef, value: Any, source: String?, instanceId: String? = nil) {
         guard let controller = viewController else { return }
         var payload: [String: Any] = [
             "value": value,
@@ -1298,28 +1375,37 @@ final class FlowJourneyRunner {
         if let source {
             payload["source"] = source
         }
+        if let instanceId {
+            payload["instanceId"] = instanceId
+        }
 
         Task { @MainActor in
             controller.sendRuntimeMessage(type: "runtime/view_model_patch", payload: payload)
         }
     }
 
-    private func sendViewModelListOperation(op: String, path: VmPathRef, payload: [String: Any]) {
+    private func sendViewModelListOperation(op: String, path: VmPathRef, payload: [String: Any], instanceId: String? = nil) {
         guard let controller = viewController else { return }
         var message = payload
         appendPathPayload(&message, path: path)
+        if let instanceId {
+            message["instanceId"] = instanceId
+        }
 
         Task { @MainActor in
             controller.sendRuntimeMessage(type: "runtime/view_model_list_\(op)", payload: message)
         }
     }
 
-    private func sendViewModelTrigger(path: VmPathRef, value: Any?) {
+    private func sendViewModelTrigger(path: VmPathRef, value: Any?, instanceId: String? = nil) {
         guard let controller = viewController else { return }
         var payload: [String: Any] = [:]
         appendPathPayload(&payload, path: path)
         if let value {
             payload["value"] = value
+        }
+        if let instanceId {
+            payload["instanceId"] = instanceId
         }
 
         Task { @MainActor in
@@ -1420,7 +1506,11 @@ final class FlowJourneyRunner {
                 return literal
             }
             if dict.count == 1, let refValue = dict["ref"], let ref = parseRefPath(refValue) {
-                return viewModels.getValue(path: ref, screenId: context.screenId ?? journey.flowState.currentScreenId) as Any
+                return viewModels.getValue(
+                    path: ref,
+                    screenId: context.screenId ?? journey.flowState.currentScreenId,
+                    instanceId: context.instanceId
+                ) as Any
             }
             var resolved: [String: Any] = [:]
             for (key, entry) in dict {
@@ -1433,7 +1523,11 @@ final class FlowJourneyRunner {
                 return literal
             }
             if dict.count == 1, let refValue = dict["ref"]?.value, let ref = parseRefPath(refValue) {
-                return viewModels.getValue(path: ref, screenId: context.screenId ?? journey.flowState.currentScreenId) as Any
+                return viewModels.getValue(
+                    path: ref,
+                    screenId: context.screenId ?? journey.flowState.currentScreenId,
+                    instanceId: context.instanceId
+                ) as Any
             }
             var resolved: [String: Any] = [:]
             for (key, entry) in dict {
@@ -1505,7 +1599,8 @@ final class FlowJourneyRunner {
 
         switch assignment.status {
         case "running", "concluded":
-            if let variant = action.variants.first(where: { $0.id == assignment.variantId }) {
+            if let variantId = assignment.variantId,
+               let variant = action.variants.first(where: { $0.id == variantId }) {
                 return variant
             }
             return action.variants.first
