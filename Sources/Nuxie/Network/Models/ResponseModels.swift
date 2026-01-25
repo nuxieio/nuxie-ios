@@ -105,7 +105,7 @@ public struct Feature: Codable, Sendable {
 /// Pre-computed experiment variant assignment from server
 public struct ExperimentAssignment: Codable {
     public let experimentId: String
-    public let variantId: String
+    public let variantId: String? // nil when draft/paused
     public let flowId: String? // nil = holdout (control group that shows nothing)
     public let status: String
 }
