@@ -684,19 +684,54 @@ public final class FlowViewModelRuntime {
         target: inout [String: AnyCodable]
     ) {
         for (key, property) in schema {
-            if property.type == .object, let schema = property.schema {
-                let existing = target[key]?.value as? [String: Any]
-                var nested = existing?.mapValues { AnyCodable($0) } ?? [:]
-                applyDefaults(schema: schema, target: &nested)
-                if !nested.isEmpty {
-                    target[key] = AnyCodable(nested.mapValues { $0.value })
+            if let defaultValue = property.defaultValue {
+                if target[key] == nil {
+                    target[key] = defaultValue
                 }
                 continue
             }
 
-            if target[key] == nil, let defaultValue = property.defaultValue {
-                target[key] = defaultValue
+            if property.type == .object, let schema = property.schema {
+                let existingAny = target[key]?.value as? [String: Any]
+                let existingCodable = target[key]?.value as? [String: AnyCodable]
+                var nested: [String: AnyCodable] = existingCodable ?? [:]
+                if let existingAny {
+                    for (nestedKey, nestedValue) in existingAny {
+                        nested[nestedKey] = AnyCodable(nestedValue)
+                    }
+                }
+                applyDefaults(schema: schema, target: &nested)
+                target[key] = AnyCodable(nested.mapValues { $0.value })
+                continue
             }
+
+            if target[key] == nil, let fallback = defaultValue(for: property) {
+                target[key] = fallback
+            }
+        }
+    }
+
+    private func defaultValue(for property: ViewModelProperty) -> AnyCodable? {
+        if let defaultValue = property.defaultValue {
+            return defaultValue
+        }
+        switch property.type {
+        case .list:
+            return AnyCodable([Any]())
+        case .object:
+            return AnyCodable([String: Any]())
+        case .viewModel:
+            return AnyCodable([String: Any]())
+        case .enum:
+            return AnyCodable(property.enumValues?.first ?? "")
+        case .string, .color, .image:
+            return AnyCodable("")
+        case .number:
+            return AnyCodable(0)
+        case .list_index, .trigger:
+            return AnyCodable(0)
+        case .boolean:
+            return AnyCodable(false)
         }
     }
 

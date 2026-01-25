@@ -214,20 +214,46 @@ actor FlowStore {
         var values: [String: AnyCodable] = [:]
 
         for (key, property) in schema {
+            if let defaultValue = property.defaultValue {
+                values[key] = defaultValue
+                continue
+            }
             if property.type == .object, let schema = property.schema {
                 let nestedDefaults = buildDefaultValues(schema: schema)
-                if !nestedDefaults.isEmpty {
-                    let raw = nestedDefaults.mapValues { $0.value }
-                    values[key] = AnyCodable(raw)
-                }
+                let raw = nestedDefaults.mapValues { $0.value }
+                values[key] = AnyCodable(raw)
+                continue
             }
-
-            if values[key] == nil, let defaultValue = property.defaultValue {
-                values[key] = defaultValue
+            if let fallback = defaultValue(for: property) {
+                values[key] = fallback
             }
         }
 
         return values
+    }
+
+    private func defaultValue(for property: ViewModelProperty) -> AnyCodable? {
+        if let defaultValue = property.defaultValue {
+            return defaultValue
+        }
+        switch property.type {
+        case .list:
+            return AnyCodable([Any]())
+        case .object:
+            return AnyCodable([String: Any]())
+        case .viewModel:
+            return AnyCodable([String: Any]())
+        case .enum:
+            return AnyCodable(property.enumValues?.first ?? "")
+        case .string, .color, .image:
+            return AnyCodable("")
+        case .number:
+            return AnyCodable(0)
+        case .list_index, .trigger:
+            return AnyCodable(0)
+        case .boolean:
+            return AnyCodable(false)
+        }
     }
 
     private func mergeValues(

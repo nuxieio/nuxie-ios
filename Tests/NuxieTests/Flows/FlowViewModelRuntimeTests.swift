@@ -11,14 +11,15 @@ final class FlowViewModelRuntimeTests: QuickSpec {
             defaultValue: AnyCodable? = nil,
             itemType: ViewModelProperty? = nil,
             schema: [String: ViewModelProperty]? = nil,
-            viewModelId: String? = nil
+            viewModelId: String? = nil,
+            enumValues: [String]? = nil
         ) -> ViewModelProperty {
             return ViewModelProperty(
                 type: type,
                 propertyId: id,
                 defaultValue: defaultValue,
                 required: nil,
-                enumValues: nil,
+                enumValues: enumValues,
                 itemType: itemType,
                 schema: schema,
                 viewModelId: viewModelId,
@@ -164,6 +165,65 @@ final class FlowViewModelRuntimeTests: QuickSpec {
 
                 let title = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 5])), screenId: "screen-1") as? String
                 expect(title).to(equal("Hello"))
+            }
+
+            it("applies concrete defaults when missing explicit defaults") {
+                let titleProperty = makeProperty(type: .string, id: 10)
+                let countProperty = makeProperty(type: .number, id: 11)
+                let flagProperty = makeProperty(type: .boolean, id: 12)
+                let colorProperty = makeProperty(type: .color, id: 13)
+                let enumProperty = makeProperty(type: .enum, id: 14, enumValues: ["alpha", "beta"])
+                let listProperty = makeProperty(
+                    type: .list,
+                    id: 15,
+                    itemType: makeProperty(type: .string, id: 16)
+                )
+                let nestedFlag = makeProperty(type: .boolean, id: 18)
+                let objectProperty = makeProperty(
+                    type: .object,
+                    id: 17,
+                    schema: ["nestedFlag": nestedFlag]
+                )
+                let triggerProperty = makeProperty(type: .trigger, id: 19)
+                let listIndexProperty = makeProperty(type: .list_index, id: 20)
+
+                let viewModel = ViewModel(
+                    id: "vm-fallback",
+                    name: "Fallback",
+                    viewModelPathId: 0,
+                    properties: [
+                        "title": titleProperty,
+                        "count": countProperty,
+                        "flag": flagProperty,
+                        "color": colorProperty,
+                        "choice": enumProperty,
+                        "items": listProperty,
+                        "meta": objectProperty,
+                        "pulse": triggerProperty,
+                        "index": listIndexProperty
+                    ]
+                )
+
+                let runtime = FlowViewModelRuntime(remoteFlow: makeRemoteFlow(viewModels: [viewModel]))
+
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 10])), screenId: "screen-1") as? String)
+                    .to(equal(""))
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 11])), screenId: "screen-1") as? Int)
+                    .to(equal(0))
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 12])), screenId: "screen-1") as? Bool)
+                    .to(equal(false))
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 13])), screenId: "screen-1") as? String)
+                    .to(equal(""))
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 14])), screenId: "screen-1") as? String)
+                    .to(equal("alpha"))
+                let list = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 15])), screenId: "screen-1") as? [Any]
+                expect(list?.isEmpty).to(beTrue())
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 17, 18])), screenId: "screen-1") as? Bool)
+                    .to(equal(false))
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 19])), screenId: "screen-1") as? Int)
+                    .to(equal(0))
+                expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 20])), screenId: "screen-1") as? Int)
+                    .to(equal(0))
             }
 
             it("detects trigger properties via pathIds") {
