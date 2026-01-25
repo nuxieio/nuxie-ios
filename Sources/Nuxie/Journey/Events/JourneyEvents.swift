@@ -267,13 +267,19 @@ public class JourneyEvents {
     public static func experimentVariantAssignedProperties(
         journey: Journey,
         experimentId: String,
-        variantId: String
+        variantId: String,
+        variantName: String?,
+        variantIndex: Int?,
+        flowId: String?
     ) -> [String: Any] {
         return [
             "journey_id": journey.id,
             "campaign_id": journey.campaignId,
+            "flow_id": flowId as Any,
             "experiment_id": experimentId,
-            "variant_id": variantId
+            "variant_id": variantId,
+            "variant_name": variantName ?? "",
+            "variant_index": variantIndex ?? 0
         ]
     }
 }
