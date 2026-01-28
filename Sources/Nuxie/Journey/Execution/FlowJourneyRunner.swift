@@ -115,7 +115,6 @@ final class FlowJourneyRunner {
 
     func handleScreenChanged(_ screenId: String) async -> RunOutcome? {
         journey.flowState.currentScreenId = screenId
-        journey.flowState.pendingAfterDelay = buildAfterDelayTriggers(for: screenId)
         let event = makeSystemEvent(
             name: SystemEventNames.screenShown,
             properties: ["screen_id": screenId]
@@ -299,26 +298,6 @@ final class FlowJourneyRunner {
         return await processQueue(resumeContext: resumeContext)
     }
 
-    func dispatchAfterDelay(interactionId: String, screenId: String) async -> RunOutcome? {
-        guard journey.flowState.currentScreenId == screenId else { return nil }
-        guard let interactions = interactionsById[screenId] else { return nil }
-        guard let interaction = interactions.first(where: { $0.id == interactionId }) else { return nil }
-        guard case .afterDelay = interaction.trigger else { return nil }
-
-        journey.flowState.pendingAfterDelay.removeAll { $0.interactionId == interactionId }
-
-        enqueueActions(
-            interaction.actions,
-            context: TriggerContext(
-                screenId: screenId,
-                componentId: nil,
-                interactionId: interactionId,
-                instanceId: nil
-            )
-        )
-        return await processQueue(resumeContext: nil)
-    }
-
     func clearDebounces() {
         for (_, task) in debounceTasks {
             task.cancel()
@@ -328,7 +307,6 @@ final class FlowJourneyRunner {
 
     func hasPendingWork() -> Bool {
         if journey.flowState.pendingAction != nil { return true }
-        if !journey.flowState.pendingAfterDelay.isEmpty { return true }
         if activeRequest != nil { return true }
         if !actionQueue.isEmpty { return true }
         return false
@@ -1406,22 +1384,6 @@ final class FlowJourneyRunner {
         return nil
     }
 
-    private func buildAfterDelayTriggers(for screenId: String) -> [FlowAfterDelaySnapshot] {
-        let now = dateProvider.now()
-        guard let interactions = interactionsById[screenId] else { return [] }
-
-        return interactions.compactMap { interaction in
-            guard interaction.enabled != false else { return nil }
-            guard case .afterDelay(let delayMs) = interaction.trigger else { return nil }
-            let fireAt = dateProvider.date(byAddingTimeInterval: TimeInterval(delayMs) / 1000, to: now)
-            return FlowAfterDelaySnapshot(
-                interactionId: interaction.id,
-                screenId: screenId,
-                fireAt: fireAt
-            )
-        }
-    }
-
     private func makePendingAction(
         kind: FlowPendingActionKind,
         context: TriggerContext,
@@ -1589,7 +1551,6 @@ final class FlowJourneyRunner {
         case (.tap, .tap),
              (.hover, .hover),
              (.press, .press),
-             (.afterDelay, .afterDelay),
              (.manual, .manual):
             return true
         case (.longPress, .longPress):
