@@ -423,13 +423,13 @@ public actor JourneyService: JourneyServiceProtocol {
         )
       }
 
-    case "action/set_value":
+    case "action/did_set":
       if let path = parsePathRef(payload) {
         let value = payload["value"] ?? NSNull()
         let source = payload["source"] as? String
         let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
         let instanceId = payload["instanceId"] as? String
-        let outcome = await runner.handleSetValue(
+        let outcome = await runner.handleDidSet(
           path: path,
           value: value,
           source: source,

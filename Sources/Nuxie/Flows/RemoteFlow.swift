@@ -134,7 +134,7 @@ public enum InteractionTrigger: Codable {
     case drag(direction: DragDirection?, threshold: Double?)
     case event(eventName: String, filter: IREnvelope?)
     case manual(label: String?)
-    case setValue(path: VmPathRef, debounceMs: Int?)
+    case didSet(path: VmPathRef, debounceMs: Int?)
     case unknown(type: String, payload: [String: AnyCodable]?)
 
     public enum DragDirection: String, Codable {
@@ -166,7 +166,7 @@ public enum InteractionTrigger: Codable {
         case drag
         case event
         case manual
-        case setValue = "set_value"
+        case didSet = "did_set"
     }
 
     public init(from decoder: Decoder) throws {
@@ -191,10 +191,10 @@ public enum InteractionTrigger: Codable {
             self = .event(eventName: eventName, filter: filter)
         case .manual:
             self = .manual(label: try container.decodeIfPresent(String.self, forKey: .label))
-        case .setValue:
+        case .didSet:
             let path = try container.decode(VmPathRef.self, forKey: .path)
             let debounceMs = try container.decodeIfPresent(Int.self, forKey: .debounceMs)
-            self = .setValue(path: path, debounceMs: debounceMs)
+            self = .didSet(path: path, debounceMs: debounceMs)
         case .none:
             let rawType = (try? container.decode(String.self, forKey: .type)) ?? "unknown"
             var payload: [String: AnyCodable] = [:]
@@ -229,8 +229,8 @@ public enum InteractionTrigger: Codable {
         case .manual(let label):
             try container.encode(TriggerType.manual, forKey: .type)
             try container.encodeIfPresent(label, forKey: .label)
-        case .setValue(let path, let debounceMs):
-            try container.encode(TriggerType.setValue, forKey: .type)
+        case .didSet(let path, let debounceMs):
+            try container.encode(TriggerType.didSet, forKey: .type)
             try container.encode(path, forKey: .path)
             try container.encodeIfPresent(debounceMs, forKey: .debounceMs)
         case .unknown(let type, let payload):
