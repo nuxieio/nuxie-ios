@@ -340,7 +340,7 @@ extension FlowViewController {
             runtimeReady = true
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
             flushPendingRuntimeMessages()
-        case "runtime/screen_changed", "action/view_model_changed", "action/event":
+        case "runtime/screen_changed", "action/set_value", "action/event":
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
         case "action/purchase":
             if runtimeDelegate != nil {
