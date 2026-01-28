@@ -134,7 +134,7 @@ public enum InteractionTrigger: Codable {
     case drag(direction: DragDirection?, threshold: Double?)
     case event(eventName: String, filter: IREnvelope?)
     case manual(label: String?)
-    case viewModelChanged(path: VmPathRef, debounceMs: Int?)
+    case setValue(path: VmPathRef, debounceMs: Int?)
     case unknown(type: String, payload: [String: AnyCodable]?)
 
     public enum DragDirection: String, Codable {
@@ -166,7 +166,7 @@ public enum InteractionTrigger: Codable {
         case drag
         case event
         case manual
-        case viewModelChanged = "view_model_changed"
+        case setValue = "set_value"
     }
 
     public init(from decoder: Decoder) throws {
@@ -191,10 +191,10 @@ public enum InteractionTrigger: Codable {
             self = .event(eventName: eventName, filter: filter)
         case .manual:
             self = .manual(label: try container.decodeIfPresent(String.self, forKey: .label))
-        case .viewModelChanged:
+        case .setValue:
             let path = try container.decode(VmPathRef.self, forKey: .path)
             let debounceMs = try container.decodeIfPresent(Int.self, forKey: .debounceMs)
-            self = .viewModelChanged(path: path, debounceMs: debounceMs)
+            self = .setValue(path: path, debounceMs: debounceMs)
         case .none:
             let rawType = (try? container.decode(String.self, forKey: .type)) ?? "unknown"
             var payload: [String: AnyCodable] = [:]
@@ -229,8 +229,8 @@ public enum InteractionTrigger: Codable {
         case .manual(let label):
             try container.encode(TriggerType.manual, forKey: .type)
             try container.encodeIfPresent(label, forKey: .label)
-        case .viewModelChanged(let path, let debounceMs):
-            try container.encode(TriggerType.viewModelChanged, forKey: .type)
+        case .setValue(let path, let debounceMs):
+            try container.encode(TriggerType.setValue, forKey: .type)
             try container.encode(path, forKey: .path)
             try container.encodeIfPresent(debounceMs, forKey: .debounceMs)
         case .unknown(let type, let payload):
