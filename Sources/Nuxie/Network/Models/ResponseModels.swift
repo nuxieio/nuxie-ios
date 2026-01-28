@@ -240,7 +240,7 @@ public struct Campaign: Codable {
     // Goal and exit configuration (optional for backward compatibility)
     public let goal: GoalConfig?
     public let exitPolicy: ExitPolicy?
-    public let conversionAnchor: String? // Default: "workflow_entry"
+    public let conversionAnchor: String? // Default: "journey_start"
     public let campaignType: String? // Used for default conversion windows
 }
 
