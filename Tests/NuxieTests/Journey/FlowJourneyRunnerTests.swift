@@ -45,7 +45,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 interactions["start"] = [
                     Interaction(
                         id: "start",
-                        trigger: .flowEntered,
+                        trigger: .event(eventName: SystemEventNames.flowEntered, filter: nil),
                         actions: entryActions,
                         enabled: true
                     )
@@ -137,7 +137,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
                 let interaction = Interaction(
                     id: "int-1",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         .setViewModel(SetViewModelAction(
                             path: .ids(VmPathIds(pathIds: [0, 1])),
@@ -217,7 +217,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
                 let interaction = Interaction(
                     id: "int-1",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         .listInsert(ListInsertAction(
                             path: .ids(VmPathIds(pathIds: [0, 2])),
@@ -288,7 +288,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
                 let interaction = Interaction(
                     id: "int-ops",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         .listMove(ListMoveAction(
                             path: .ids(VmPathIds(pathIds: [0, 2])),
@@ -393,7 +393,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
                 let interaction = Interaction(
                     id: "int-1",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         purchaseAction,
                         .restore(RestoreAction()),
@@ -870,7 +870,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let transition = AnyCodable(["type": "push", "direction": "left"])
                 let interaction = Interaction(
                     id: "int-back",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [.back(BackAction(steps: 1, transition: transition))],
                     enabled: true
                 )
@@ -908,7 +908,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let flowId = "flow-back-no-transition"
                 let interaction = Interaction(
                     id: "int-back",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [.back(BackAction(steps: 1))],
                     enabled: true
                 )
@@ -944,7 +944,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let flowId = "flow-back-empty"
                 let interaction = Interaction(
                     id: "int-back",
-                    trigger: .screenShown,
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [.back(BackAction(steps: 1))],
                     enabled: true
                 )

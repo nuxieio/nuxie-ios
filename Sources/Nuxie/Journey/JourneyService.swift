@@ -581,13 +581,28 @@ public actor JourneyService: JourneyServiceProtocol {
       userInfo: userInfo
     )
 
-    let outcome = await runner.dispatchTrigger(
-      trigger: .screenDismissed(method: nil),
-      screenId: journey.flowState.currentScreenId,
-      componentId: nil,
-      instanceId: nil,
-      event: nil
+    var properties: [String: Any] = [:]
+    if let screenId = journey.flowState.currentScreenId {
+      properties["screen_id"] = screenId
+    }
+    let method: String
+    switch reason {
+    case .userDismissed:
+      method = "user"
+    case .purchaseCompleted:
+      method = "purchase_completed"
+    case .timeout:
+      method = "timeout"
+    case .error:
+      method = "error"
+    }
+    properties["method"] = method
+    let event = NuxieEvent(
+      name: SystemEventNames.screenDismissed,
+      distinctId: journey.distinctId,
+      properties: properties
     )
+    let outcome = await runner.dispatchEventTrigger(event)
     handleOutcome(outcome, journey: journey)
 
     if !runner.hasPendingWork() {
@@ -1064,8 +1079,6 @@ public actor JourneyService: JourneyServiceProtocol {
       return .drag(direction: direction, threshold: threshold)
     case "manual":
       return .manual(label: payload["label"] as? String)
-    case "screen_dismissed":
-      return .screenDismissed(method: payload["method"] as? String)
     case "after_delay":
       let delayMs = parseInt(payload["delayMs"] ?? payload["delay_ms"]) ?? 0
       return .afterDelay(delayMs: delayMs)

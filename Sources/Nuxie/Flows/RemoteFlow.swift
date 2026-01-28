@@ -127,14 +127,11 @@ public struct Interaction: Codable {
 }
 
 public enum InteractionTrigger: Codable {
-    case flowEntered
     case tap
     case longPress(minMs: Int?)
     case hover
     case press
     case drag(direction: DragDirection?, threshold: Double?)
-    case screenShown
-    case screenDismissed(method: String?)
     case afterDelay(delayMs: Int)
     case event(eventName: String, filter: IREnvelope?)
     case manual(label: String?)
@@ -163,14 +160,11 @@ public enum InteractionTrigger: Codable {
     }
 
     private enum TriggerType: String, Codable {
-        case flowEntered = "flow_entered"
         case tap
         case longPress = "long_press"
         case hover
         case press
         case drag
-        case screenShown = "screen_shown"
-        case screenDismissed = "screen_dismissed"
         case afterDelay = "after_delay"
         case event
         case manual
@@ -181,8 +175,6 @@ public enum InteractionTrigger: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let typeValue = (try? container.decode(TriggerType.self, forKey: .type))
         switch typeValue {
-        case .flowEntered:
-            self = .flowEntered
         case .tap:
             self = .tap
         case .longPress:
@@ -195,10 +187,6 @@ public enum InteractionTrigger: Codable {
             let direction = try container.decodeIfPresent(DragDirection.self, forKey: .direction)
             let threshold = try container.decodeIfPresent(Double.self, forKey: .threshold)
             self = .drag(direction: direction, threshold: threshold)
-        case .screenShown:
-            self = .screenShown
-        case .screenDismissed:
-            self = .screenDismissed(method: try container.decodeIfPresent(String.self, forKey: .method))
         case .afterDelay:
             let delayMs: Int
             if let intValue = try? container.decode(Int.self, forKey: .delayMs) {
@@ -231,8 +219,6 @@ public enum InteractionTrigger: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .flowEntered:
-            try container.encode(TriggerType.flowEntered, forKey: .type)
         case .tap:
             try container.encode(TriggerType.tap, forKey: .type)
         case .longPress(let minMs):
@@ -246,11 +232,6 @@ public enum InteractionTrigger: Codable {
             try container.encode(TriggerType.drag, forKey: .type)
             try container.encodeIfPresent(direction, forKey: .direction)
             try container.encodeIfPresent(threshold, forKey: .threshold)
-        case .screenShown:
-            try container.encode(TriggerType.screenShown, forKey: .type)
-        case .screenDismissed(let method):
-            try container.encode(TriggerType.screenDismissed, forKey: .type)
-            try container.encodeIfPresent(method, forKey: .method)
         case .afterDelay(let delayMs):
             try container.encode(TriggerType.afterDelay, forKey: .type)
             try container.encode(delayMs, forKey: .delayMs)

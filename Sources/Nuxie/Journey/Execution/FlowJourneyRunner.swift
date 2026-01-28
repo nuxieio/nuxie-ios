@@ -116,13 +116,11 @@ final class FlowJourneyRunner {
     func handleScreenChanged(_ screenId: String) async -> RunOutcome? {
         journey.flowState.currentScreenId = screenId
         journey.flowState.pendingAfterDelay = buildAfterDelayTriggers(for: screenId)
-        return await dispatchTrigger(
-            trigger: .screenShown,
-            screenId: screenId,
-            componentId: nil,
-            instanceId: nil,
-            event: nil
+        let event = makeSystemEvent(
+            name: SystemEventNames.screenShown,
+            properties: ["screen_id": screenId]
         )
+        return await dispatchEventTrigger(event)
     }
 
     func handleViewModelChanged(
@@ -336,22 +334,55 @@ final class FlowJourneyRunner {
         return false
     }
 
+    private func makeSystemEvent(name: String, properties: [String: Any]) -> NuxieEvent {
+        return NuxieEvent(
+            name: name,
+            distinctId: journey.distinctId,
+            properties: properties
+        )
+    }
+
+    private func entryScreenId(from interactions: [Interaction]) -> String? {
+        for interaction in interactions {
+            for action in interaction.actions {
+                if case .navigate(let navigateAction) = action, !navigateAction.screenId.isEmpty {
+                    return navigateAction.screenId
+                }
+            }
+        }
+        return nil
+    }
+
     private func runEntryActionsIfNeeded() async -> RunOutcome? {
         guard let entryInteractions = interactionsById["start"], !entryInteractions.isEmpty else { return nil }
 
+        let entryScreenId = entryScreenId(from: entryInteractions)
+        var properties: [String: Any] = [:]
+        if let entryScreenId {
+            properties["entry_screen_id"] = entryScreenId
+        }
+        let event = makeSystemEvent(
+            name: SystemEventNames.flowEntered,
+            properties: properties
+        )
+
         for interaction in entryInteractions {
             if interaction.enabled == false { continue }
-            if case .flowEntered = interaction.trigger {
-                enqueueActions(
-                    interaction.actions,
-                    context: TriggerContext(
-                        screenId: journey.flowState.currentScreenId,
-                        componentId: nil,
-                        interactionId: interaction.id,
-                        instanceId: nil
-                    )
-                )
+            guard case .event(let eventName, let filter) = interaction.trigger else { continue }
+            guard eventName == SystemEventNames.flowEntered else { continue }
+            if let filter {
+                let ok = await evalConditionIR(filter, event: event)
+                if !ok { continue }
             }
+            enqueueActions(
+                interaction.actions,
+                context: TriggerContext(
+                    screenId: journey.flowState.currentScreenId,
+                    componentId: nil,
+                    interactionId: interaction.id,
+                    instanceId: nil
+                )
+            )
         }
 
         return await processQueue(resumeContext: nil)
@@ -537,13 +568,11 @@ final class FlowJourneyRunner {
 
     private func navigate(to screenId: String, transition: AnyCodable?) async {
         if let current = journey.flowState.currentScreenId, current != screenId {
-            _ = await dispatchTrigger(
-                trigger: .screenDismissed(method: nil),
-                screenId: current,
-                componentId: nil,
-                instanceId: nil,
-                event: nil
+            let event = makeSystemEvent(
+                name: SystemEventNames.screenDismissed,
+                properties: ["screen_id": current, "method": "navigate"]
             )
+            _ = await dispatchEventTrigger(event)
             journey.flowState.navigationStack.append(current)
         }
         await sendShowScreen(screenId, transition: transition)
@@ -1560,7 +1589,6 @@ final class FlowJourneyRunner {
         case (.tap, .tap),
              (.hover, .hover),
              (.press, .press),
-             (.screenShown, .screenShown),
              (.afterDelay, .afterDelay),
              (.manual, .manual):
             return true
@@ -1569,11 +1597,6 @@ final class FlowJourneyRunner {
         case (.drag(let dir, let threshold), .drag(let inputDir, let inputThreshold)):
             if let dir, let inputDir, dir != inputDir { return false }
             if let threshold, let inputThreshold, threshold > inputThreshold { return false }
-            return true
-        case (.screenDismissed(let method), .screenDismissed(let inputMethod)):
-            if let method, let inputMethod {
-                return method == inputMethod
-            }
             return true
         case (.event(let name, _), .event(let inputName, _)):
             return name == inputName
