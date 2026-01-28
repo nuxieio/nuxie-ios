@@ -428,61 +428,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(controller.dismissRequests).to(equal([.userDismissed]))
             }
 
-            it("executes after_delay interactions and clears pending snapshot") {
-                let flowId = "flow-after-delay"
-                let viewModel = ViewModel(
-                    id: "vm-1",
-                    name: "VM",
-                    viewModelPathId: 0,
-                    properties: [
-                        "flag": ViewModelProperty(
-                            type: .boolean,
-                            propertyId: 1,
-                            defaultValue: AnyCodable(false),
-                            required: nil,
-                            enumValues: nil,
-                            itemType: nil,
-                            schema: nil,
-                            viewModelId: nil,
-                            validation: nil
-                        )
-                    ]
-                )
-                let interaction = Interaction(
-                    id: "int-delay",
-                    trigger: .afterDelay(delayMs: 1000),
-                    actions: [
-                        .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
-                            value: AnyCodable(["literal": true] as [String: Any])
-                        ))
-                    ],
-                    enabled: true
-                )
-                let remoteFlow = makeRemoteFlow(
-                    flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
-                    viewModels: [viewModel]
-                )
-
-                let flow = Flow(remoteFlow: remoteFlow, products: [])
-                let campaign = makeCampaign(flowId: flowId)
-                let journey = Journey(campaign: campaign, distinctId: "user-1")
-                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
-
-                _ = await runner.handleScreenChanged("screen-1")
-
-                expect(journey.flowState.pendingAfterDelay).to(haveCount(1))
-
-                _ = await runner.dispatchAfterDelay(interactionId: "int-delay", screenId: "screen-1")
-
-                let snapshot = journey.flowState.viewModelSnapshot
-                let values = snapshot?.viewModelInstances.first?.values
-                let flag = values?["flag"]?.value as? Bool
-                expect(flag).to(equal(true))
-                expect(journey.flowState.pendingAfterDelay).to(beEmpty())
-            }
-
             it("resumes delayed entry action and continues sequence") {
                 let flowId = "flow-resume"
                 let viewModel = ViewModel(

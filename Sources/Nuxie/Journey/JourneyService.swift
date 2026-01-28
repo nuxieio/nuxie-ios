@@ -106,8 +106,6 @@ public actor JourneyService: JourneyServiceProtocol {
       if let pending = journey.flowState.pendingAction, let resumeAt = pending.resumeAt {
         scheduleResume(journeyId: journey.id, at: resumeAt)
       }
-
-      scheduleAfterDelay(for: journey)
     }
 
     await checkExpiredTimers()
@@ -124,7 +122,6 @@ public actor JourneyService: JourneyServiceProtocol {
          resumeAt > now {
         scheduleResume(journeyId: journey.id, at: resumeAt)
       }
-      scheduleAfterDelay(for: journey)
     }
   }
 
@@ -167,7 +164,6 @@ public actor JourneyService: JourneyServiceProtocol {
       if let pending = journey.flowState.pendingAction, let resumeAt = pending.resumeAt {
         scheduleResume(journeyId: journey.id, at: resumeAt)
       }
-      scheduleAfterDelay(for: journey)
     }
 
     await checkExpiredTimers()
@@ -389,14 +385,6 @@ public actor JourneyService: JourneyServiceProtocol {
         await resumeJourney(journey)
         continue
       }
-
-      let due = journey.flowState.pendingAfterDelay.filter { $0.fireAt <= now }
-      for item in due {
-        if let runner = flowRunners[journey.id] {
-          let outcome = await runner.dispatchAfterDelay(interactionId: item.interactionId, screenId: item.screenId)
-          handleOutcome(outcome, journey: journey)
-        }
-      }
     }
   }
 
@@ -416,15 +404,12 @@ public actor JourneyService: JourneyServiceProtocol {
     case "runtime/ready":
       let outcome = await runner.handleRuntimeReady()
       handleOutcome(outcome, journey: journey)
-      scheduleAfterDelay(for: journey)
 
     case "runtime/screen_changed":
       if let screenId = payload["screenId"] as? String {
         let outcome = await runner.handleScreenChanged(screenId)
         handleOutcome(outcome, journey: journey)
         persistJourney(journey)
-        cancelAfterDelayTasks(for: journey.id)
-        scheduleAfterDelay(for: journey)
 
         eventService.track(
           "$journey_node_executed",
@@ -703,20 +688,6 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  private func scheduleAfterDelay(for journey: Journey) {
-    cancelAfterDelayTasks(for: journey.id)
-    let now = dateProvider.now()
-    for item in journey.flowState.pendingAfterDelay {
-      if item.fireAt <= now {
-        continue
-      }
-      let key = taskKey(journeyId: journey.id, kind: "after_delay", id: item.interactionId)
-      scheduleTask(key: key, at: item.fireAt) { [weak self] in
-        await self?.handleAfterDelay(journeyId: journey.id, interactionId: item.interactionId, screenId: item.screenId)
-      }
-    }
-  }
-
   private func scheduleResume(journeyId: String, at date: Date) {
     let key = taskKey(journeyId: journeyId, kind: "resume", id: nil)
     scheduleTask(key: key, at: date) { [weak self] in
@@ -745,14 +716,6 @@ public actor JourneyService: JourneyServiceProtocol {
       LogDebug("Journey task \(key) cancelled/failed: \(error)")
     }
     clearTask(key)
-  }
-
-  private func handleAfterDelay(journeyId: String, interactionId: String, screenId: String) async {
-    guard let journey = inMemoryJourneysById[journeyId],
-          let runner = flowRunners[journeyId] else { return }
-
-    let outcome = await runner.dispatchAfterDelay(interactionId: interactionId, screenId: screenId)
-    handleOutcome(outcome, journey: journey)
   }
 
   private func resumeJourneyIfCached(journeyId: String) async {
@@ -844,15 +807,6 @@ public actor JourneyService: JourneyServiceProtocol {
 
   private func cancelTasks(for journeyId: String) {
     let keys = activeTasks.keys.filter { $0.hasPrefix("\(journeyId):") }
-    for key in keys {
-      activeTasks[key]?.cancel()
-      activeTasks.removeValue(forKey: key)
-    }
-  }
-
-  private func cancelAfterDelayTasks(for journeyId: String) {
-    let prefix = "\(journeyId):after_delay:"
-    let keys = activeTasks.keys.filter { $0.hasPrefix(prefix) }
     for key in keys {
       activeTasks[key]?.cancel()
       activeTasks.removeValue(forKey: key)
@@ -1079,9 +1033,6 @@ public actor JourneyService: JourneyServiceProtocol {
       return .drag(direction: direction, threshold: threshold)
     case "manual":
       return .manual(label: payload["label"] as? String)
-    case "after_delay":
-      let delayMs = parseInt(payload["delayMs"] ?? payload["delay_ms"]) ?? 0
-      return .afterDelay(delayMs: delayMs)
     default:
       return nil
     }

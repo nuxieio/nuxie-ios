@@ -1,12 +1,6 @@
 import Foundation
 import FactoryKit
 
-public struct FlowAfterDelaySnapshot: Codable, Equatable {
-    public let interactionId: String
-    public let screenId: String
-    public let fireAt: Date
-}
-
 public enum FlowPendingActionKind: String, Codable {
     case delay
     case timeWindow
@@ -30,20 +24,17 @@ public struct FlowJourneyState: Codable {
     public var currentScreenId: String?
     public var navigationStack: [String]
     public var viewModelSnapshot: FlowViewModelSnapshot?
-    public var pendingAfterDelay: [FlowAfterDelaySnapshot]
     public var pendingAction: FlowPendingAction?
 
     public init(
         currentScreenId: String? = nil,
         navigationStack: [String] = [],
         viewModelSnapshot: FlowViewModelSnapshot? = nil,
-        pendingAfterDelay: [FlowAfterDelaySnapshot] = [],
         pendingAction: FlowPendingAction? = nil
     ) {
         self.currentScreenId = currentScreenId
         self.navigationStack = navigationStack
         self.viewModelSnapshot = viewModelSnapshot
-        self.pendingAfterDelay = pendingAfterDelay
         self.pendingAction = pendingAction
     }
 }

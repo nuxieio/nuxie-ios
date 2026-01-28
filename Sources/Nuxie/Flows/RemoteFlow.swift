@@ -132,7 +132,6 @@ public enum InteractionTrigger: Codable {
     case hover
     case press
     case drag(direction: DragDirection?, threshold: Double?)
-    case afterDelay(delayMs: Int)
     case event(eventName: String, filter: IREnvelope?)
     case manual(label: String?)
     case viewModelChanged(path: VmPathRef, debounceMs: Int?)
@@ -165,7 +164,6 @@ public enum InteractionTrigger: Codable {
         case hover
         case press
         case drag
-        case afterDelay = "after_delay"
         case event
         case manual
         case viewModelChanged = "view_model_changed"
@@ -187,14 +185,6 @@ public enum InteractionTrigger: Codable {
             let direction = try container.decodeIfPresent(DragDirection.self, forKey: .direction)
             let threshold = try container.decodeIfPresent(Double.self, forKey: .threshold)
             self = .drag(direction: direction, threshold: threshold)
-        case .afterDelay:
-            let delayMs: Int
-            if let intValue = try? container.decode(Int.self, forKey: .delayMs) {
-                delayMs = intValue
-            } else {
-                delayMs = Int(try container.decode(Double.self, forKey: .delayMs))
-            }
-            self = .afterDelay(delayMs: delayMs)
         case .event:
             let eventName = try container.decode(String.self, forKey: .eventName)
             let filter = try container.decodeIfPresent(IREnvelope.self, forKey: .filter)
@@ -232,9 +222,6 @@ public enum InteractionTrigger: Codable {
             try container.encode(TriggerType.drag, forKey: .type)
             try container.encodeIfPresent(direction, forKey: .direction)
             try container.encodeIfPresent(threshold, forKey: .threshold)
-        case .afterDelay(let delayMs):
-            try container.encode(TriggerType.afterDelay, forKey: .type)
-            try container.encode(delayMs, forKey: .delayMs)
         case .event(let eventName, let filter):
             try container.encode(TriggerType.event, forKey: .type)
             try container.encode(eventName, forKey: .eventName)
