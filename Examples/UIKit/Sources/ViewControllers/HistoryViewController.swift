@@ -66,7 +66,7 @@ final class HistoryViewController: UIViewController {
 
         /// **Nuxie Integration: Track history_viewed event**
         /// Track when user views their history
-        NuxieSDK.shared.track(Constants.eventHistoryViewed, properties: [
+        NuxieSDK.shared.trigger(Constants.eventHistoryViewed, properties: [
             "entry_count": entries.count,
             "is_pro": entitlementManager.isProUser,
             "timestamp": Date().timeIntervalSince1970
@@ -168,31 +168,12 @@ final class HistoryViewController: UIViewController {
             /// **Nuxie Integration: Feature gating with flows**
             /// When user tries to access Pro feature, track event and let
             /// Nuxie show upgrade flow if configured
-            NuxieSDK.shared.track("csv_export_gated", properties: [
+            NuxieSDK.shared.trigger("csv_export_gated", properties: [
                 "entry_count": moodStore.count,
                 "source": "history_toolbar"
-            ]) { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-
-                    switch result {
-                    case .flow(let completion):
-                        // Flow was shown and completed
-                        if case .purchased = completion.outcome {
-                            // User just purchased! Now export
-                            self.performCSVExport()
-                        } else if case .trialStarted = completion.outcome {
-                            // Trial started, export now
-                            self.performCSVExport()
-                        }
-
-                    case .noInteraction:
-                        // No flow configured - show message
-                        self.showError("CSV export is a Pro feature")
-
-                    case .failed(let error):
-                        self.showError(error.localizedDescription)
-                    }
+            ]) { [weak self] update in
+                self?.handleTriggerUpdate(update) { [weak self] in
+                    self?.performCSVExport()
                 }
             }
         }
@@ -201,7 +182,7 @@ final class HistoryViewController: UIViewController {
     /// Performs the actual CSV export
     private func performCSVExport() {
         /// **Nuxie Integration: Track successful export**
-        NuxieSDK.shared.track(Constants.eventExportCSV, properties: [
+        NuxieSDK.shared.trigger(Constants.eventExportCSV, properties: [
             "entry_count": moodStore.count
         ])
 
@@ -249,13 +230,14 @@ final class HistoryViewController: UIViewController {
     /// **Nuxie Integration: Track unlock event**
     /// When user wants to unlock history, track event and let Nuxie show configured flow
     private func requestHistoryUnlock() {
-        NuxieSDK.shared.track("unlock_history_tapped", properties: [
+        NuxieSDK.shared.trigger("unlock_history_tapped", properties: [
             "visible_entries": entries.count,
             "total_entries": moodStore.count,
             "source": "history_screen"
-        ]) { [weak self] result in
-            DispatchQueue.main.async {
-                self?.handleFlowResult(result)
+        ]) { [weak self] update in
+            self?.handleTriggerUpdate(update) { [weak self] in
+                self?.loadEntries()
+                self?.showSuccessMessage()
             }
         }
     }
@@ -263,37 +245,30 @@ final class HistoryViewController: UIViewController {
     // MARK: - Nuxie Flow Handling
 
     /// Handles the result of a tracked event that may trigger a flow
-    private func handleFlowResult(_ result: EventResult) {
-        switch result {
-        case .flow(let completion):
-            handleFlowCompletion(completion)
-
-        case .noInteraction:
-            print("[MoodLog] No flow shown - configure a campaign in Nuxie dashboard")
-
-        case .failed(let error):
-            showError("Unable to load: \(error.localizedDescription)")
-        }
-    }
-
-    /// Handles the completion of a Nuxie flow
-    private func handleFlowCompletion(_ completion: FlowCompletion) {
-        switch completion.outcome {
-        case .purchased, .trialStarted:
-            // User purchased or started trial - reload to show all history
-            loadEntries()
-            showSuccessMessage()
-
-        case .restored:
-            loadEntries()
-            showSuccessMessage()
-
-        case .dismissed, .skipped:
-            // User closed without purchasing
+    private func handleTriggerUpdate(_ update: TriggerUpdate, onAllowed: (() -> Void)? = nil) {
+        switch update {
+        case .entitlement(let entitlement):
+            switch entitlement {
+            case .allowed:
+                onAllowed?()
+            case .denied:
+                showError("This is a Pro feature")
+            case .pending:
+                break
+            }
+        case .decision(let decision):
+            switch decision {
+            case .allowedImmediate:
+                onAllowed?()
+            case .deniedImmediate, .noMatch, .suppressed:
+                showError("This is a Pro feature")
+            default:
+                break
+            }
+        case .error(let error):
+            showError("Unable to load: \(error.message)")
+        case .journey:
             break
-
-        case .error(let message):
-            showError(message ?? "Something went wrong")
         }
     }
 

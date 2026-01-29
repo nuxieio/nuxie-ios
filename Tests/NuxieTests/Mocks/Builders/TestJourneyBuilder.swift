@@ -8,7 +8,7 @@ class TestJourneyBuilder {
     private var campaign: Campaign
     private var distinctId: String
     private var status: JourneyStatus
-    private var currentNodeId: String?
+    private var currentScreenId: String?
     private var context: [String: AnyCodable]
     private var resumeAt: Date?
     private var startedAt: Date
@@ -18,15 +18,34 @@ class TestJourneyBuilder {
     init(id: String = "test-journey") {
         self.id = id
         // Create a default campaign
-        self.campaign = TestCampaignBuilder(id: "test-campaign").build()
+        self.campaign = TestJourneyBuilder.makeCampaign(id: "test-campaign")
         self.distinctId = "test-user"
         self.status = .active
-        self.currentNodeId = nil
+        self.currentScreenId = nil
         self.context = [:]
         self.resumeAt = nil
         self.startedAt = Date()
         self.completedAt = nil
         self.exitReason = nil
+    }
+
+    private static func makeCampaign(id: String) -> Campaign {
+        let publishedAt = ISO8601DateFormatter().string(from: Date())
+        return Campaign(
+            id: id,
+            name: "Test Campaign",
+            versionId: "v1",
+            versionNumber: 1,
+            versionName: nil,
+            reentry: .everyTime,
+            publishedAt: publishedAt,
+            trigger: .event(EventTriggerConfig(eventName: "app_opened", condition: nil)),
+            flowId: "flow-test",
+            goal: nil,
+            exitPolicy: nil,
+            conversionAnchor: nil,
+            campaignType: nil
+        )
     }
     
     func withId(_ id: String) -> TestJourneyBuilder {
@@ -40,7 +59,7 @@ class TestJourneyBuilder {
     }
     
     func withCampaignId(_ campaignId: String) -> TestJourneyBuilder {
-        self.campaign = TestCampaignBuilder(id: campaignId).build()
+        self.campaign = TestJourneyBuilder.makeCampaign(id: campaignId)
         return self
     }
     
@@ -55,7 +74,7 @@ class TestJourneyBuilder {
     }
     
     func withCurrentNodeId(_ nodeId: String?) -> TestJourneyBuilder {
-        self.currentNodeId = nodeId
+        self.currentScreenId = nodeId
         return self
     }
     
@@ -85,6 +104,14 @@ class TestJourneyBuilder {
     }
     
     func build() -> Journey {
-        return Journey(campaign: campaign, distinctId: distinctId)
+        let journey = Journey(id: id, campaign: campaign, distinctId: distinctId)
+        journey.status = status
+        journey.flowState.currentScreenId = currentScreenId
+        journey.context = context
+        journey.resumeAt = resumeAt
+        journey.completedAt = completedAt
+        journey.exitReason = exitReason
+        journey.updatedAt = Date()
+        return journey
     }
 }

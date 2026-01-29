@@ -41,7 +41,7 @@ final class UseFeatureTests: AsyncSpec {
                     var capturedRequest: URLRequest?
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -88,7 +88,7 @@ final class UseFeatureTests: AsyncSpec {
                     let entityId = "project-456"
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -127,7 +127,7 @@ final class UseFeatureTests: AsyncSpec {
                     let customAmount = 5.0
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -167,7 +167,7 @@ final class UseFeatureTests: AsyncSpec {
                     let expectedRemaining = 90.0
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             let response = ResponseBuilders.buildFeatureUsedResponse(
                                 current: expectedCurrent,
@@ -202,7 +202,7 @@ final class UseFeatureTests: AsyncSpec {
 
                 it("should handle network errors") {
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { _ in throw URLError(.networkConnectionLost) }
                     )
 
@@ -228,7 +228,7 @@ final class UseFeatureTests: AsyncSpec {
                     )
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             let data = try ResponseBuilders.toJSON(errorResponse)
                             let response = HTTPURLResponse(
@@ -339,7 +339,7 @@ final class UseFeatureTests: AsyncSpec {
                     var capturedRequest: URLRequest?
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -390,7 +390,7 @@ final class UseFeatureTests: AsyncSpec {
                     ]
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -440,7 +440,7 @@ final class UseFeatureTests: AsyncSpec {
                     var capturedRequest: URLRequest?
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -477,7 +477,7 @@ final class UseFeatureTests: AsyncSpec {
                     let fractionalAmount = 0.5
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -514,7 +514,7 @@ final class UseFeatureTests: AsyncSpec {
                     let largeAmount = 999999.99
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -551,7 +551,7 @@ final class UseFeatureTests: AsyncSpec {
                     let specialFeatureId = "feature-with_special.chars:v2"
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -589,7 +589,7 @@ final class UseFeatureTests: AsyncSpec {
                     let specialEntityId = "org:123/project:456"
 
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             capturedRequest = request
 
@@ -630,7 +630,7 @@ final class UseFeatureTests: AsyncSpec {
 
                 it("should recognize 'ok' as success") {
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             let response = ResponseBuilders.buildFeatureUsedResponse(status: "ok")
                             let data = try ResponseBuilders.toJSON(response)
@@ -657,7 +657,7 @@ final class UseFeatureTests: AsyncSpec {
 
                 it("should recognize 'success' as success") {
                     StubURLProtocol.register(
-                        matcher: RequestMatchers.post("/api/i/event"),
+                        matcher: RequestMatchers.post("/event"),
                         handler: { request in
                             let response = ResponseBuilders.buildFeatureUsedResponse(status: "success")
                             let data = try ResponseBuilders.toJSON(response)

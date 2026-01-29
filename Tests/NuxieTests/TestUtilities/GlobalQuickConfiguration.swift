@@ -15,6 +15,10 @@ final class GlobalQuickConfiguration: QuickConfiguration {
           await NuxieSDK.shared.shutdown()
         }
       }
+
+      if NuxieSDK.shared.configuration == nil {
+        Container.shared.sdkConfiguration.register { NuxieConfiguration(apiKey: "test-api-key") }
+      }
     }
 
     configuration.afterEach {

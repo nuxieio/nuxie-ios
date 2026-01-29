@@ -83,28 +83,18 @@ Instead of hardcoding when/where to show paywalls, MoodLog uses Nuxie's **flow s
 
 ```swift
 // User taps "Go Pro" button
-NuxieSDK.shared.track("upgrade_tapped", properties: [
+NuxieSDK.shared.trigger("upgrade_tapped", properties: [
     "source": "today_screen",
     "current_streak": streak
-]) { result in
-    switch result {
-    case .flow(let completion):
-        // Nuxie showed a flow! Handle the outcome
-        switch completion.outcome {
-        case .purchased:
-            unlockProFeatures()
-        case .dismissed:
-            // User closed without buying
-            break
-        // ... other outcomes
-        }
-
-    case .noInteraction:
-        // No flow configured in dashboard - that's ok
+]) { update in
+    switch update {
+    case .entitlement(.allowed):
+        unlockProFeatures()
+    case .decision(.noMatch):
         break
-
-    case .failed(let error):
-        // Handle error
+    case .error(let error):
+        print("Trigger failed: \(error.message)")
+    default:
         break
     }
 }
@@ -302,7 +292,7 @@ Every file includes:
 This example demonstrates:
 
 1. **SDK Setup**: One-time configuration in AppDelegate
-2. **Event Tracking**: Strategic placement of track() calls
+2. **Event Tracking**: Strategic placement of trigger() calls
 3. **User Identification**: Persistent UUID for user continuity
 4. **Purchase Integration**: Proper delegate pattern implementation
 5. **Feature Gating**: Simple entitlement checks before Pro features

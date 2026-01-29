@@ -17,22 +17,33 @@ class MockFlowViewController: FlowViewController {
     
     /// Create a mock flow view controller with test data
     init(mockFlowId: String = "test-flow") {
-        let remoteFlow = RemoteFlow(
+        let description = RemoteFlow(
             id: mockFlowId,
-            name: "Test Flow",
-            url: "https://example.com/flow/\(mockFlowId)",
-            products: [],
-            manifest: BuildManifest(
-                totalFiles: 1,
-                totalSize: 100,
-                contentHash: "test-hash",
-                files: [
-                    BuildFile(path: "index.html", size: 100, contentType: "text/html")
-                ]
-            )
+            bundle: FlowBundleRef(
+                url: "https://example.com/flow/\(mockFlowId)",
+                manifest: BuildManifest(
+                    totalFiles: 1,
+                    totalSize: 100,
+                    contentHash: "test-hash",
+                    files: [
+                        BuildFile(path: "index.html", size: 100, contentType: "text/html")
+                    ]
+                )
+            ),
+            screens: [
+                RemoteFlowScreen(
+                    id: "screen-1",
+                    defaultViewModelId: nil,
+                    defaultInstanceId: nil
+                )
+            ],
+            interactions: [:],
+            viewModels: [],
+            viewModelInstances: nil,
+            converters: nil,
         )
-        
-        let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+        let flow = Flow(remoteFlow: description, products: [])
         // Create a mock FlowArchiver for testing
         let mockArchiver = FlowArchiver()
         super.init(flow: flow, archiveService: mockArchiver)

@@ -27,7 +27,7 @@ public struct ProfileResponse: Codable {
     public let experiments: [String: ExperimentAssignment]?
     /// Customer's feature access (from active subscriptions)
     public let features: [Feature]?
-    /// Active journeys for cross-device resume (server-assisted workflows)
+    /// Active journeys for cross-device resume (server-assisted journeys)
     public let journeys: [ActiveJourney]?
 
     public init(
@@ -105,8 +105,9 @@ public struct Feature: Codable, Sendable {
 /// Pre-computed experiment variant assignment from server
 public struct ExperimentAssignment: Codable {
     public let experimentId: String
-    public let variantId: String
+    public let variantId: String? // nil when draft/paused
     public let flowId: String? // nil = holdout (control group that shows nothing)
+    public let status: String
 }
 
 // MARK: - Campaign Models
@@ -164,63 +165,89 @@ public enum CampaignTrigger: Codable {
     }
 }
 
+// MARK: - Reentry Policy
+
+public struct Window: Codable {
+    public let amount: Int
+    public let unit: WindowUnit
+}
+
+public enum WindowUnit: String, Codable {
+    case minute
+    case hour
+    case day
+    case week
+}
+
+public enum CampaignReentry: Codable {
+    case oneTime
+    case everyTime
+    case oncePerWindow(Window)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case window
+    }
+
+    private enum ReentryType: String, Codable {
+        case oneTime = "one_time"
+        case everyTime = "every_time"
+        case oncePerWindow = "once_per_window"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(ReentryType.self, forKey: .type)
+
+        switch type {
+        case .oneTime:
+            self = .oneTime
+        case .everyTime:
+            self = .everyTime
+        case .oncePerWindow:
+            let window = try container.decode(Window.self, forKey: .window)
+            self = .oncePerWindow(window)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .oneTime:
+            try container.encode(ReentryType.oneTime, forKey: .type)
+        case .everyTime:
+            try container.encode(ReentryType.everyTime, forKey: .type)
+        case .oncePerWindow(let window):
+            try container.encode(ReentryType.oncePerWindow, forKey: .type)
+            try container.encode(window, forKey: .window)
+        }
+    }
+}
+
 public struct Campaign: Codable {
     public let id: String
     public let name: String
     public let versionId: String
     public let versionNumber: Int
-    public let frequencyPolicy: String
-    public let frequencyInterval: TimeInterval?
-    public let messageLimit: Int?
+    public let versionName: String?
+    public let reentry: CampaignReentry
     public let publishedAt: String
     
     // Trigger configuration (discriminated union)
     public let trigger: CampaignTrigger
-    public let entryNodeId: String? // First node to execute after trigger
-    
-    // Workflow contains only action nodes
-    public let workflow: Workflow
+    public let flowId: String?
     
     // Goal and exit configuration (optional for backward compatibility)
     public let goal: GoalConfig?
     public let exitPolicy: ExitPolicy?
-    public let conversionAnchor: String? // Default: "workflow_entry"
+    public let conversionAnchor: String? // Default: "journey_start"
     public let campaignType: String? // Used for default conversion windows
 }
-
-public struct Workflow: Codable {
-    public let nodes: [AnyWorkflowNode]
-}
-
-
 
 public struct Segment: Codable {
     public let id: String
     public let name: String
     public let condition: IREnvelope  // Compiled IR expression from backend
-}
-
-// RemoteFlow represents immutable flow data from the server
-public struct RemoteFlow: Codable {
-    public let id: String
-    public let name: String
-    public let url: String
-    public let products: [RemoteFlowProduct]
-    public let manifest: BuildManifest
-}
-
-public struct Frame: Codable {
-    public let id: String
-    public let name: String
-    public let url: String
-    public let products: [RemoteFlowProduct]
-    public let manifest: BuildManifest?
-}
-
-public struct RemoteFlowProduct: Codable, Equatable {
-    public let id: String
-    public let extId: String
-    public let name: String
 }
 
 public struct BuildManifest: Codable, Equatable {

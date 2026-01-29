@@ -5,14 +5,21 @@ import FactoryKit
 /// Protocol defining the FlowService interface
 protocol FlowServiceProtocol: AnyObject {
     /// Prefetch flows - triggers fetch of flow data and preloads web archives
-    func prefetchFlows(_ flows: [RemoteFlow])
+    func prefetchFlows(_ remoteFlows: [RemoteFlow])
     
     /// Remove flows from cache
     func removeFlows(_ flowIds: [String]) async
+
+    /// Fetch flow data with products - does not create UI
+    func fetchFlow(id: String) async throws -> Flow
     
     /// Get a view controller for a flow by ID
     @MainActor
     func viewController(for flowId: String) async throws -> FlowViewController
+
+    /// Get a view controller for a flow by ID with a runtime delegate
+    @MainActor
+    func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController
     
     /// Clear all cached data (flows and WebArchives)
     func clearCache() async
@@ -46,15 +53,16 @@ final class FlowService: FlowServiceProtocol {
     // MARK: - Flow Lifecycle Management (called by ProfileService)
     
     /// Prefetch flows - triggers fetch of flow data and preloads web archives
-    func prefetchFlows(_ flows: [RemoteFlow]) {
-        LogInfo("Prefetching \(flows.count) flows")
+    func prefetchFlows(_ remoteFlows: [RemoteFlow]) {
+        LogInfo("Prefetching \(remoteFlows.count) flows")
         
         Task {
             // Preload all flows with products into cache (concurrent)
-            await flowStore.preloadFlows(flows)
+            await flowStore.preloadFlows(remoteFlows)
             
             // Preload web archives for all flows
-            for flow in flows {
+            for remoteFlow in remoteFlows {
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
                 await flowArchiver.preloadArchive(for: flow)
             }
         }
@@ -124,6 +132,13 @@ final class FlowService: FlowServiceProtocol {
         
         // Then get or create the view controller
         return viewController(for: flow)
+    }
+
+    @MainActor
+    func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+        let controller = try await viewController(for: flowId)
+        controller.runtimeDelegate = runtimeDelegate
+        return controller
     }
     
     // MARK: - Cache Management

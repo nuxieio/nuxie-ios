@@ -4,12 +4,11 @@ import UIKit
 
 /// Reason for resuming a journey
 public enum ResumeReason {
-  case start              // Journey just started
-  case timer              // Timer/schedule-based resume
-  case event(NuxieEvent)  // Event-driven resume
-  case segmentChange      // Segment change-driven resume
-  
-  /// Whether this is a reactive resume (event or segment change)
+  case start
+  case timer
+  case event(NuxieEvent)
+  case segmentChange
+
   var isReactive: Bool {
     switch self {
     case .event, .segmentChange:
@@ -22,30 +21,23 @@ public enum ResumeReason {
 
 /// Protocol for journey management
 public protocol JourneyServiceProtocol: AnyObject {
-  /// Start a new journey for a campaign
   @discardableResult
   func startJourney(for campaign: Campaign, distinctId: String, originEventId: String?) async -> Journey?
 
-  /// Resume a paused journey
   func resumeJourney(_ journey: Journey) async
 
-  /// Resume journeys from server state (for cross-device resume)
-  /// Called after profile fetch to resume any journeys active on other devices
   func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async
 
-  /// Handle an event (may trigger or resume journeys)
   func handleEvent(_ event: NuxieEvent) async
 
-  /// Handle segment change
+  func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult]
+
   func handleSegmentChange(distinctId: String, segments: Set<String>) async
 
-  /// Get all active journeys for a user
   func getActiveJourneys(for distinctId: String) async -> [Journey]
 
-  /// Check and resume expired timers (called on app foreground)
   func checkExpiredTimers() async
 
-  /// Initialize service and restore journeys
   func initialize() async
 
   func onAppWillEnterForeground() async
@@ -54,52 +46,45 @@ public protocol JourneyServiceProtocol: AnyObject {
 
   func onAppDidEnterBackground() async
 
-  /// Shutdown service
   func shutdown() async
 
-  /// Handle user change (identity transition)
   func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async
 }
 
-/// High-level orchestrator for the journey system
 public actor JourneyService: JourneyServiceProtocol {
 
   // MARK: - Dependencies
 
   private let journeyStore: JourneyStoreProtocol
-  private let journeyExecutor: JourneyExecutorProtocol
+
+  @Injected(\.flowService) private var flowService: FlowServiceProtocol
+  @Injected(\.flowPresentationService) private var flowPresentationService: FlowPresentationServiceProtocol
   @Injected(\.profileService) private var profileService: ProfileServiceProtocol
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
   @Injected(\.featureService) private var featureService: FeatureServiceProtocol
   @Injected(\.eventService) private var eventService: EventServiceProtocol
+  @Injected(\.triggerBroker) private var triggerBroker: TriggerBrokerProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
   @Injected(\.sleepProvider) private var sleepProvider: SleepProviderProtocol
   @Injected(\.goalEvaluator) private var goalEvaluator: GoalEvaluatorProtocol
   @Injected(\.irRuntime) private var irRuntime: IRRuntime
 
-  // MARK: - Properties
+  // MARK: - State
 
-  /// In-memory registry of all live journeys (the single source of truth for running/paused)
   private var inMemoryJourneysById: [String: Journey] = [:]
-
-  /// Active tasks for journey resumption
+  private var flowRunners: [String: FlowJourneyRunner] = [:]
+  private var runtimeDelegates: [String: FlowRuntimeDelegateAdapter] = [:]
   private var activeTasks: [String: Task<Void, Never>] = [:]
-
-  /// Task for monitoring segment changes
   private var segmentMonitoringTask: Task<Void, Never>?
 
   // MARK: - Initialization
 
   internal init(
     journeyStore: JourneyStoreProtocol? = nil,
-    journeyExecutor: JourneyExecutorProtocol? = nil,
     customStoragePath: URL? = nil
   ) {
-    // Use injected dependencies or create new instances
     self.journeyStore = journeyStore ?? JourneyStore(customStoragePath: customStoragePath)
-    self.journeyExecutor = journeyExecutor ?? JourneyExecutor()
-    
     LogInfo("JourneyService initialized")
   }
 
@@ -107,812 +92,654 @@ public actor JourneyService: JourneyServiceProtocol {
     segmentMonitoringTask?.cancel()
   }
 
-  /// Initialize service and restore journeys
+  // MARK: - Lifecycle
+
   public func initialize() async {
     LogInfo("Initializing JourneyService...")
 
-    // Hydrate live registry from persisted journeys
     let persisted = journeyStore.loadActiveJourneys()
     LogInfo("Restored \(persisted.count) active journeys")
 
     for journey in persisted where journey.status.isLive {
       inMemoryJourneysById[journey.id] = journey
 
-      // Schedule branch-level resumes
-      for branch in journey.branches where branch.status == .paused {
-        if let resumeAt = branch.resumeAt {
-          scheduleBranchResume(journey: journey, branchId: branch.id, at: resumeAt)
-        }
-      }
-
-      // Legacy fallback: journey-level resume
-      if journey.status == .paused, let resumeAt = journey.resumeAt {
-        scheduleResume(journey, at: resumeAt)
+      if let pending = journey.flowState.pendingAction, let resumeAt = pending.resumeAt {
+        scheduleResume(journeyId: journey.id, at: resumeAt)
       }
     }
 
-    // Check for expired timers
     await checkExpiredTimers()
-
-    // Register for segment changes
     registerForSegmentChanges()
   }
 
   public func onAppWillEnterForeground() async {
-    // 1) Resume any timers that already matured
     await checkExpiredTimers()
 
-    // 2) Re-arm not-yet-matured branch timers
-    let candidates = getAllLiveJourneys()
-    var scheduled = 0
     let now = dateProvider.now()
-
-    for journey in candidates {
-      // Check each paused branch
-      for branch in journey.branches where branch.status == .paused {
-        if let resumeAt = branch.resumeAt, resumeAt > now {
-          scheduleBranchResume(journey: journey, branchId: branch.id, at: resumeAt)
-          scheduled += 1
-        }
-      }
-      // Legacy fallback: journey-level timer
-      if journey.status == .paused, let at = journey.resumeAt, at > now {
-        scheduleResume(journey, at: at)
-        scheduled += 1
+    for journey in inMemoryJourneysById.values where journey.status.isLive {
+      if let pending = journey.flowState.pendingAction,
+         let resumeAt = pending.resumeAt,
+         resumeAt > now {
+        scheduleResume(journeyId: journey.id, at: resumeAt)
       }
     }
-    if scheduled > 0 { LogInfo("Re-armed \(scheduled) journey/branch timers") }
   }
 
   public func onAppBecameActive() async {
-    // No-op for now; the normal execution path will present flows as nodes run.
-    // But this hook gives us a place to nudge journeys that were waiting on "app active", if we add that later.
+    await flowPresentationService.onAppBecameActive()
   }
 
   public func onAppDidEnterBackground() async {
-    await self.cancelAllTasks()
-    // Persist any paused journeys (already done). Optionally also persist active journeys that are at a node boundary.
-    let journeys = await self.getAllLiveJourneys()
-    for j in journeys where j.status == .paused {
-      await self.persistJourney(j)
+    cancelAllTasks()
+    await flowPresentationService.onAppDidEnterBackground()
+
+    for journey in inMemoryJourneysById.values where journey.status.isLive {
+      persistJourney(journey)
     }
+
     LogInfo("JourneyService background snapshot complete")
   }
 
-  /// Shutdown service
   public func shutdown() async {
     segmentMonitoringTask?.cancel()
     segmentMonitoringTask = nil
     cancelAllTasks()
   }
-  
-  /// Handle user change (identity transition)
+
   public func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {
     LogInfo("JourneyService handling user change from \(NuxieLogger.shared.logDistinctID(oldDistinctId)) to \(NuxieLogger.shared.logDistinctID(newDistinctId))")
-    
-    // Cancel all journeys for the old user
-    let oldUserJourneys = await getActiveJourneys(for: oldDistinctId)
-    for journey in oldUserJourneys {
-      LogDebug("Cancelling journey \(journey.id) for old user")
+
+    let oldJourneys = await getActiveJourneys(for: oldDistinctId)
+    for journey in oldJourneys {
       cancelJourney(journey)
     }
-    
-    // Clear in-memory registry for old user
-    let keysToRemove = inMemoryJourneysById.keys.filter { key in
-      inMemoryJourneysById[key]?.distinctId == oldDistinctId
-    }
-    for key in keysToRemove {
-      inMemoryJourneysById.removeValue(forKey: key)
-    }
-    
-    // Load persisted journeys for new user
+
+    inMemoryJourneysById = inMemoryJourneysById.filter { $0.value.distinctId != oldDistinctId }
+
     let persisted = journeyStore.loadActiveJourneys()
       .filter { $0.distinctId == newDistinctId && $0.status.isLive }
-    
-    LogInfo("Loaded \(persisted.count) active journeys for new user")
-    
+
     for journey in persisted {
       inMemoryJourneysById[journey.id] = journey
-      
-      // Schedule resume if needed
-      if journey.status == .paused, let resumeAt = journey.resumeAt {
-        await scheduleResume(journey, at: resumeAt)
+      if let pending = journey.flowState.pendingAction, let resumeAt = pending.resumeAt {
+        scheduleResume(journeyId: journey.id, at: resumeAt)
       }
     }
-    
-    // Check for expired timers for the new user
+
     await checkExpiredTimers()
   }
 
-  // MARK: - Public Methods
+  // MARK: - Public API
 
-  /// Start a new journey for a campaign
-  public func startJourney(for campaign: Campaign, distinctId: String, originEventId: String? = nil) async -> Journey? {
-    LogDebug("[JourneyService] startJourney called for campaign: \(campaign.id), user: \(distinctId)")
-    // Check if user can start this journey
-    guard canStartJourney(campaign: campaign, distinctId: distinctId) else {
+  public func startJourney(
+    for campaign: Campaign,
+    distinctId: String,
+    originEventId: String? = nil
+  ) async -> Journey? {
+    guard suppressionReason(campaign: campaign, distinctId: distinctId) == nil else {
       LogDebug("User \(distinctId) cannot start journey for campaign \(campaign.id)")
-      LogDebug("[JourneyService] User cannot start journey (frequency policy check failed)")
       return nil
     }
 
-    LogInfo("Starting journey for campaign \(campaign.name) (\(campaign.id)), user \(distinctId)")
-    LogDebug("[JourneyService] Creating new journey...")
+    return await startJourneyInternal(
+      for: campaign,
+      distinctId: distinctId,
+      originEventId: originEventId
+    )
+  }
 
-    // Create new journey
+  private func startJourneyInternal(
+    for campaign: Campaign,
+    distinctId: String,
+    originEventId: String? = nil
+  ) async -> Journey? {
+    guard let flowId = campaign.flowId else {
+      LogError("Campaign \(campaign.id) missing flowId, cannot start journey")
+      return nil
+    }
+
     let journey = Journey(campaign: campaign, distinctId: distinctId)
     journey.status = .active
-    if let originEventId = originEventId {
+    if let originEventId {
       journey.setContext("_origin_event_id", value: originEventId)
     }
 
-    // Put it in the identity map *before* execution so callers can find it immediately
     inMemoryJourneysById[journey.id] = journey
-    LogDebug(
-      "[JourneyService] Stored journey \(journey.id) in registry. Total journeys: \(inMemoryJourneysById.count)"
-    )
 
-    // Send $journey_start to server for cross-device tracking (fire-and-forget)
+    let flow = try? await flowService.fetchFlow(id: flowId)
+    let entryScreenId = flow?.remoteFlow.screens.first?.id
+
     eventService.track(
       "$journey_start",
       properties: [
         "session_id": journey.id,
         "campaign_id": campaign.id,
         "campaign_version_id": campaign.versionId,
-        "entry_node_id": campaign.entryNodeId as Any,
+        "entry_node_id": entryScreenId as Any,
       ],
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
-    // Track local journey started event for telemetry
     eventService.track(
       JourneyEvents.journeyStarted,
       properties: JourneyEvents.journeyStartedProperties(
         journey: journey,
         campaign: campaign,
-        triggerEvent: nil
+        triggerEvent: nil,
+        entryScreenId: entryScreenId
       ),
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
-    // Execute journey
-    await executeJourney(journey, campaign: campaign, reason: .start)
+    guard await ensureRunner(for: journey, campaign: campaign) != nil else {
+      completeJourney(journey, reason: .error)
+      return journey
+    }
 
     return journey
   }
 
-  /// Resume a paused journey
   public func resumeJourney(_ journey: Journey) async {
-    guard journey.status == .paused else {
-      LogWarning("Cannot resume journey \(journey.id) - not paused")
-      return
-    }
+    guard journey.status == .paused || journey.status == .active else { return }
 
-    LogInfo("Resuming journey \(journey.id)")
-
-    // Get campaign for the journey's user
     guard let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) else {
-      LogError("Campaign not found for journey \(journey.id)")
       cancelJourney(journey)
       return
     }
 
-    // Work on the canonical instance from registry
-    let canonical = inMemoryJourneysById[journey.id] ?? journey
+    guard let runner = await ensureRunner(for: journey, campaign: campaign) else {
+      completeJourney(journey, reason: .error)
+      return
+    }
 
-    canonical.resume()
-    inMemoryJourneysById[canonical.id] = canonical
+    journey.resume()
+    inMemoryJourneysById[journey.id] = journey
 
-    // Track journey resumed event
+    let outcome = await runner.resumePendingAction(reason: .timer, event: nil)
+    handleOutcome(outcome, journey: journey)
+
     eventService.track(
       JourneyEvents.journeyResumed,
       properties: JourneyEvents.journeyResumedProperties(
-        journey: canonical,
-        nodeId: canonical.currentNodeId,
+        journey: journey,
+        screenId: journey.flowState.currentScreenId,
         resumeReason: "timer"
       ),
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
-
-    // Continue execution (timer-based resume)
-    await executeJourney(canonical, campaign: campaign, reason: .timer)
   }
 
-  /// Resume journeys from server state (for cross-device resume)
-  /// Called after profile fetch to resume any journeys active on other devices
   public func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {
-    guard !journeys.isEmpty else { return }
-
-    let distinctId = identityService.getDistinctId()
-    LogInfo("[JourneyService] Resuming \(journeys.count) journeys from server state")
-
     for active in journeys {
-      // Skip if we already have this journey locally (by ID)
-      if inMemoryJourneysById[active.sessionId] != nil {
-        LogDebug("[JourneyService] Journey \(active.sessionId) already exists locally, skipping")
+      if let existing = inMemoryJourneysById[active.sessionId] {
+        existing.setContext("_server_resume", value: true)
         continue
       }
 
-      // Find the campaign for this journey
       guard let campaign = campaigns.first(where: { $0.id == active.campaignId }) else {
-        LogWarning("[JourneyService] Campaign \(active.campaignId) not found for server journey \(active.sessionId)")
+        LogWarning("Campaign \(active.campaignId) not found for server journey \(active.sessionId)")
         continue
       }
 
-      // Create journey with the server's session ID as the journey ID
-      let journey = Journey(id: active.sessionId, campaign: campaign, distinctId: distinctId)
-      journey.currentNodeId = active.currentNodeId
-      journey.status = .active
+      let journey = Journey(id: active.sessionId, campaign: campaign, distinctId: identityService.getDistinctId())
+      journey.status = .paused
+      journey.flowState.currentScreenId = active.currentNodeId
+      journey.context = active.context
 
-      // Restore context from server
-      for (key, value) in active.context {
-        journey.context[key] = value
-      }
-
-      // Register in memory
       inMemoryJourneysById[journey.id] = journey
-      LogInfo("[JourneyService] Restored journey from server: id=\(journey.id), node=\(active.currentNodeId)")
 
-      // Track cross-device resume event
-      eventService.track(
-        JourneyEvents.journeyResumed,
-        properties: JourneyEvents.journeyResumedProperties(
-          journey: journey,
-          nodeId: active.currentNodeId,
-          resumeReason: "cross_device"
-        ),
-        userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
-      )
-
-      // Continue execution from the current node
-      await executeJourney(journey, campaign: campaign, reason: .start)
+      if let pending = journey.flowState.pendingAction, let resumeAt = pending.resumeAt {
+        scheduleResume(journeyId: journey.id, at: resumeAt)
+      }
     }
   }
 
-  /// Handle an event (may trigger or resume journeys)
   public func handleEvent(_ event: NuxieEvent) async {
-    LogDebug("JourneyService handling event: \(event.name)")
-    LogDebug("[JourneyService] handleEvent called: \(event.name) for user: \(event.distinctId)")
+    _ = await handleEventForTrigger(event)
+  }
 
-    // Fetch campaigns for THIS user
-    guard let campaigns = await getAllCampaigns(for: event.distinctId) else {
-      LogDebug("[JourneyService] No campaigns available")
-      return
-    }
-    LogDebug("[JourneyService] Found \(campaigns.count) campaigns")
+  public func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+    guard let campaigns = await getAllCampaigns(for: event.distinctId) else { return [] }
 
-    // Check each campaign for triggers
+    var results: [JourneyTriggerResult] = []
+
     for campaign in campaigns {
-      LogDebug("[JourneyService] Checking campaign: \(campaign.id)")
-      if await shouldTriggerFromEvent(campaign: campaign, event: event) {
-        LogDebug("[JourneyService] Event triggered campaign \(campaign.id), starting journey")
-        _ = await startJourney(for: campaign, distinctId: event.distinctId, originEventId: event.id)
-      } else {
-        LogDebug("[JourneyService] Event did not trigger campaign \(campaign.id)")
-      }
-    }
+      guard await shouldTriggerFromEvent(campaign: campaign, event: event) else { continue }
 
-    // Evaluate/latch goals for active journeys (event-time semantics for event goals)
-    let activeJourneys = await getActiveJourneys(for: event.distinctId)
-    for journey in activeJourneys {
-      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else {
+      if let reason = suppressionReason(campaign: campaign, distinctId: event.distinctId) {
+        results.append(.suppressed(reason))
         continue
       }
 
-      // Fast path for event-goal journeys: latch based on the *event's timestamp* being within the window
-      if let goal = journey.goalSnapshot,
-        goal.kind == .event,
-        let goalEvent = goal.eventName,
-        goalEvent == event.name
-      {
-        let anchor = journey.conversionAnchorAt
-        var isInWindow = event.timestamp >= anchor
-        if isInWindow, journey.conversionWindow > 0 {
-          let windowEnd = anchor.addingTimeInterval(journey.conversionWindow)
-          isInWindow = (event.timestamp <= windowEnd)
-        }
-
-        if isInWindow {
-          // (Phase 2: apply goal.eventFilter via IR before latching, if present)
-          // Latch conversion at the *event* time; keep the earliest conversion
-          if let existing = journey.convertedAt {
-            if event.timestamp < existing {
-              journey.convertedAt = event.timestamp
-              journey.updatedAt = dateProvider.now()
-              persistJourney(journey)  // Persist immediately after updating convertedAt
-            }
-          } else {
-            journey.convertedAt = event.timestamp
-            journey.updatedAt = dateProvider.now()
-            persistJourney(journey)  // Persist immediately after setting convertedAt
-          }
-
-          LogInfo(
-            "Latched conversion for journey \(journey.id) at \(event.timestamp) via event-time window"
-          )
-
-          // Evaluate goal & exit if the policy allows
-          let result = await goalEvaluator.isGoalMet(journey: journey, campaign: campaign)
-          if result.met {
-            // Respect exit policy (use snapshot to avoid mid-journey changes)
-            let mode = journey.exitPolicySnapshot?.mode ?? .never
-            switch mode {
-            case .onGoal, .onGoalOrStop:
-              LogInfo(
-                "Journey \(journey.id) exiting due to goalMet (event-time) for campaign \(campaign.id)"
-              )
-              completeJourney(journey, reason: .goalMet)
-              continue
-            case .never, .onStopMatching:
-              // Do not exit here; keep running. convertedAt remains set for reporting or later checks.
-              break
-            }
-          }
-        } else {
-          LogDebug(
-            "Event \(event.name) for journey \(journey.id) not within event-time window (anchor: \(anchor), window: \(journey.conversionWindow))"
-          )
-        }
+      if let journey = await startJourneyInternal(
+        for: campaign,
+        distinctId: event.distinctId,
+        originEventId: event.id
+      ) {
+        results.append(.started(journey))
       } else {
-        // Non-event goals still follow evaluation-time semantics; keep your existing evaluation flow
-        // Optionally evaluate goals generically when any event arrives
+        results.append(.suppressed(.unknown("start_failed")))
       }
+    }
 
-      // Generic evaluation for any goal types (kept from your original flow)
+    let journeys = await getActiveJourneys(for: event.distinctId)
+    for journey in journeys {
+      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
+
       await evaluateGoalIfNeeded(journey, campaign: campaign)
-
-      // Check if journey should exit after evaluation
       if let reason = await exitDecision(journey, campaign) {
-        LogInfo("Journey \(journey.id) exiting with reason \(reason) after event \(event.name)")
         completeJourney(journey, reason: reason)
-      }
-    }
-
-    // Check if any waiting journeys should resume
-    await tryReactiveResume(for: event.distinctId, event: event)
-  }
-
-  /// Handle segment change
-  public func handleSegmentChange(distinctId: String, segments: Set<String>) async {
-    LogDebug("JourneyService handling segment change for user \(distinctId)")
-
-    // Get all campaigns
-    guard let campaigns = await getAllCampaigns() else {
-      return
-    }
-
-    // Evaluate segment-triggered campaigns for new journeys
-    for campaign in campaigns {
-      // Only segment-triggered campaigns
-      guard case .segment(let config) = campaign.trigger else {
         continue
       }
 
-      // Evaluate segment condition using IR interpreter
-      let qualifies = await evalConditionIR(config.condition)
-      if qualifies {
-        _ = await startJourney(for: campaign, distinctId: distinctId)
-      }
-    }
-
-    // Check active journeys for stop-matching conditions
-    let activeJourneys = await getActiveJourneys(for: distinctId)
-    for journey in activeJourneys {
-      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else {
-        continue
-      }
-
-      // Check if journey should exit (handles both stop-matching and goal-based exits)
-      if let reason = await exitDecision(journey, campaign) {
-        LogInfo("Journey \(journey.id) exiting with reason \(reason) after segment change")
-        completeJourney(journey, reason: reason)
-      }
-
-      // Also check for segment-based goals
-      if let goal = journey.goalSnapshot,
-        goal.kind == .segmentEnter || goal.kind == .segmentLeave
-      {
-        await evaluateGoalIfNeeded(journey, campaign: campaign)
-
-        // Check if journey should exit after goal evaluation
-        if let reason = await exitDecision(journey, campaign) {
-          LogInfo("Journey \(journey.id) exiting with reason \(reason) after segment change")
-          completeJourney(journey, reason: reason)
+      if let pending = journey.flowState.pendingAction, pending.kind == .waitUntil {
+        if let runner = flowRunners[journey.id] {
+          let outcome = await runner.resumePendingAction(reason: .event(event), event: event)
+          handleOutcome(outcome, journey: journey)
         }
+        continue
+      }
+
+      if let runner = flowRunners[journey.id] {
+        let outcome = await runner.dispatchEventTrigger(event)
+        handleOutcome(outcome, journey: journey)
       }
     }
 
-    // Check any waiting journeys that should resume
-    await tryReactiveResume(for: distinctId, event: nil)
+    return results
   }
 
-  /// Get all active journeys for a user (reads from memory, not disk)
+  public func handleSegmentChange(distinctId: String, segments: Set<String>) async {
+    guard let campaigns = await getAllCampaigns(for: distinctId) else { return }
+
+    for campaign in campaigns {
+      guard case .segment(let config) = campaign.trigger else { continue }
+      let matches = await evalConditionIR(config.condition)
+      if matches {
+        _ = await startJourney(for: campaign, distinctId: distinctId, originEventId: nil)
+      }
+    }
+
+    let journeys = await getActiveJourneys(for: distinctId)
+    for journey in journeys {
+      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
+      await evaluateGoalIfNeeded(journey, campaign: campaign)
+      if let reason = await exitDecision(journey, campaign) {
+        completeJourney(journey, reason: reason)
+      }
+    }
+  }
+
   public func getActiveJourneys(for distinctId: String) async -> [Journey] {
-    LogDebug("[JourneyService] getActiveJourneys called for \(distinctId)")
-    LogDebug("[JourneyService] Total journeys in registry: \(inMemoryJourneysById.count)")
-    let allJourneys = Array(inMemoryJourneysById.values)
-    LogDebug("[JourneyService] All journeys: \(allJourneys.map { "\($0.id): \($0.status)" })")
-    let userJourneys = allJourneys.filter { $0.distinctId == distinctId }
-    LogDebug("[JourneyService] User journeys: \(userJourneys.map { "\($0.id): \($0.status)" })")
-    let liveJourneys = userJourneys.filter { $0.status.isLive }
-    LogDebug("[JourneyService] Live journeys: \(liveJourneys.map { "\($0.id): \($0.status)" })")
-    return liveJourneys
+    return inMemoryJourneysById.values.filter { $0.distinctId == distinctId && $0.status.isLive }
   }
 
-  /// Get all live journeys (internal helper)
-  private func getAllLiveJourneys() -> [Journey] {
-    return Array(inMemoryJourneysById.values.filter { $0.status.isLive })
-  }
-
-  /// Check and resume expired timers (called on app foreground)
   public func checkExpiredTimers() async {
-    LogDebug("Checking for expired journey/branch timers...")
-
-    // Iterate memory, not disk
-    let candidates = Array(inMemoryJourneysById.values.filter { $0.status.isLive })
-    var resumeCount = 0
     let now = dateProvider.now()
 
-    for journey in candidates {
-      // Check for branches with expired timers
-      let expiredBranches = journey.branchesReadyToResume(at: now)
-      if !expiredBranches.isEmpty {
-        for branch in expiredBranches {
-          await resumeBranch(journey: journey, branchId: branch.id)
-          resumeCount += 1
-        }
-      } else if journey.status == .paused && journey.shouldResume(at: now) {
-        // Legacy fallback: journey-level resume
+    for journey in inMemoryJourneysById.values where journey.status.isLive {
+      if let pending = journey.flowState.pendingAction, let resumeAt = pending.resumeAt, resumeAt <= now {
         await resumeJourney(journey)
-        resumeCount += 1
+        continue
       }
-    }
-
-    if resumeCount > 0 {
-      LogInfo("Resumed \(resumeCount) journeys/branches with expired timers")
     }
   }
 
-  // MARK: - Private Methods
+  // MARK: - Runtime Bridge
 
-  /// Evaluate and update goal status for a journey
-  private func evaluateGoalIfNeeded(_ journey: Journey, campaign: Campaign) async {
-    LogDebug("[JourneyService.evaluateGoalIfNeeded] Called for journey \(journey.id)")
-    
-    // Skip if already converted
-    guard journey.convertedAt == nil else {
-      LogDebug("[JourneyService.evaluateGoalIfNeeded] Journey already converted at \(journey.convertedAt!), skipping")
-      return
-    }
-
-    // Skip if no goal configured
-    guard journey.goalSnapshot != nil else {
-      LogDebug("[JourneyService.evaluateGoalIfNeeded] No goal configured, skipping")
-      return
-    }
-
-    LogDebug("[JourneyService.evaluateGoalIfNeeded] Evaluating goal for journey \(journey.id)")
-    let result = await goalEvaluator.isGoalMet(journey: journey, campaign: campaign)
-    LogDebug("[JourneyService.evaluateGoalIfNeeded] Goal evaluation result: met=\(result.met), at=\(String(describing: result.at))")
-    
-    if result.met, let at = result.at {
-      LogDebug("[JourneyService.evaluateGoalIfNeeded] Setting journey.convertedAt to \(at)")
-      journey.convertedAt = at
-      journey.updatedAt = dateProvider.now()
-      persistJourney(journey)  // Persist immediately after setting convertedAt
-      LogInfo("Journey \(journey.id) achieved goal at \(at)")
-
-      // Track telemetry event
-      eventService.track(
-        JourneyEvents.journeyGoalMet,
-        properties: [
-          "journey_id": journey.id,
-          "campaign_id": journey.campaignId,
-          "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
-          "met_at": at.timeIntervalSince1970,
-          "window_seconds": journey.conversionWindow,
-        ],
-        userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
-      )
-    } else {
-      LogDebug("[JourneyService.evaluateGoalIfNeeded] Goal not met, journey continues")
-    }
-  }
-
-  /// Consolidated exit decision function that checks all exit conditions
-  private func exitDecision(_ journey: Journey, _ campaign: Campaign) async -> JourneyExitReason? {
-    LogDebug("[JourneyService.exitDecision] Checking exit conditions for journey \(journey.id)")
-    LogDebug("[JourneyService.exitDecision] Journey status: \(journey.status)")
-    LogDebug("[JourneyService.exitDecision] Journey.convertedAt: \(String(describing: journey.convertedAt))")
-    
-    // 1. Check if journey expired
-    if journey.hasExpired() {
-      LogDebug("[JourneyService.exitDecision] Journey has expired")
-      return .expired
-    }
-
-    // Get exit policy (default to never if not set)
-    let mode = journey.exitPolicySnapshot?.mode ?? .never
-    LogDebug("[JourneyService.exitDecision] Exit policy mode: \(mode)")
-
-    // 2. Check exit on goal (if configured)
-    if mode == .onGoal || mode == .onGoalOrStop {
-      // If already converted, exit immediately
-      if journey.convertedAt != nil {
-        LogDebug("[JourneyService.exitDecision] Journey already converted at \(journey.convertedAt!), exiting with goalMet")
-        return .goalMet
-      } else {
-        LogDebug("[JourneyService.exitDecision] Goal-based exit enabled but not yet converted")
-      }
-    }
-
-    // 3. Check stop-matching for segment-triggered campaigns
-    if mode == .onStopMatching || mode == .onGoalOrStop {
-      if case .segment(let config) = campaign.trigger {
-        LogDebug("[JourneyService.exitDecision] Checking stop-matching for segment-triggered campaign")
-        // Re-evaluate the trigger condition
-        let stillMatches = await evalConditionIR(config.condition)
-        if !stillMatches {
-          LogDebug("[JourneyService.exitDecision] Journey no longer matches trigger, exiting with triggerUnmatched")
-          return .triggerUnmatched
-        }
-      }
-    }
-
-    LogDebug("[JourneyService.exitDecision] No exit conditions met, journey continues")
-    return nil
-  }
-
-  private func executeJourney(
-    _ journey: Journey,
-    campaign: Campaign,
-    reason: ResumeReason = .start
+  fileprivate func handleRuntimeMessage(
+    journeyId: String,
+    type: String,
+    payload: [String: Any],
+    id: String?,
+    controller: FlowViewController
   ) async {
-    LogDebug(
-      "[JourneyService] executeJourney starting with \(journey.branches.count) branches, \(journey.pendingBranchStarts.count) pending"
-    )
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
 
-    // Evaluate goal before starting
-    await evaluateGoalIfNeeded(journey, campaign: campaign)
+    switch type {
+    case "runtime/ready":
+      let outcome = await runner.handleRuntimeReady()
+      handleOutcome(outcome, journey: journey)
 
-    // Check exit conditions before continuing
-    if let exitReason = await exitDecision(journey, campaign) {
-      LogDebug("[JourneyService] Journey should exit with reason: \(exitReason)")
-      completeJourney(journey, reason: exitReason)
-      return
-    }
+    case "runtime/screen_changed":
+      if let screenId = payload["screenId"] as? String {
+        let outcome = await runner.handleScreenChanged(screenId)
+        handleOutcome(outcome, journey: journey)
+        persistJourney(journey)
 
-    // Execute branches concurrently: when one pauses, start the next
-    while true {
-      // Find the first running branch
-      guard let branchIndex = journey.branches.firstIndex(where: { $0.status == .running }) else {
-        // No running branches - try to start a pending branch
-        if let newBranch = journey.startNextPendingBranch() {
-          LogDebug("[JourneyService] Started pending branch \(newBranch.id) at node \(newBranch.currentNodeId ?? "nil")")
-          inMemoryJourneysById[journey.id] = journey
-          continue
-        }
-        // No running branches and no pending - check if all completed
-        if journey.allBranchesCompleted() {
-          LogDebug("[JourneyService] All branches completed - completing journey")
-          completeJourney(journey, reason: .completed)
-        } else {
-          // Some branches still paused - journey is waiting
-          LogDebug("[JourneyService] Journey has paused branches, waiting for resume")
-          persistJourney(journey)
-        }
-        return
-      }
-
-      var branch = journey.branches[branchIndex]
-      let branchResult = await executeBranch(
-        &branch,
-        journey: journey,
-        campaign: campaign,
-        reason: reason
-      )
-      journey.branches[branchIndex] = branch
-      inMemoryJourneysById[journey.id] = journey
-
-      switch branchResult {
-      case .branchCompleted:
-        // Branch finished naturally, continue to next branch
-        LogDebug("[JourneyService] Branch \(branch.id) completed naturally")
-        continue
-
-      case .branchPaused:
-        // Branch is waiting - try to start next pending branch
-        LogDebug("[JourneyService] Branch \(branch.id) paused, checking for pending branches")
-        continue
-
-      case .journeyExited(let exitReason):
-        // Exit node or error - end entire journey
-        LogDebug("[JourneyService] Journey exiting with reason: \(exitReason)")
-        completeJourney(journey, reason: exitReason)
-        return
-      }
-    }
-  }
-
-  /// Result of executing a single branch
-  private enum BranchExecutionResult {
-    case branchCompleted      // Branch reached end (no more nodes)
-    case branchPaused         // Branch is waiting (async node)
-    case journeyExited(JourneyExitReason)  // Journey should end (exit node or error)
-  }
-
-  /// Execute a single branch until it pauses, completes, or exits
-  private func executeBranch(
-    _ branch: inout BranchState,
-    journey: Journey,
-    campaign: Campaign,
-    reason: ResumeReason
-  ) async -> BranchExecutionResult {
-    var currentReason = reason
-    var iterationCount = 0
-
-    while let currentNodeId = branch.currentNodeId {
-      iterationCount += 1
-      LogDebug("[JourneyService] Branch \(branch.id) iteration \(iterationCount): node \(currentNodeId)")
-
-      // Re-evaluate goal before each node
-      await evaluateGoalIfNeeded(journey, campaign: campaign)
-
-      // Check exit conditions
-      if let exitReason = await exitDecision(journey, campaign) {
-        return .journeyExited(exitReason)
-      }
-
-      // Find current node
-      guard let node = journeyExecutor.findNode(id: currentNodeId, in: campaign) else {
-        LogError("Node \(currentNodeId) not found in campaign \(campaign.id)")
-        return .journeyExited(.error)
-      }
-
-      // Execute node
-      let result = await journeyExecutor.executeNode(
-        node,
-        journey: journey,
-        resumeReason: currentReason
-      )
-      currentReason = .start  // Only first node uses original reason
-      LogDebug("[JourneyService] Node \(currentNodeId) result: \(result)")
-
-      switch result {
-      case .continue(let nextNodeIds):
-        // Handle multiple outputs: first continues this branch, rest queued as new branches
-        if nextNodeIds.count > 1 {
-          let additionalPaths = Array(nextNodeIds.dropFirst())
-          journey.queueBranchStarts(additionalPaths)
-          LogDebug("[JourneyService] Queued \(additionalPaths.count) additional branch(es)")
-        }
-        branch.currentNodeId = nextNodeIds.first
-        journey.updatedAt = dateProvider.now()
-
-      case .skip(let skipToNodeId):
-        branch.currentNodeId = skipToNodeId
-        journey.updatedAt = dateProvider.now()
-
-      case .async(let resumeAt):
-        // Branch enters wait state
-        branch.status = .paused
-        branch.resumeAt = resumeAt
-        journey.pauseBranch(withId: branch.id, until: resumeAt)
-        LogDebug("[JourneyService] Branch \(branch.id) paused until \(String(describing: resumeAt))")
-
-        // Track paused event
         eventService.track(
-          JourneyEvents.journeyPaused,
-          properties: JourneyEvents.journeyPausedProperties(
-            journey: journey,
-            nodeId: currentNodeId,
-            resumeAt: resumeAt
-          ),
+          "$journey_node_executed",
+          properties: [
+            "session_id": journey.id,
+            "node_id": screenId,
+            "context": journey.context.mapValues { $0.value },
+          ],
           userProperties: nil,
-          userPropertiesSetOnce: nil,
-          completion: nil
+          userPropertiesSetOnce: nil
         )
-
-        // Schedule timer resume for this branch if there's a deadline
-        if let resumeAt = resumeAt {
-          scheduleBranchResume(journey: journey, branchId: branch.id, at: resumeAt)
-        }
-
-        return .branchPaused
-
-      case .complete(let exitReason):
-        // Exit node - end entire journey
-        return .journeyExited(exitReason)
       }
-    }
 
-    // No more nodes in this branch - mark completed
-    branch.status = .completed
-    branch.currentNodeId = nil
-    journey.completeBranch(withId: branch.id)
-    LogDebug("[JourneyService] Branch \(branch.id) reached end")
-    return .branchCompleted
+    case "action/did_set":
+      if let path = parsePathRef(payload) {
+        let value = payload["value"] ?? NSNull()
+        let source = payload["source"] as? String
+        let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+        let instanceId = payload["instanceId"] as? String
+        let outcome = await runner.handleDidSet(
+          path: path,
+          value: value,
+          source: source,
+          screenId: screenId,
+          instanceId: instanceId
+        )
+        handleOutcome(outcome, journey: journey)
+        persistJourney(journey)
+      }
+
+    case "action/event":
+      let name = payload["name"] as? String ?? ""
+      let properties = payload["properties"] as? [String: Any]
+      if !name.isEmpty {
+        eventService.track(
+          name,
+          properties: properties,
+          userProperties: nil,
+          userPropertiesSetOnce: nil
+        )
+      }
+
+    case "action/purchase":
+      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+      let instanceId = payload["instanceId"] as? String
+      let resolvedProductId = runner.resolveRuntimeValue(
+        payload["productId"] ?? "",
+        screenId: screenId,
+        instanceId: instanceId
+      )
+      if let productId = resolvedProductId as? String, !productId.isEmpty {
+        var userInfo: [String: Any] = [
+          "journeyId": journey.id,
+          "campaignId": journey.campaignId,
+          "productId": productId
+        ]
+        if let screenId {
+          userInfo["screenId"] = screenId
+        }
+        if let placementIndex = payload["placementIndex"] {
+          let resolvedPlacement = runner.resolveRuntimeValue(
+            placementIndex,
+            screenId: screenId,
+            instanceId: instanceId
+          )
+          userInfo["placementIndex"] = resolvedPlacement
+        }
+        NotificationCenter.default.post(
+          name: .nuxiePurchase,
+          object: nil,
+          userInfo: userInfo
+        )
+        await handlePurchase(productId: productId, controller: controller)
+      }
+
+    case "action/restore":
+      NotificationCenter.default.post(
+        name: .nuxieRestore,
+        object: nil,
+        userInfo: [
+          "journeyId": journey.id,
+          "campaignId": journey.campaignId,
+          "screenId": journey.flowState.currentScreenId as Any
+        ]
+      )
+      await handleRestore(controller: controller)
+
+    case "action/open_link":
+      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+      let instanceId = payload["instanceId"] as? String
+      let target = payload["target"] as? String
+      await runner.handleRuntimeOpenLink(
+        url: payload["url"] ?? "",
+        target: target,
+        screenId: screenId,
+        instanceId: instanceId
+      )
+
+    case "action/back":
+      let steps = parseInt(payload["steps"] ?? payload["step"])
+      let transition = payload["transition"].map { AnyCodable($0) }
+      await runner.handleRuntimeBack(steps: steps, transition: transition)
+
+    case let action where action.hasPrefix("action/"):
+      if let trigger = parseRuntimeTrigger(type: action, payload: payload) {
+        let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+        let componentId = payload["componentId"] as? String
+        let instanceId = payload["instanceId"] as? String
+        let outcome = await runner.dispatchTrigger(
+          trigger: trigger,
+          screenId: screenId,
+          componentId: componentId,
+          instanceId: instanceId,
+          event: nil
+        )
+        handleOutcome(outcome, journey: journey)
+        persistJourney(journey)
+      }
+
+    default:
+      break
+    }
   }
 
-  private func completeJourney(_ journey: Journey, reason: JourneyExitReason) {
-    LogInfo("Completing journey \(journey.id) with reason: \(reason)")
+  fileprivate func handleRuntimeDismiss(
+    journeyId: String,
+    reason: CloseReason,
+    controller: FlowViewController
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
 
-    journey.complete(reason: reason)
-
-    // Calculate journey duration
-    let duration = journey.completedAt?.timeIntervalSince(journey.startedAt) ?? dateProvider.now().timeIntervalSince(journey.startedAt)
-
-    // Send $journey_completed to server for cross-device tracking (fire-and-forget)
-    eventService.track(
-      "$journey_completed",
-      properties: [
-        "session_id": journey.id,
-        "exit_reason": reason.rawValue,
-        "goal_met": journey.convertedAt != nil,
-        "goal_met_at": journey.convertedAt?.timeIntervalSince1970 as Any,
-        "duration_seconds": duration,
-      ],
-      userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+    var userInfo: [String: Any] = [
+      "journeyId": journey.id,
+      "campaignId": journey.campaignId
+    ]
+    if let screenId = journey.flowState.currentScreenId {
+      userInfo["screenId"] = screenId
+    }
+    switch reason {
+    case .userDismissed:
+      userInfo["reason"] = "user_dismissed"
+    case .purchaseCompleted:
+      userInfo["reason"] = "purchase_completed"
+    case .timeout:
+      userInfo["reason"] = "timeout"
+    case .error(let error):
+      userInfo["reason"] = "error"
+      userInfo["error"] = error.localizedDescription
+    }
+    NotificationCenter.default.post(
+      name: .nuxieDismiss,
+      object: nil,
+      userInfo: userInfo
     )
 
-    // Track journey errored event if this is an error exit
-    if reason == .error {
+    var properties: [String: Any] = [:]
+    if let screenId = journey.flowState.currentScreenId {
+      properties["screen_id"] = screenId
+    }
+    let method: String
+    switch reason {
+    case .userDismissed:
+      method = "user"
+    case .purchaseCompleted:
+      method = "purchase_completed"
+    case .timeout:
+      method = "timeout"
+    case .error:
+      method = "error"
+    }
+    properties["method"] = method
+    let event = NuxieEvent(
+      name: SystemEventNames.screenDismissed,
+      distinctId: journey.distinctId,
+      properties: properties
+    )
+    let outcome = await runner.dispatchEventTrigger(event)
+    handleOutcome(outcome, journey: journey)
+
+    if !runner.hasPendingWork() {
+      completeJourney(journey, reason: .completed)
+    }
+  }
+
+  // MARK: - Helpers
+
+  private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
+    if let existing = flowRunners[journey.id] {
+      return existing
+    }
+
+    guard let flowId = campaign.flowId else { return nil }
+
+    do {
+      let flow = try await flowService.fetchFlow(id: flowId)
+      let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+      runner.onShowScreen = { [weak self, weak runner] (screenId: String, transition: AnyCodable?) async in
+        guard let self else { return }
+        let controller = try? await self.presentFlowIfNeeded(flowId: flowId, journey: journey)
+        if let controller {
+          runner?.attach(viewController: controller)
+          await MainActor.run {
+            var payload: [String: Any] = ["screenId": screenId]
+            if let transition {
+              payload["transition"] = transition.value
+            }
+            controller.sendRuntimeMessage(type: "runtime/navigate", payload: payload)
+          }
+        }
+      }
+
+      flowRunners[journey.id] = runner
+
+      _ = try? await presentFlowIfNeeded(flowId: flowId, journey: journey)
+
       eventService.track(
-        JourneyEvents.journeyErrored,
-        properties: JourneyEvents.journeyErroredProperties(
+        JourneyEvents.flowShown,
+        properties: JourneyEvents.flowShownProperties(flowId: flowId, journey: journey),
+        userProperties: nil,
+        userPropertiesSetOnce: nil
+      )
+
+      return runner
+    } catch {
+      LogError("Failed to load flow \(campaign.flowId ?? "") for journey \(journey.id): \(error)")
+      return nil
+    }
+  }
+
+  private func presentFlowIfNeeded(flowId: String, journey: Journey) async throws -> FlowViewController {
+    if let runner = flowRunners[journey.id],
+       let controller = runner.viewController,
+       await flowPresentationService.isFlowPresented {
+      return controller
+    }
+    if let delegate = runtimeDelegates[journey.id] {
+      let controller = try await flowPresentationService.presentFlow(flowId, from: journey, runtimeDelegate: delegate)
+      if let runner = flowRunners[journey.id] {
+        runner.attach(viewController: controller)
+      }
+      return controller
+    }
+
+    let delegate = FlowRuntimeDelegateAdapter(journeyId: journey.id, journeyService: self)
+    runtimeDelegates[journey.id] = delegate
+    let controller = try await flowPresentationService.presentFlow(flowId, from: journey, runtimeDelegate: delegate)
+    if let runner = flowRunners[journey.id] {
+      runner.attach(viewController: controller)
+    }
+    return controller
+  }
+
+  private func handleOutcome(_ outcome: FlowJourneyRunner.RunOutcome?, journey: Journey) {
+    guard let outcome else { return }
+    switch outcome {
+    case .paused(let pending):
+      journey.pause(until: pending.resumeAt)
+      persistJourney(journey)
+      if let resumeAt = pending.resumeAt {
+        scheduleResume(journeyId: journey.id, at: resumeAt)
+      }
+      eventService.track(
+        JourneyEvents.journeyPaused,
+        properties: JourneyEvents.journeyPausedProperties(
           journey: journey,
-          nodeId: journey.currentNodeId,
-          errorMessage: nil
+          screenId: journey.flowState.currentScreenId,
+          resumeAt: pending.resumeAt
         ),
         userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
+        userPropertiesSetOnce: nil
       )
+    case .exited(let reason):
+      completeJourney(journey, reason: reason)
     }
-
-    // Track journey exit event for observability
-    eventService.track(
-      JourneyEvents.journeyExited,
-      properties: JourneyEvents.journeyExitedProperties(
-        journey: journey,
-        exitReason: reason,
-        durationSeconds: duration
-      ),
-      userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
-    )
-
-    // Remove from in-memory registry and tasks
-    LogDebug("[JourneyService] Removing journey \(journey.id) from registry (reason: \(reason))")
-    inMemoryJourneysById.removeValue(forKey: journey.id)
-    activeTasks[journey.id]?.cancel()
-    activeTasks.removeValue(forKey: journey.id)
-    LogDebug("[JourneyService] Remaining journeys: \(inMemoryJourneysById.count)")
-
-    // Delete persisted journey file
-    journeyStore.deleteJourney(id: journey.id)
-
-    // Record completion for frequency policy
-    let record = JourneyCompletionRecord(journey: journey)
-    try? journeyStore.recordCompletion(record)
   }
 
-  private func cancelJourney(_ journey: Journey) {
-    journey.cancel()
-    completeJourney(journey, reason: .cancelled)
+  private func scheduleResume(journeyId: String, at date: Date) {
+    let key = taskKey(journeyId: journeyId, kind: "resume", id: nil)
+    scheduleTask(key: key, at: date) { [weak self] in
+      await self?.resumeJourneyIfCached(journeyId: journeyId)
+    }
+  }
+
+  private func scheduleTask(key: String, at date: Date, work: @escaping () async -> Void) {
+    activeTasks[key]?.cancel()
+
+    let delay = max(0, date.timeIntervalSince(dateProvider.now()))
+    let task = Task { [weak self] in
+      guard let self else { return }
+      await self.runScheduledTask(key: key, delay: delay, work: work)
+    }
+
+    activeTasks[key] = task
+  }
+
+  private func runScheduledTask(key: String, delay: TimeInterval, work: @escaping () async -> Void) async {
+    do {
+      try await sleepProvider.sleep(for: delay)
+      guard !Task.isCancelled else { return }
+      await work()
+    } catch {
+      LogDebug("Journey task \(key) cancelled/failed: \(error)")
+    }
+    clearTask(key)
+  }
+
+  private func resumeJourneyIfCached(journeyId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId] else { return }
+    await resumeJourney(journey)
+  }
+
+  private func taskKey(journeyId: String, kind: String, id: String?) -> String {
+    var key = "\(journeyId):\(kind)"
+    if let id {
+      key += ":\(id)"
+    }
+    return key
+  }
+
+  private func clearTask(_ key: String) {
+    activeTasks.removeValue(forKey: key)
+  }
+
+  private func cancelAllTasks() {
+    for (_, task) in activeTasks {
+      task.cancel()
+    }
+    activeTasks.removeAll()
   }
 
   private func persistJourney(_ journey: Journey) {
@@ -924,240 +751,206 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  // MARK: - Frequency Policy
+  private func completeJourney(_ journey: Journey, reason: JourneyExitReason) {
+    journey.complete(reason: reason)
 
-  private func canStartJourney(campaign: Campaign, distinctId: String) -> Bool {
-    // Check in-memory registry for live journeys
-    let liveJourneys = inMemoryJourneysById.values.filter {
-      $0.distinctId == distinctId && $0.campaignId == campaign.id && $0.status.isLive
-    }
-    let hasLive = !liveJourneys.isEmpty
+    let duration = journey.completedAt?.timeIntervalSince(journey.startedAt)
+      ?? dateProvider.now().timeIntervalSince(journey.startedAt)
 
-    // Parse frequency policy
-    let policy = FrequencyPolicy(rawValue: campaign.frequencyPolicy) ?? .everyRematch
-
-    switch policy {
-    case .once:
-      // Block if there's already a live journey OR if user has completed this campaign before
-      // The hasLive check prevents starting a second journey while one is in progress
-      // The hasCompletedCampaign check prevents re-entry after completion
-      if hasLive {
-        return false
-      }
-      return !journeyStore.hasCompletedCampaign(distinctId: distinctId, campaignId: campaign.id)
-
-    case .everyRematch:
-      return !hasLive
-
-    case .fixedInterval:
-      if hasLive {
-        // Check if we can cancel and restart based on time since journey started
-        if let interval = campaign.frequencyInterval {
-          // Get the live journey to check its start time
-          if let liveJourney = liveJourneys.first {
-            let elapsed = dateProvider.timeIntervalSince(liveJourney.startedAt)
-            if elapsed >= interval {
-              // Cancel old journey and allow new one
-              Task {
-                await cancelActiveJourneys(distinctId: distinctId, campaignId: campaign.id)
-              }
-              return true
-            }
-          }
-        }
-        return false
-      }
-
-      // Check time since last completion
-      if let interval = campaign.frequencyInterval,
-        let lastTime = journeyStore.lastCompletionTime(
-          distinctId: distinctId, campaignId: campaign.id)
-      {
-        return dateProvider.timeIntervalSince(lastTime) >= interval
-      }
-
-      return true
-    }
-  }
-
-  private func cancelActiveJourneys(distinctId: String, campaignId: String) async {
-    let journeys = await getActiveJourneys(for: distinctId)
-      .filter { $0.campaignId == campaignId }
-
-    for journey in journeys {
-      cancelJourney(journey)
-    }
-  }
-
-  // MARK: - Task Management
-
-  private func scheduleResume(_ journey: Journey, at date: Date) {
-    // Cancel any existing task
-    activeTasks[journey.id]?.cancel()
-
-    let delay = max(0, date.timeIntervalSince(dateProvider.now()))
-    let journeyId = journey.id  // Capture ID only, not the entire journey object
-
-    let task = Task { [weak self] in
-      do {
-        try await self?.sleepProvider.sleep(for: delay)
-        guard let self = self, !Task.isCancelled else { return }
-
-        // Re-read canonical instance from registry
-        if let journey = await self.inMemoryJourneysById[journeyId] {
-          await self.resumeJourney(journey)
-        }
-      } catch {
-        // Sleep was cancelled or failed, which is expected during app lifecycle changes
-        LogDebug("Journey \(journeyId) resume task cancelled/failed: \(error)")
-      }
-      // Remove the finished task to release its captures ASAP
-      await self?.clearTask(for: journeyId)
-    }
-
-    activeTasks[journey.id] = task
-    LogDebug("Scheduled journey \(journey.id) to resume at \(date)")
-  }
-
-  /// Schedule resume for a specific branch within a journey
-  private func scheduleBranchResume(journey: Journey, branchId: String, at date: Date) {
-    // Use a composite key for branch-specific tasks
-    let taskKey = "\(journey.id):\(branchId)"
-
-    // Cancel any existing task for this branch
-    activeTasks[taskKey]?.cancel()
-
-    let delay = max(0, date.timeIntervalSince(dateProvider.now()))
-    let journeyId = journey.id
-
-    let task = Task { [weak self] in
-      do {
-        try await self?.sleepProvider.sleep(for: delay)
-        guard let self = self, !Task.isCancelled else { return }
-
-        // Re-read canonical instance from registry
-        if let journey = await self.inMemoryJourneysById[journeyId] {
-          await self.resumeBranch(journey: journey, branchId: branchId)
-        }
-      } catch {
-        LogDebug("Branch \(branchId) resume task cancelled/failed: \(error)")
-      }
-      await self?.clearTask(for: taskKey)
-    }
-
-    activeTasks[taskKey] = task
-    LogDebug("Scheduled branch \(branchId) of journey \(journey.id) to resume at \(date)")
-  }
-
-  /// Resume a specific branch within a journey (timer-based)
-  private func resumeBranch(journey: Journey, branchId: String) async {
-    guard let branch = journey.branch(withId: branchId),
-          branch.status == .paused else {
-      LogDebug("Branch \(branchId) not found or not paused")
-      return
-    }
-
-    LogInfo("Resuming branch \(branchId) of journey \(journey.id)")
-
-    // Get campaign
-    guard let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) else {
-      LogError("Campaign not found for journey \(journey.id)")
-      return
-    }
-
-    // Resume the branch
-    journey.resumeBranch(withId: branchId)
-    inMemoryJourneysById[journey.id] = journey
-
-    // Track resume event
     eventService.track(
-      JourneyEvents.journeyResumed,
-      properties: JourneyEvents.journeyResumedProperties(
-        journey: journey,
-        nodeId: branch.currentNodeId,
-        resumeReason: "timer"
-      ),
+      "$journey_completed",
+      properties: [
+        "session_id": journey.id,
+        "exit_reason": reason.rawValue,
+        "goal_met": journey.convertedAt != nil,
+        "goal_met_at": journey.convertedAt?.timeIntervalSince1970 as Any,
+        "duration_seconds": duration,
+      ],
       userProperties: nil,
-      userPropertiesSetOnce: nil,
-      completion: nil
+      userPropertiesSetOnce: nil
     )
 
-    // Continue execution
-    await executeJourney(journey, campaign: campaign, reason: .timer)
-  }
+    eventService.track(
+      JourneyEvents.journeyExited,
+      properties: JourneyEvents.journeyExitedProperties(
+        journey: journey,
+        reason: reason,
+        screenId: journey.flowState.currentScreenId
+      ),
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
 
-  private func clearTask(for journeyId: String) {
-    activeTasks.removeValue(forKey: journeyId)
-  }
-
-  private func cancelAllTasks() {
-    for (_, task) in activeTasks {
-      task.cancel()
+    if let originEventId = journey.getContext("_origin_event_id") as? String {
+      let update = JourneyUpdate(
+        journeyId: journey.id,
+        campaignId: journey.campaignId,
+        flowId: journey.flowId,
+        exitReason: reason,
+        goalMet: journey.convertedAt != nil,
+        goalMetAt: journey.convertedAt,
+        durationSeconds: duration,
+        flowExitReason: nil
+      )
+      Task { await triggerBroker.emit(eventId: originEventId, update: .journey(update)) }
     }
-    activeTasks.removeAll()
+
+    cancelTasks(for: journey.id)
+    flowRunners.removeValue(forKey: journey.id)
+    runtimeDelegates.removeValue(forKey: journey.id)
+    inMemoryJourneysById.removeValue(forKey: journey.id)
+
+    journeyStore.deleteJourney(id: journey.id)
+    let record = JourneyCompletionRecord(journey: journey)
+    try? journeyStore.recordCompletion(record)
   }
 
-  // MARK: - Segment Integration
+  private func cancelTasks(for journeyId: String) {
+    let keys = activeTasks.keys.filter { $0.hasPrefix("\(journeyId):") }
+    for key in keys {
+      activeTasks[key]?.cancel()
+      activeTasks.removeValue(forKey: key)
+    }
+  }
 
-  private func registerForSegmentChanges() {
-    // Cancel any existing monitoring task
-    segmentMonitoringTask?.cancel()
+  private func cancelJourney(_ journey: Journey) {
+    journey.cancel()
+    completeJourney(journey, reason: .cancelled)
+  }
 
-    // Start monitoring segment changes via AsyncStream
-    segmentMonitoringTask = Task { [weak self] in
-      LogInfo("Starting segment change monitoring")
+  // MARK: - Goals + Exit Policy
 
-      for await result in segmentService.segmentChanges {
-        guard !Task.isCancelled else { break }
+  private func evaluateGoalIfNeeded(_ journey: Journey, campaign: Campaign) async {
+    guard journey.convertedAt == nil else { return }
+    guard journey.goalSnapshot != nil else { return }
 
-        guard let self = self else { break }
-        
-        // Get current user ID
-        let currentDistinctId = await self.identityService.getDistinctId()
-        
-        // IMPORTANT: Only process segment changes for the current user
-        // This prevents race conditions during identity transitions
-        guard result.distinctId == currentDistinctId else {
-          LogDebug("Ignoring segment change for user \(NuxieLogger.shared.logDistinctID(result.distinctId)) (current user: \(NuxieLogger.shared.logDistinctID(currentDistinctId)))")
-          continue
-        }
+    let result = await goalEvaluator.isGoalMet(journey: journey, campaign: campaign)
+    if result.met, let at = result.at {
+      journey.convertedAt = at
+      journey.updatedAt = dateProvider.now()
+      persistJourney(journey)
 
-        // Build current segment set from memberships
-        let currentSegments = Set(result.entered.map { $0.id } + result.remained.map { $0.id })
+      eventService.track(
+        JourneyEvents.journeyGoalMet,
+        properties: [
+          "journey_id": journey.id,
+          "campaign_id": journey.campaignId,
+          "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
+          "met_at": at.timeIntervalSince1970,
+          "window_seconds": journey.conversionWindow,
+        ],
+        userProperties: nil,
+        userPropertiesSetOnce: nil
+      )
+    }
+  }
 
-        // Handle segment changes for journey triggers
-        await self.handleSegmentChange(distinctId: result.distinctId, segments: currentSegments)
+  private func exitDecision(_ journey: Journey, _ campaign: Campaign) async -> JourneyExitReason? {
+    if journey.hasExpired() { return .expired }
 
-        // Log segment changes for debugging
-        for segment in result.entered {
-          LogInfo("User entered segment '\(segment.name)' - checking for journey triggers")
-        }
-        for segment in result.exited {
-          LogInfo("User exited segment '\(segment.name)'")
+    let mode = journey.exitPolicySnapshot?.mode ?? .never
+
+    if (mode == .onGoal || mode == .onGoalOrStop), journey.convertedAt != nil {
+      return .goalMet
+    }
+
+    if mode == .onStopMatching || mode == .onGoalOrStop {
+      if case .segment(let config) = campaign.trigger {
+        let stillMatches = await evalConditionIR(config.condition)
+        if !stillMatches {
+          return .triggerUnmatched
         }
       }
-
-      LogInfo("Segment change monitoring stopped")
     }
 
-    LogInfo("Registered for segment change notifications")
+    return nil
   }
 
-  // MARK: - Helper Methods
+  // MARK: - Reentry Policy
 
-  private func makeTrackingKey(distinctId: String, campaignId: String) -> String {
-    return "\(distinctId):\(campaignId)"
+  private func suppressionReason(campaign: Campaign, distinctId: String) -> SuppressReason? {
+    if campaign.flowId == nil {
+      return .noFlow
+    }
+
+    let live = inMemoryJourneysById.values.filter {
+      $0.distinctId == distinctId && $0.campaignId == campaign.id && $0.status.isLive
+    }
+    if !live.isEmpty { return .alreadyActive }
+
+    switch campaign.reentry {
+    case .everyTime:
+      return nil
+    case .oneTime:
+      let completed = journeyStore.hasCompletedCampaign(distinctId: distinctId, campaignId: campaign.id)
+      return completed ? .reentryLimited : nil
+    case .oncePerWindow(let window):
+      guard let lastCompletion = journeyStore.lastCompletionTime(distinctId: distinctId, campaignId: campaign.id) else {
+        return nil
+      }
+      let interval = windowInterval(window)
+      let allowed = dateProvider.timeIntervalSince(lastCompletion) >= interval
+      return allowed ? nil : .reentryLimited
+    }
   }
 
-  // MARK: - IR Evaluation
+  private func windowInterval(_ window: Window) -> TimeInterval {
+    switch window.unit {
+    case .minute: return TimeInterval(window.amount * 60)
+    case .hour: return TimeInterval(window.amount * 3600)
+    case .day: return TimeInterval(window.amount * 86400)
+    case .week: return TimeInterval(window.amount * 604800)
+    }
+  }
 
-  private func evalConditionIR(
-    _ envelope: IREnvelope?, journey: Journey? = nil, event: NuxieEvent? = nil
-  ) async -> Bool {
-    // No condition means always true
-    guard let envelope = envelope else { return true }
-    
-    // Create adapters for the services
+  // MARK: - Campaign Lookup
+
+  private func getCampaign(id: String) async -> Campaign? {
+    guard let profile = await profileService.getCachedProfile(distinctId: identityService.getDistinctId()) else {
+      return nil
+    }
+    return profile.campaigns.first { $0.id == id }
+  }
+
+  private func getCampaign(id: String, for distinctId: String) async -> Campaign? {
+    guard let profile = await profileService.getCachedProfile(distinctId: distinctId) else {
+      return nil
+    }
+    return profile.campaigns.first { $0.id == id }
+  }
+
+  private func getAllCampaigns() async -> [Campaign]? {
+    guard let profile = await profileService.getCachedProfile(distinctId: identityService.getDistinctId()) else {
+      return nil
+    }
+    return profile.campaigns
+  }
+
+  private func getAllCampaigns(for distinctId: String) async -> [Campaign]? {
+    guard let profile = await profileService.getCachedProfile(distinctId: distinctId) else {
+      return nil
+    }
+    return profile.campaigns
+  }
+
+  // MARK: - Trigger Evaluation
+
+  private func shouldTriggerFromEvent(campaign: Campaign, event: NuxieEvent) async -> Bool {
+    switch campaign.trigger {
+    case .event(let config):
+      guard config.eventName == event.name else { return false }
+      if let condition = config.condition {
+        return await evalConditionIR(condition, event: event)
+      }
+      return true
+    case .segment:
+      return false
+    }
+  }
+
+  private func evalConditionIR(_ envelope: IREnvelope?, event: NuxieEvent? = nil) async -> Bool {
+    guard let envelope else { return true }
+
     let userAdapter = IRUserPropsAdapter(identityService: identityService)
     let eventsAdapter = IREventQueriesAdapter(eventService: eventService)
     let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: segmentService)
@@ -1174,142 +967,183 @@ public actor JourneyService: JourneyServiceProtocol {
     return await irRuntime.eval(envelope, config)
   }
 
-  private func shouldTriggerFromEvent(campaign: Campaign, event: NuxieEvent) async -> Bool {
-    guard case .event(let config) = campaign.trigger,
-      config.eventName == event.name
-    else {
-      return false
+  // MARK: - Segment Integration
+
+  private func registerForSegmentChanges() {
+    segmentMonitoringTask?.cancel()
+
+    segmentMonitoringTask = Task { [weak self] in
+      for await result in segmentService.segmentChanges {
+        guard !Task.isCancelled else { break }
+        guard let self else { break }
+
+        let currentDistinctId = await self.identityService.getDistinctId()
+        guard result.distinctId == currentDistinctId else { continue }
+
+        let currentSegments = Set(result.entered.map { $0.id } + result.remained.map { $0.id })
+        await self.handleSegmentChange(distinctId: result.distinctId, segments: currentSegments)
+      }
+    }
+  }
+
+  // MARK: - Runtime Helpers
+
+  private func parseRuntimeTrigger(type: String, payload: [String: Any]) -> InteractionTrigger? {
+    if let triggerPayload = payload["trigger"] as? [String: Any] {
+      return parseTriggerDict(triggerPayload)
+    }
+    if let triggerType = payload["trigger"] as? String {
+      return parseTriggerType(triggerType, payload: payload)
     }
 
-    // Evaluate trigger condition if present
-    if let condition = config.condition {
-      return await evalConditionIR(condition, event: event)
+    let fallback = type.hasPrefix("action/") ? String(type.dropFirst("action/".count)) : type
+    return parseTriggerType(fallback, payload: payload)
+  }
+
+  private func parseTriggerDict(_ payload: [String: Any]) -> InteractionTrigger? {
+    if let type = payload["type"] as? String {
+      return parseTriggerType(type, payload: payload)
     }
-
-    return true
-  }
-
-  private func evaluateSegmentExpression(_ expression: String, userSegments: Set<String>) async
-    -> Bool
-  {
-    // Check if this is a simple segment ID reference
-    if !expression.contains("&&") && !expression.contains("||") && !expression.contains("!") {
-      // Just a segment ID - check SegmentService membership
-      return await segmentService.isInSegment(expression)
+    if let type = payload["trigger"] as? String {
+      return parseTriggerType(type, payload: payload)
     }
-
-    // For complex expressions, we would need the IR envelope
-    // Since we only have a string expression here, we can't use IR evaluation
-    // This would need to be refactored to accept an IREnvelope instead
-    LogWarning(
-      "Complex segment expression evaluation not supported without IR envelope: \(expression)")
-    return false
+    return nil
   }
 
+  private func parseTriggerType(_ raw: String, payload: [String: Any]) -> InteractionTrigger? {
+    let normalized = raw
+      .replacingOccurrences(of: "action/", with: "")
+      .replacingOccurrences(of: "-", with: "_")
+      .lowercased()
 
-  private func getCampaign(id: String) async -> Campaign? {
-    let distinctId = identityService.getDistinctId()
-    let response = try? await profileService.fetchProfile(distinctId: distinctId)
-    return response?.campaigns.first { $0.id == id }
-  }
-
-  // Overload: fetch campaign for a specific distinctId
-  private func getCampaign(id: String, for distinctId: String) async -> Campaign? {
-    let response = try? await profileService.fetchProfile(distinctId: distinctId)
-    return response?.campaigns.first { $0.id == id }
-  }
-
-  private func getAllCampaigns() async -> [Campaign]? {
-    let distinctId = identityService.getDistinctId()
-    LogDebug("[JourneyService] Getting campaigns for distinctId: \(distinctId)")
-
-    do {
-      let response = try await profileService.fetchProfile(distinctId: distinctId)
-      LogDebug(
-        "[JourneyService] Profile fetch successful, campaigns count: \(response.campaigns.count)")
-      return response.campaigns
-    } catch {
-      LogDebug("[JourneyService] Profile fetch failed: \(error)")
+    switch normalized {
+    case "tap":
+      return .tap
+    case "long_press", "longpress":
+      let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
+      return .longPress(minMs: minMs)
+    case "hover":
+      return .hover
+    case "press":
+      return .press
+    case "drag":
+      let direction = (payload["direction"] as? String)
+        .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
+      let threshold = parseDouble(payload["threshold"])
+      return .drag(direction: direction, threshold: threshold)
+    case "manual":
+      return .manual(label: payload["label"] as? String)
+    default:
       return nil
     }
   }
 
-  // Overload: fetch campaigns for a specific distinctId
-  private func getAllCampaigns(for distinctId: String) async -> [Campaign]? {
-    LogDebug("[JourneyService] Getting campaigns for distinctId: \(distinctId)")
-    do {
-      let response = try await profileService.fetchProfile(distinctId: distinctId)
-      LogDebug(
-        "[JourneyService] Profile fetch successful, campaigns count: \(response.campaigns.count)")
-      return response.campaigns
-    } catch {
-      LogDebug("[JourneyService] Profile fetch failed: \(error)")
-      return nil
+  private func parseInt(_ value: Any?) -> Int? {
+    if let value = value as? Int { return value }
+    if let value = value as? Double { return Int(value) }
+    if let value = value as? NSNumber { return value.intValue }
+    if let value = value as? String { return Int(value) }
+    return nil
+  }
+
+  private func parseDouble(_ value: Any?) -> Double? {
+    if let value = value as? Double { return value }
+    if let value = value as? Int { return Double(value) }
+    if let value = value as? NSNumber { return value.doubleValue }
+    if let value = value as? String { return Double(value) }
+    return nil
+  }
+
+  private func parsePathRef(_ payload: [String: Any]) -> VmPathRef? {
+    let isRelative = payload["isRelative"] as? Bool
+    let nameBased = payload["nameBased"] as? Bool
+    if let pathIds = payload["pathIds"] as? [Int] {
+      return .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
+    }
+    if let pathIds = payload["pathIds"] as? [NSNumber] {
+      return .ids(VmPathIds(pathIds: pathIds.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+    }
+    return nil
+  }
+
+  private func handlePurchase(productId: String, controller: FlowViewController) async {
+    let transactionService = Container.shared.transactionService()
+    let productService = Container.shared.productService()
+
+    await MainActor.run {
+      Task { @MainActor in
+        do {
+          let products = try await productService.fetchProducts(for: [productId])
+          guard let product = products.first else {
+            controller.sendRuntimeMessage(type: "purchase_error", payload: ["error": "Product not found"])
+            return
+          }
+          let syncResult = try await transactionService.purchase(product)
+          controller.sendRuntimeMessage(type: "purchase_ui_success", payload: ["productId": productId])
+          if let syncTask = syncResult.syncTask {
+            let confirmed = await syncTask.value
+            if confirmed {
+              controller.sendRuntimeMessage(type: "purchase_confirmed", payload: ["productId": productId])
+            }
+          }
+        } catch StoreKitError.purchaseCancelled {
+          controller.sendRuntimeMessage(type: "purchase_cancelled", payload: [:])
+        } catch {
+          controller.sendRuntimeMessage(type: "purchase_error", payload: ["error": error.localizedDescription])
+        }
+      }
     }
   }
 
-  /// Try to resume paused wait-until branches for a user due to a reactive trigger (event/segment change)
-  private func tryReactiveResume(for distinctId: String, event: NuxieEvent? = nil) async {
-    // Get all journeys that have paused branches (not just paused journey status)
-    let journeysWithPausedBranches = await getActiveJourneys(for: distinctId).filter { journey in
-      journey.branches.contains(where: { $0.status == .paused })
+  private func handleRestore(controller: FlowViewController) async {
+    let transactionService = Container.shared.transactionService()
+
+    await MainActor.run {
+      Task { @MainActor in
+        do {
+          try await transactionService.restore()
+          controller.sendRuntimeMessage(type: "restore_success", payload: [:])
+        } catch {
+          controller.sendRuntimeMessage(type: "restore_error", payload: ["error": error.localizedDescription])
+        }
+      }
     }
-    guard !journeysWithPausedBranches.isEmpty else { return }
+  }
+}
 
-    // Fetch campaigns for THIS user
-    guard let campaigns = await getAllCampaigns(for: distinctId) else { return }
+private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate {
+  private weak var journeyService: JourneyService?
+  private let journeyId: String
 
-    for journey in journeysWithPausedBranches {
-      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else {
-        continue
-      }
+  init(journeyId: String, journeyService: JourneyService) {
+    self.journeyId = journeyId
+    self.journeyService = journeyService
+  }
 
-      // Check each paused branch
-      var branchesToResume: [String] = []
-      for branch in journey.branches where branch.status == .paused {
-        guard let nodeId = branch.currentNodeId,
-              let node = journeyExecutor.findNode(id: nodeId, in: campaign) else {
-          continue
-        }
-
-        // Only wait-until reacts to events (time-window/delay self-resume by schedule)
-        if node.type == .waitUntil {
-          branchesToResume.append(branch.id)
-        }
-      }
-
-      guard !branchesToResume.isEmpty else { continue }
-
-      // Resume matching branches
-      for branchId in branchesToResume {
-        // Cancel any pending timer for this branch
-        let taskKey = "\(journey.id):\(branchId)"
-        activeTasks[taskKey]?.cancel()
-        activeTasks.removeValue(forKey: taskKey)
-
-        journey.resumeBranch(withId: branchId)
-      }
-
-      inMemoryJourneysById[journey.id] = journey
-
-      // Pass the event-driven resume reason for this reactive re-evaluation
-      let resumeReason: ResumeReason = event != nil ? .event(event!) : .segmentChange
-      let resumeReasonString = event != nil ? "event" : "segment_change"
-
-      // Track journey resumed event
-      eventService.track(
-        JourneyEvents.journeyResumed,
-        properties: JourneyEvents.journeyResumedProperties(
-          journey: journey,
-          nodeId: branchesToResume.first.flatMap { journey.branch(withId: $0)?.currentNodeId },
-          resumeReason: resumeReasonString
-        ),
-        userProperties: nil,
-        userPropertiesSetOnce: nil,
-        completion: nil
+  func flowViewController(
+    _ controller: FlowViewController,
+    didReceiveRuntimeMessage type: String,
+    payload: [String : Any],
+    id: String?
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRuntimeMessage(
+        journeyId: journeyId,
+        type: type,
+        payload: payload,
+        id: id,
+        controller: controller
       )
+    }
+  }
 
-      await executeJourney(journey, campaign: campaign, reason: resumeReason)
+  func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRuntimeDismiss(
+        journeyId: journeyId,
+        reason: reason,
+        controller: controller
+      )
     }
   }
 }

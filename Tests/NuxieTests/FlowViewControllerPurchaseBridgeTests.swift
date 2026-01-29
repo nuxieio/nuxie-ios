@@ -1,5 +1,6 @@
 import Quick
 import Nimble
+import SafariServices
 import WebKit
 import FactoryKit
 @testable import Nuxie
@@ -9,11 +10,26 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
         describe("FlowViewController purchase/restore over bridge") {
             var mockProductService: MockProductService!
             var mockDelegate: MockPurchaseDelegate!
+            var mockTransactionObserver: MockTransactionObserver!
 
             func makeFlow(products: [FlowProduct] = []) -> Flow {
                 let manifest = BuildManifest(totalFiles: 0, totalSize: 0, contentHash: "hash", files: [])
-                let remote = RemoteFlow(id: "flow1", name: "Test", url: "about:blank", products: [], manifest: manifest)
-                return Flow(remoteFlow: remote, products: products)
+                let description = RemoteFlow(
+                    id: "flow1",
+                    bundle: FlowBundleRef(url: "about:blank", manifest: manifest),
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "screen-1",
+                            defaultViewModelId: nil,
+                            defaultInstanceId: nil
+                        )
+                    ],
+                    interactions: [:],
+                    viewModels: [],
+                    viewModelInstances: nil,
+                    converters: nil,
+                )
+                return Flow(remoteFlow: description, products: products)
             }
 
             func injectBootstrap(_ webView: FlowWebView) {
@@ -40,6 +56,8 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
             beforeEach {
                 mockProductService = MockProductService()
                 Container.shared.productService.register { mockProductService }
+                mockTransactionObserver = MockTransactionObserver()
+                Container.shared.transactionObserver.register { mockTransactionObserver }
                 let config = NuxieConfiguration(apiKey: "test")
                 mockDelegate = MockPurchaseDelegate()
                 mockDelegate.simulatedDelay = 0
@@ -52,9 +70,10 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 // Reset mocks
                 mockProductService = nil
                 mockDelegate = nil
+                mockTransactionObserver = nil
             }
 
-            it("posts purchase_success on successful purchase") {
+            it("posts purchase_ui_success on successful purchase") {
                 let productId = "pro"
                 mockProductService.mockProducts = [MockStoreProduct(id: productId, displayName: "Pro", price: 9.99, displayPrice: "$9.99")]
                 mockDelegate.purchaseResult = .success
@@ -62,10 +81,10 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
-                let match = msgs.first { ($0["type"] as? String) == "purchase_success" }
+                let match = msgs.first { ($0["type"] as? String) == "purchase_ui_success" }
                 expect(match).toNot(beNil())
                 let pl = match?["payload"] as? [String: Any]
                 expect(pl?["productId"] as? String).to(equal(productId))
@@ -79,7 +98,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "purchase_cancelled" }
@@ -94,7 +113,7 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "purchase_error" }
@@ -103,12 +122,34 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(pl?["error"] as? String).toNot(beNil())
             }
 
+            it("posts purchase_confirmed after successful sync") {
+                let productId = "pro"
+                mockProductService.mockProducts = [MockStoreProduct(id: productId, displayName: "Pro", price: 9.99, displayPrice: "$9.99")]
+                mockDelegate.purchaseOutcomeOverride = PurchaseOutcome(
+                    result: .success,
+                    transactionJws: "test-jws",
+                    transactionId: "tx-1",
+                    originalTransactionId: "otx-1",
+                    productId: productId
+                )
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                _ = vc.view
+                injectBootstrap(vc.flowWebView)
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/purchase', payload: { productId: '\(productId)' } })") { _, _ in }
+                waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { done() } }
+                let msgs = getMessages(vc.flowWebView)
+                let confirmed = msgs.first { ($0["type"] as? String) == "purchase_confirmed" }
+                expect(confirmed).toNot(beNil())
+                let payload = confirmed?["payload"] as? [String: Any]
+                expect(payload?["productId"] as? String).to(equal(productId))
+            }
+
             it("posts restore_success on restore success") {
                 mockDelegate.restoreResult = .success(restoredCount: 1)
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'restore' })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/restore' })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "restore_success" }
@@ -120,13 +161,30 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 _ = vc.view
                 injectBootstrap(vc.flowWebView)
-                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'restore' })") { _, _ in }
+                vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'action/restore' })") { _, _ in }
                 waitUntil(timeout: .seconds(2)) { done in DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() } }
                 let msgs = getMessages(vc.flowWebView)
                 let match = msgs.first { ($0["type"] as? String) == "restore_error" }
                 expect(match).toNot(beNil())
                 let pl = match?["payload"] as? [String: Any]
                 expect(pl?["error"] as? String).toNot(beNil())
+            }
+
+            it("presents in-app Safari for open_link target") {
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                let window = UIWindow(frame: UIScreen.main.bounds)
+                window.rootViewController = vc
+                window.makeKeyAndVisible()
+                _ = vc.view
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.async {
+                        vc.performOpenLink(urlString: "https://nuxie.com", target: "in_app")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { done() }
+                    }
+                }
+
+                expect(vc.presentedViewController).to(beAKindOf(SFSafariViewController.self))
             }
         }
     }

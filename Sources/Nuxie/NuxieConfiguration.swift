@@ -112,11 +112,6 @@ public class NuxieConfiguration {
     /// Return nil to drop the event, or return a modified event
     public var beforeSend: ((NuxieEvent) -> NuxieEvent?)?
     
-    /// Time window (in seconds) to wait for immediate flow presentation after tracking an event
-    /// If a flow is shown within this window, the track completion will return the flow outcome
-    /// Otherwise, it returns .noInteraction
-    public var immediateOutcomeWindowSeconds: TimeInterval = 1.0
-    
     /// Flow caching settings
     public var maxFlowCacheSize: Int64 = 500 * 1024 * 1024 // 500 MB
     public var flowCacheExpiration: TimeInterval = 7 * 24 * 3600 // 7 days

@@ -5,11 +5,15 @@ import Foundation
 public class MockFlowService: FlowServiceProtocol {
     public var prefetchedFlows: [RemoteFlow] = []
     public var removedFlowIds: [String] = []
+    public var fetchedFlowIds: [String] = []
     
     // Error testing properties
     public var shouldFailFlowDisplay = false
     public var failureError: Error?
     public var displayAttempts: [(flowId: String, timestamp: Date)] = []
+
+    public var mockFlows: [String: Flow] = [:]
+    public var defaultMockFlow: Flow?
     
     // Property storage for testing
     private var properties: [String: Any] = [:]
@@ -18,12 +22,27 @@ public class MockFlowService: FlowServiceProtocol {
     public var mockViewControllers: [String: FlowViewController] = [:]
     public var defaultMockViewController: FlowViewController?
     
-    public func prefetchFlows(_ flows: [RemoteFlow]) {
-        prefetchedFlows.append(contentsOf: flows)
+    public func prefetchFlows(_ remoteFlows: [RemoteFlow]) {
+        prefetchedFlows.append(contentsOf: remoteFlows)
     }
     
     public func removeFlows(_ flowIds: [String]) async {
         removedFlowIds.append(contentsOf: flowIds)
+    }
+
+    public func fetchFlow(id: String) async throws -> Flow {
+        fetchedFlowIds.append(id)
+
+        if let flow = mockFlows[id] {
+            return flow
+        }
+        if let flow = defaultMockFlow {
+            return flow
+        }
+        if let error = failureError {
+            throw error
+        }
+        throw FlowError.flowNotFound(id)
     }
     
     @MainActor
@@ -49,6 +68,13 @@ public class MockFlowService: FlowServiceProtocol {
         // Create a basic mock view controller
         return MockFlowViewController(mockFlowId: flowId)
     }
+
+    @MainActor
+    public func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+        let controller = try await viewController(for: flowId)
+        controller.runtimeDelegate = runtimeDelegate
+        return controller
+    }
     
     public func clearCache() async {
         // Mock implementation - just clear tracked data
@@ -59,12 +85,15 @@ public class MockFlowService: FlowServiceProtocol {
     public func reset() {
         prefetchedFlows = []
         removedFlowIds = []
+        fetchedFlowIds = []
         shouldFailFlowDisplay = false
         failureError = nil
         displayAttempts = []
         properties = [:]
         mockViewControllers = [:]
         defaultMockViewController = nil
+        mockFlows = [:]
+        defaultMockFlow = nil
     }
     
     // Property storage methods for testing

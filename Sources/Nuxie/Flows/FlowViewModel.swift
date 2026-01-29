@@ -73,20 +73,20 @@ class FlowViewModel {
     /// Async version of loadFlow
     private func loadFlowAsync() async {
         // 1. Try loading from cached WebArchive first
-        if let archiveURL = await archiveService.getArchiveURL(for: flow.remoteFlow) {
+        if let archiveURL = await archiveService.getArchiveURL(for: flow) {
             onLoadURL?(archiveURL)
             LogDebug("Loading flow from cached WebArchive: \(archiveURL)")
             return
         }
         
         // 2. Fallback to loading from remote URL
-        if let remoteURL = URL(string: flow.remoteFlow.url) {
+        if let remoteURL = URL(string: flow.url) {
             let request = URLRequest(url: remoteURL)
             onLoadRequest?(request)
             LogDebug("Loading flow from remote URL: \(remoteURL)")
             
             // 3. Download archive in background for next time
-            await archiveService.preloadArchive(for: flow.remoteFlow)
+            await archiveService.preloadArchive(for: flow)
         } else {
             // 4. Show error state
             currentState = .error
@@ -132,15 +132,14 @@ class FlowViewModel {
     /// Update the flow and reload if content has changed
     func updateFlowIfNeeded(_ newFlow: Flow) {
         // Check if the flow content has changed (using manifest hash)
-        let hasContentChanged = flow.remoteFlow.manifest.contentHash != newFlow.remoteFlow.manifest.contentHash
-        let hasURLChanged = flow.remoteFlow.url != newFlow.remoteFlow.url
+        let hasContentChanged = flow.manifest.contentHash != newFlow.manifest.contentHash
         
         // Always update the flow reference
         self.flow = newFlow
         self.products = newFlow.products
         
         // If content or URL changed, reload the web view
-        if hasContentChanged || hasURLChanged {
+        if hasContentChanged {
             LogDebug("Flow content changed for \(flow.id), reloading web view")
             loadFlow()
         } else if products != newFlow.products {

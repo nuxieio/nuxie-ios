@@ -108,6 +108,7 @@ final class IdentityIntegrationTests: AsyncSpec {
                         let events = await eventService.getEventsForUser(userId, limit: 10)
                         return events.first { $0.name == "$identify" }
                     }.toEventuallyNot(beNil(), timeout: .seconds(2))
+                    await eventService.drain()
 
                     let firstEvents = await eventService.getEventsForUser(userId, limit: 10)
                     let firstIdentify = firstEvents.first { $0.name == "$identify" }
@@ -117,6 +118,7 @@ final class IdentityIntegrationTests: AsyncSpec {
 
                     // Second identify with different setOnce properties
                     NuxieSDK.shared.identify(userId, userPropertiesSetOnce: ["first_seen": "2024-12-01"])
+                    try? await Task.sleep(nanoseconds: 50_000_000)
 
                     expect(NuxieSDK.shared.isIdentified).to(beTrue())
 
@@ -124,6 +126,7 @@ final class IdentityIntegrationTests: AsyncSpec {
                         let events = await eventService.getEventsForUser(userId, limit: 20)
                         return events.first { $0.name == "$identify" }
                     }.toEventuallyNot(beNil(), timeout: .seconds(2))
+                    await eventService.drain()
 
                     let latestEvents = await eventService.getEventsForUser(userId, limit: 20)
                     let latestIdentify = latestEvents.first { $0.name == "$identify" }

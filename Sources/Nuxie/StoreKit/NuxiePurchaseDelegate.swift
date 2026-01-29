@@ -28,6 +28,29 @@ public enum PurchaseResult: Equatable {
     }
 }
 
+/// Outcome of a purchase including optional verified transaction data
+public struct PurchaseOutcome: Equatable {
+    public let result: PurchaseResult
+    public let transactionJws: String?
+    public let transactionId: String?
+    public let originalTransactionId: String?
+    public let productId: String?
+
+    public init(
+        result: PurchaseResult,
+        transactionJws: String? = nil,
+        transactionId: String? = nil,
+        originalTransactionId: String? = nil,
+        productId: String? = nil
+    ) {
+        self.result = result
+        self.transactionJws = transactionJws
+        self.transactionId = transactionId
+        self.originalTransactionId = originalTransactionId
+        self.productId = productId
+    }
+}
+
 /// Result type for restore operations
 public enum RestoreResult: Equatable {
     /// Restore completed successfully with count of restored items
@@ -59,8 +82,18 @@ public protocol NuxiePurchaseDelegate: AnyObject {
     /// - Parameter product: The StoreKit product to purchase
     /// - Returns: Result of the purchase operation
     func purchase(_ product: any StoreProductProtocol) async -> PurchaseResult
+
+    /// Optional fast-path purchase API returning verified transaction data when available
+    func purchaseOutcome(_ product: any StoreProductProtocol) async -> PurchaseOutcome
     
     /// Restore previous purchases
     /// - Returns: Result of the restore operation
     func restore() async -> RestoreResult
+}
+
+public extension NuxiePurchaseDelegate {
+    func purchaseOutcome(_ product: any StoreProductProtocol) async -> PurchaseOutcome {
+        let result = await purchase(product)
+        return PurchaseOutcome(result: result, productId: product.id)
+    }
 }

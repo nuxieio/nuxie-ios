@@ -154,7 +154,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     let eventService = Container.shared.eventService()
 
                     // Track initial event
-                    NuxieSDK.shared.track("before_background")
+                    NuxieSDK.shared.trigger("before_background")
 
                     await expect {
                         let events = await eventService.getRecentEvents(limit: 20)
@@ -168,7 +168,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     sessionService.onAppBecameActive()
 
                     // Track event after returning
-                    NuxieSDK.shared.track("after_background")
+                    NuxieSDK.shared.trigger("after_background")
 
                     // Both events should be tracked
                     await expect {
@@ -184,7 +184,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     // Rapid cycles
                     for i in 0..<10 {
                         sessionService.onAppDidEnterBackground()
-                        NuxieSDK.shared.track("cycle_event_\(i)")
+                        NuxieSDK.shared.trigger("cycle_event_\(i)")
                         sessionService.onAppBecameActive()
                     }
 
@@ -216,8 +216,8 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     let eventService = Container.shared.eventService()
 
                     // Track some events
-                    NuxieSDK.shared.track("event_1")
-                    NuxieSDK.shared.track("event_2")
+                    NuxieSDK.shared.trigger("event_1")
+                    NuxieSDK.shared.trigger("event_2")
 
                     // Enter background
                     await eventService.onAppDidEnterBackground()
@@ -236,7 +236,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     await eventService.onAppDidEnterBackground()
 
                     // Track event while backgrounded
-                    NuxieSDK.shared.track("backgrounded_event")
+                    NuxieSDK.shared.trigger("backgrounded_event")
 
                     // Foreground
                     await eventService.onAppBecameActive()
@@ -402,7 +402,7 @@ final class BackgroundingIntegrationTests: AsyncSpec {
                     await eventService.onAppDidEnterBackground()
 
                     // Track event while backgrounded
-                    NuxieSDK.shared.track("stored_during_bg", properties: ["test": true])
+                    NuxieSDK.shared.trigger("stored_during_bg", properties: ["test": true])
 
                     await eventService.drain()
 

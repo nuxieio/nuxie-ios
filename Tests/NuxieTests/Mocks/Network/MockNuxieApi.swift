@@ -53,9 +53,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
             name: "Test Campaign",
             versionId: "version-1",
             versionNumber: 1,
-            frequencyPolicy: "unlimited",
-            frequencyInterval: nil,
-            messageLimit: nil,
+            versionName: nil,
+            reentry: .everyTime,
             publishedAt: "2024-01-01T00:00:00Z",
             trigger: .event(EventTriggerConfig(
                 eventName: "test_event",
@@ -66,8 +65,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
                     expr: .bool(true)
                 )
             )),
-            entryNodeId: "node-1",
-            workflow: Workflow(nodes: []),
+            flowId: "flow-1",
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
@@ -85,23 +83,10 @@ public actor MockNuxieApi: NuxieApiProtocol {
             )
         )
         
-        let flow = RemoteFlow(
-            id: "flow-1",
-            name: "Test Flow",
-            url: "https://example.com/flow",
-            products: [],
-            manifest: BuildManifest(
-                totalFiles: 5,
-                totalSize: 1024,
-                contentHash: "hash123",
-                files: []
-            )
-        )
-        
         self.profileResponse = ProfileResponse(
             campaigns: [campaign],
             segments: [segment],
-            flows: [flow],
+            flows: [ResponseBuilders.buildRemoteFlow()],
             userProperties: nil,
             experiments: nil,
             features: nil,
@@ -194,15 +179,26 @@ public actor MockNuxieApi: NuxieApiProtocol {
         
         return RemoteFlow(
             id: flowId,
-            name: "Test Flow",
-            url: "https://example.com/flow",
-            products: [],
-            manifest: BuildManifest(
-                totalFiles: 5,
-                totalSize: 1024,
-                contentHash: "hash123",
-                files: []
-            )
+            bundle: FlowBundleRef(
+                url: "https://example.com/flow",
+                manifest: BuildManifest(
+                    totalFiles: 5,
+                    totalSize: 1024,
+                    contentHash: "hash123",
+                    files: []
+                )
+            ),
+            screens: [
+                RemoteFlowScreen(
+                    id: "screen-1",
+                    defaultViewModelId: nil,
+                    defaultInstanceId: nil
+                )
+            ],
+            interactions: [:],
+            viewModels: [],
+            viewModelInstances: nil,
+            converters: nil,
         )
     }
     
