@@ -26,19 +26,19 @@ class TestProfileResponseBuilder {
         self.segments = segments
         return self
     }
-
+    
+    func addSegment(_ segment: Segment) -> TestProfileResponseBuilder {
+        segments.append(segment)
+        return self
+    }
+    
     func withFlows(_ flows: [RemoteFlow]) -> TestProfileResponseBuilder {
         self.flows = flows
         return self
     }
-
+    
     func addFlow(_ flow: RemoteFlow) -> TestProfileResponseBuilder {
         flows.append(flow)
-        return self
-    }
-    
-    func addSegment(_ segment: Segment) -> TestProfileResponseBuilder {
-        segments.append(segment)
         return self
     }
     

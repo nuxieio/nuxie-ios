@@ -15,14 +15,14 @@ public class NuxieContextBuilder {
     private let configuration: NuxieConfiguration?
     
     // Cache static context to avoid repeated system calls
-    private let staticContextTask: Task<[String: Any], Never>
+    private let staticContextCache: [String: Any]
     
     // MARK: - Initialization
     
     internal init(identityService: IdentityServiceProtocol?, configuration: NuxieConfiguration?) {
         self.identityService = identityService
         self.configuration = configuration
-        self.staticContextTask = Task { await Self.buildStaticDeviceContext() }
+        self.staticContextCache = Self.buildStaticDeviceContext()
     }
     
     // MARK: - Context Building
@@ -30,16 +30,14 @@ public class NuxieContextBuilder {
     /// Build complete enriched properties using a layered approach
     /// - Parameter customProperties: User-provided properties
     /// - Returns: Fully enriched properties dictionary
-    public func buildEnrichedProperties(customProperties: [String: Any] = [:]) async -> [String: Any] {
+    public func buildEnrichedProperties(customProperties: [String: Any] = [:]) -> [String: Any] {
         var enriched: [String: Any] = [:]
         
         // Layer 1: Static Device Context (cached)
-        let staticContext = await staticContextTask.value
-        enriched.merge(staticContext) { _, new in new }
+        enriched.merge(staticContextCache) { _, new in new }
         
         // Layer 2: Dynamic Context  
-        let dynamicContext = await buildDynamicContext()
-        enriched.merge(dynamicContext) { _, new in new }
+        enriched.merge(buildDynamicContext()) { _, new in new }
         
         // Layer 3: SDK Context
         enriched.merge(buildSDKContext()) { _, new in new }
@@ -57,7 +55,7 @@ public class NuxieContextBuilder {
     
     /// Build static device context (cached for performance)
     /// These properties don't change during app lifetime
-    private static func buildStaticDeviceContext() async -> [String: Any] {
+    private static func buildStaticDeviceContext() -> [String: Any] {
         var context: [String: Any] = [:]
         
         // App information
@@ -82,7 +80,7 @@ public class NuxieContextBuilder {
         // Device information
         context["$device_manufacturer"] = "Apple"
         context["$device_model"] = getDeviceModel()
-        context["$device_type"] = await getDeviceType()
+        context["$device_type"] = getDeviceType()
         
         // Operating system
         let processInfo = ProcessInfo.processInfo
@@ -99,23 +97,19 @@ public class NuxieContextBuilder {
     // MARK: - Layer 2: Dynamic Context
     
     /// Build dynamic context that can change during app lifetime
-    private func buildDynamicContext() async -> [String: Any] {
+    private func buildDynamicContext() -> [String: Any] {
         var context: [String: Any] = [:]
         
         // Screen information
         #if canImport(UIKit)
-        let screenInfo = await MainActor.run { () -> (CGFloat, CGFloat, CGFloat) in
-            let screen = UIScreen.main.bounds.size
-            return (screen.width, screen.height, UIScreen.main.scale)
-        }
-        context["$screen_width"] = Float(screenInfo.0)
-        context["$screen_height"] = Float(screenInfo.1)
-        context["$screen_scale"] = Float(screenInfo.2)
+        let screen = UIScreen.main.bounds.size
+        context["$screen_width"] = Float(screen.width)
+        context["$screen_height"] = Float(screen.height)
+        context["$screen_scale"] = Float(UIScreen.main.scale)
         #elseif canImport(AppKit)
-        let screenSize = await MainActor.run { NSScreen.main?.frame.size }
-        if let screenSize {
-            context["$screen_width"] = Float(screenSize.width)
-            context["$screen_height"] = Float(screenSize.height)
+        if let screen = NSScreen.main?.frame.size {
+            context["$screen_width"] = Float(screen.width)
+            context["$screen_height"] = Float(screen.height)
         }
         #endif
         
@@ -195,11 +189,9 @@ public class NuxieContextBuilder {
         return identifier
     }
     
-    private static func getDeviceType() async -> String {
+    private static func getDeviceType() -> String {
         #if os(iOS)
-        return await MainActor.run {
-            UIDevice.current.userInterfaceIdiom == .pad ? "Tablet" : "Mobile"
-        }
+        return UIDevice.current.userInterfaceIdiom == .pad ? "Tablet" : "Mobile"
         #elseif os(macOS)
         return "Desktop"
         #elseif os(tvOS)
@@ -239,15 +231,13 @@ public class NuxieContextBuilder {
     }
     
     #if canImport(UIKit)
-    private func getBatteryState() async -> String {
-        await MainActor.run {
-            switch UIDevice.current.batteryState {
-            case .unknown: return "unknown"
-            case .unplugged: return "unplugged"
-            case .charging: return "charging"
-            case .full: return "full"
-            @unknown default: return "unknown"
-            }
+    private func getBatteryState() -> String {
+        switch UIDevice.current.batteryState {
+        case .unknown: return "unknown"
+        case .unplugged: return "unplugged"
+        case .charging: return "charging"
+        case .full: return "full"
+        @unknown default: return "unknown"
         }
     }
     #endif

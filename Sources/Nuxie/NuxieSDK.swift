@@ -162,91 +162,29 @@ public final class NuxieSDK {
     LogInfo("SDK shutdown completed")
   }
 
-  // MARK: - Trigger (Event) API
+  // MARK: - Core Event Method
 
-  /// Trigger an event. Returns a handle that can be ignored (fire-and-forget),
-  /// observed via callback, or consumed as an async stream.
+  /// Track an event with optional user properties (synchronous wrapper)
   /// - Parameters:
   ///   - event: Event name
   ///   - properties: Event properties
   ///   - userProperties: Properties to set on the user profile (mapped to $set)
   ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
-  ///   - handler: Optional callback for progressive TriggerUpdate events
-  @discardableResult
-  public func trigger(
+  ///   - completion: Optional completion handler called when event completes (immediately or after immediate flow)
+  public func track(
     _ event: String,
     properties: [String: Any]? = nil,
     userProperties: [String: Any]? = nil,
     userPropertiesSetOnce: [String: Any]? = nil,
-    handler: ((TriggerUpdate) -> Void)? = nil
-  ) -> TriggerHandle {
-    guard isSetup else { return .empty }
-
-    let triggerService = container.triggerService()
-    var continuation: AsyncStream<TriggerUpdate>.Continuation?
-    var didFinish = false
-
-    func finishStream() {
-      guard !didFinish else { return }
-      didFinish = true
-      continuation?.finish()
-    }
-
-    let stream = AsyncStream<TriggerUpdate> { streamContinuation in
-      continuation = streamContinuation
-      streamContinuation.onTermination = { _ in
-        Task { @MainActor in
-          finishStream()
-        }
-      }
-    }
-
-    let task = Task { @MainActor in
-      await triggerService.trigger(
-        event,
-        properties: properties,
-        userProperties: userProperties,
-        userPropertiesSetOnce: userPropertiesSetOnce
-      ) { update in
-        handler?(update)
-        continuation?.yield(update)
-        if NuxieSDK.isTerminalTriggerUpdate(update) {
-          finishStream()
-        }
-      }
-
-      finishStream()
-    }
-
-    return TriggerHandle(stream: stream) {
-      task.cancel()
-      Task { @MainActor in
-        finishStream()
-      }
-    }
-  }
-
-  private static func isTerminalTriggerUpdate(_ update: TriggerUpdate) -> Bool {
-    switch update {
-    case .error:
-      return true
-    case .decision(let decision):
-      switch decision {
-      case .allowedImmediate, .deniedImmediate, .noMatch, .suppressed:
-        return true
-      default:
-        return false
-      }
-    case .entitlement(let entitlement):
-      switch entitlement {
-      case .allowed, .denied:
-        return true
-      case .pending:
-        return false
-      }
-    case .journey:
-      return true
-    }
+    completion: ((EventResult) -> Void)? = nil
+  ) {
+    container.eventService().track(
+      event,
+      properties: properties,
+      userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce,
+      completion: completion
+    )
   }
 
   // MARK: - User Management
@@ -327,7 +265,8 @@ public final class NuxieSDK {
       "$identify",
       properties: props,
       userProperties: userProperties,
-      userPropertiesSetOnce: userPropertiesSetOnce
+      userPropertiesSetOnce: userPropertiesSetOnce,
+      completion: nil
     )
   }
 
@@ -402,9 +341,9 @@ public final class NuxieSDK {
   }
 
 
-  // MARK: - Event History (Internal use for journey evaluation)
+  // MARK: - Event History (Internal use for workflow evaluation)
 
-  /// Get recent events for journey evaluation
+  /// Get recent events for workflow evaluation
   /// - Parameter limit: Maximum events to return (default: 100)
   /// - Returns: Array of recent events or empty array if storage unavailable
   internal func getRecentEvents(limit: Int = 100) async -> [StoredEvent] {
@@ -600,7 +539,7 @@ public final class NuxieSDK {
     }
     
     let flowPresentationService = container.flowPresentationService()
-    try await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
+    try await flowPresentationService.presentFlow(flowId, from: nil)
   }
 
   // MARK: - Profile Management
@@ -821,7 +760,8 @@ public final class NuxieSDK {
       "$feature_used",
       properties: properties,
       userProperties: nil,
-      userPropertiesSetOnce: nil
+      userPropertiesSetOnce: nil,
+      completion: nil
     )
 
     // Decrement local balance for immediate UI feedback

@@ -55,13 +55,16 @@ internal actor ProfileService: ProfileServiceProtocol {
     // Disk cache for persistence
     private let diskCache: any CachedProfileStore
     
+    // Flow tracking
+    private var currentFlows: [RemoteFlow] = []
+    
     // Background refresh timer
     private var refreshTimer: Task<Void, Never>?
 
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
-    @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
     @Injected(\.flowService) private var flowService: FlowServiceProtocol
+    @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
     // Note: journeyService is resolved lazily in resumeActiveJourneys to avoid circular dependency
     // (JourneyService → ProfileService → JourneyService)
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
@@ -170,8 +173,6 @@ internal actor ProfileService: ProfileServiceProtocol {
         if let cached = await diskCache.retrieve(forKey: distinctId, allowStale: true) {
             self.cachedProfile = cached
             LogDebug("Loaded profile from disk (age: \(Int(cached.cachedAt.timeIntervalSinceNow * -1 / 60))m)")
-
-            await syncFlows(newFlows: cached.response.flows, previousFlows: nil)
             
             // Start refresh timer if cache is stale
             let age = dateProvider.timeIntervalSince(cached.cachedAt)
@@ -185,11 +186,10 @@ internal actor ProfileService: ProfileServiceProtocol {
     private func refreshProfile(distinctId: String) async throws -> ProfileResponse {
         do {
             let locale = effectiveLocale
-            let previousProfile = cachedProfile?.response
             let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
             LogInfo("Network fetch succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
-            await handleProfileUpdate(fresh, previousProfile: previousProfile)
+            await handleProfileUpdate(fresh)
             return fresh
         } catch {
             LogError("Network fetch failed: \(error)")
@@ -201,11 +201,10 @@ internal actor ProfileService: ProfileServiceProtocol {
     private func refreshInBackground(distinctId: String) async {
         do {
             let locale = effectiveLocale
-            let previousProfile = cachedProfile?.response
             let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
             LogInfo("Background refresh succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
-            await handleProfileUpdate(fresh, previousProfile: previousProfile)
+            await handleProfileUpdate(fresh)
         } catch {
             LogDebug("Background refresh failed: \(error)")
         }
@@ -387,15 +386,11 @@ internal actor ProfileService: ProfileServiceProtocol {
         
         // Clear old user's disk cache
         await diskCache.remove(forKey: oldDistinctId)
-
-        await flowService.clearCache()
         
         // Try to load new user's cache from disk
         if let cached = await diskCache.retrieve(forKey: newDistinctId, allowStale: true) {
             self.cachedProfile = cached
             LogDebug("Loaded new user's profile from disk")
-
-            await syncFlows(newFlows: cached.response.flows, previousFlows: nil)
             
             // Refresh if stale
             let age = dateProvider.timeIntervalSince(cached.cachedAt)
@@ -408,10 +403,9 @@ internal actor ProfileService: ProfileServiceProtocol {
         }
     }
     
-    private func handleProfileUpdate(
-        _ profile: ProfileResponse,
-        previousProfile: ProfileResponse?
-    ) async {
+    // MARK: - Flow lifecycle (unchanged from your version, but stays actor-isolated)
+
+    private func handleProfileUpdate(_ profile: ProfileResponse) async {
         // Get the current distinct ID for explicit attribution
         let distinctId = identityService.getDistinctId()
         
@@ -436,43 +430,56 @@ internal actor ProfileService: ProfileServiceProtocol {
             await Container.shared.journeyService().resumeFromServerState(journeys, campaigns: profile.campaigns)
         }
 
-        await syncFlows(
-            newFlows: profile.flows,
-            previousFlows: previousProfile?.flows
+        // Diff flows
+        let changes = diffFlows(oldFlows: currentFlows, newFlows: profile.flows)
+        guard changes.hasChanges else {
+            LogDebug("No flow changes detected in profile update")
+            return
+        }
+
+        LogInfo(
+            "Flow changes - Added: \(changes.added.count), Updated: \(changes.updated.count), Removed: \(changes.removed.count)"
         )
+
+        if !changes.added.isEmpty {
+            flowService.prefetchFlows(changes.added)
+        }
+        if !changes.updated.isEmpty {
+            await flowService.removeFlows(changes.updated.map { $0.id })
+            flowService.prefetchFlows(changes.updated)
+        }
+        if !changes.removed.isEmpty {
+            await flowService.removeFlows(changes.removed)
+        }
+
+        currentFlows = profile.flows
     }
 
-    private func syncFlows(newFlows: [RemoteFlow], previousFlows: [RemoteFlow]?) async {
-        let previousFlows = previousFlows ?? []
-        if newFlows.isEmpty && previousFlows.isEmpty { return }
+    private func diffFlows(oldFlows: [RemoteFlow], newFlows: [RemoteFlow]) -> FlowChanges {
+        let oldById = Dictionary(uniqueKeysWithValues: oldFlows.map { ($0.id, $0) })
+        let newById = Dictionary(uniqueKeysWithValues: newFlows.map { ($0.id, $0) })
 
-        let previousById = Dictionary(uniqueKeysWithValues: previousFlows.map { ($0.id, $0) })
-        let nextById = Dictionary(uniqueKeysWithValues: newFlows.map { ($0.id, $0) })
+        var added: [RemoteFlow] = []
+        var updated: [RemoteFlow] = []
+        var removed: [String] = []
 
-        var flowsToPrefetch: [RemoteFlow] = []
-        var flowIdsToRemove = Set<String>()
-
-        for flow in newFlows {
-            if let previous = previousById[flow.id] {
-                if previous.bundle.manifest.contentHash != flow.bundle.manifest.contentHash {
-                    flowIdsToRemove.insert(flow.id)
-                    flowsToPrefetch.append(flow)
+        for (id, newFlow) in newById {
+            if let oldFlow = oldById[id] {
+                if oldFlow.manifest.contentHash != newFlow.manifest.contentHash {
+                    updated.append(newFlow)
+                    LogDebug("Flow updated: \(newFlow.name) (hash changed)")
                 }
             } else {
-                flowsToPrefetch.append(flow)
+                added.append(newFlow)
+                LogDebug("Flow added: \(newFlow.name)")
             }
         }
 
-        for previous in previousFlows where nextById[previous.id] == nil {
-            flowIdsToRemove.insert(previous.id)
+        for id in oldById.keys where newById[id] == nil {
+            removed.append(id)
+            LogDebug("Flow removed: \(id)")
         }
 
-        if !flowIdsToRemove.isEmpty {
-            await flowService.removeFlows(Array(flowIdsToRemove))
-        }
-
-        if !flowsToPrefetch.isEmpty {
-            flowService.prefetchFlows(flowsToPrefetch)
-        }
+        return FlowChanges(added: added, updated: updated, removed: removed)
     }
 }

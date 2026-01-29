@@ -2,23 +2,11 @@ import Foundation
 import StoreKit
 import FactoryKit
 
-protocol TransactionObserverProtocol: Actor {
-    func startListening()
-    func stopListening()
-    func syncTransaction(
-        transactionJws: String,
-        transactionId: String,
-        productId: String?,
-        originalTransactionId: String?
-    ) async -> Bool
-    func syncCurrentEntitlements() async
-}
-
 /// Observes StoreKit 2 Transaction.updates stream and syncs verified transactions with the backend
 ///
 /// By observing Transaction.updates directly, we catch all purchases regardless of how they
 /// were initiated (via SDK, app's own StoreKit code, or even the App Store directly).
-internal actor TransactionObserver: TransactionObserverProtocol {
+internal actor TransactionObserver {
 
     // MARK: - Dependencies
 
@@ -99,6 +87,12 @@ internal actor TransactionObserver: TransactionObserverProtocol {
     private func handleVerifiedTransaction(_ transaction: Transaction, jwsRepresentation transactionJwt: String) async {
         let transactionIdString = String(transaction.id)
 
+        // Skip if already synced in this session
+        guard !syncedTransactionIds.contains(transactionIdString) else {
+            LogDebug("TransactionObserver: Transaction \(transaction.id) already synced this session")
+            return
+        }
+
         LogInfo("TransactionObserver: Processing verified transaction \(transaction.id) for product \(transaction.productID)")
 
         if transaction.revocationDate != nil {
@@ -118,67 +112,44 @@ internal actor TransactionObserver: TransactionObserverProtocol {
             return
         }
 
-        let synced = await syncTransaction(
-            transactionJws: transactionJwt,
-            transactionId: transactionIdString,
-            productId: transaction.productID,
-            originalTransactionId: String(transaction.originalID)
-        )
-
-        if synced {
-            await transaction.finish()
-            LogDebug("TransactionObserver: Transaction \(transaction.id) finished")
-        }
-    }
-
-    /// Sync a verified transaction JWS with backend and update features
-    /// Returns true if the transaction is synced or already known.
-    func syncTransaction(
-        transactionJws: String,
-        transactionId: String,
-        productId: String?,
-        originalTransactionId: String?
-    ) async -> Bool {
-        let preferredId = (originalTransactionId?.isEmpty == false)
-            ? originalTransactionId
-            : (transactionId.isEmpty ? nil : transactionId)
-        let dedupeKey = preferredId ?? transactionJws
-
-        if syncedTransactionIds.contains(dedupeKey) {
-            LogDebug("TransactionObserver: Transaction already synced, finishing fast path")
-            return true
-        }
-
+        // Get the current user's distinct ID
         let distinctId = identityService.getDistinctId()
 
         do {
+            // Sync with backend
             let response = try await api.syncTransaction(
-                transactionJwt: transactionJws,
+                transactionJwt: transactionJwt,
                 distinctId: distinctId
             )
 
             if response.success {
+                LogInfo("TransactionObserver: Transaction \(transaction.id) synced successfully")
+
+                // Update feature cache with returned features
                 if let features = response.features {
                     await featureService.updateFromPurchase(features)
                 }
 
-                syncedTransactionIds.insert(dedupeKey)
+                // Mark as synced
+                syncedTransactionIds.insert(transactionIdString)
 
-                NuxieSDK.shared.trigger("$purchase_synced", properties: [
-                    "transaction_id": transactionId,
-                    "original_transaction_id": originalTransactionId ?? "",
-                    "product_id": productId ?? "",
+                // Track purchase event
+                NuxieSDK.shared.track("$purchase_synced", properties: [
+                    "transaction_id": transactionIdString,
+                    "product_id": transaction.productID,
                     "customer_id": response.customerId ?? ""
                 ])
 
-                return true
+                // Only finish the transaction AFTER backend confirms success
+                await transaction.finish()
+                LogDebug("TransactionObserver: Transaction \(transaction.id) finished")
+            } else {
+                LogError("TransactionObserver: Backend sync failed for transaction \(transaction.id): \(response.error ?? "Unknown error")")
+                // Don't finish - will retry on next app launch via Transaction.unfinished
             }
-
-            LogError("TransactionObserver: Backend sync failed for transaction \(transactionId): \(response.error ?? "Unknown error")")
-            return false
         } catch {
-            LogError("TransactionObserver: Failed to sync transaction \(transactionId): \(error)")
-            return false
+            LogError("TransactionObserver: Failed to sync transaction \(transaction.id): \(error)")
+            // Don't finish - will retry on next app launch via Transaction.unfinished
         }
     }
 

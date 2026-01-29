@@ -24,7 +24,7 @@ actor FlowStore {
     
     // MARK: - Cache Management
     
-    /// Preload multiple flows with RemoteFlow data (typically from warm caches)
+    /// Preload multiple flows with RemoteFlow data (typically from ProfileService)
     /// This enriches the RemoteFlows with products and caches them
     func preloadFlows(_ remoteFlows: [RemoteFlow]) async {
         LogDebug("Preloading \(remoteFlows.count) flows")
@@ -65,7 +65,7 @@ actor FlowStore {
         LogDebug("Removed flow from cache: \(id)")
     }
     
-    /// Invalidate cached Flow model
+    /// Invalidate cached Flow model (but keep RemoteFlow)
     func invalidateFlow(id: String) {
         // Remove all variants of this flow
         flowModels = flowModels.filter { $0.key.id != id }
@@ -116,10 +116,10 @@ actor FlowStore {
             do {
                 // Fetch from API
                 LogInfo("Fetching flow from API: \(id)")
-                let remoteFlow = try await self.api.fetchFlow(flowId: id)
+                let remote = try await self.api.fetchFlow(flowId: id)
                 
                 // Enrich and cache
-                let flow = try await self.enrichFlow(remoteFlow)
+                let flow = try await self.enrichFlow(remote)
                 await self.setFlow(flow, for: key)
                 
                 // Clear pending after successful completion
@@ -147,7 +147,7 @@ actor FlowStore {
     }
     
     private func enrichFlow(_ remoteFlow: RemoteFlow) async throws -> Flow {
-        // Fetch products if the flow references any
+        // Fetch products if the flow has any defined
         let products = try await fetchProducts(for: remoteFlow)
         
         // Create and return the flow with fetched products
@@ -161,200 +161,39 @@ actor FlowStore {
     }
     
     private func fetchProducts(for remoteFlow: RemoteFlow) async throws -> [FlowProduct] {
-        let productIds = extractProductIds(from: remoteFlow)
-        guard !productIds.isEmpty else {
-            LogDebug("No products referenced in flow: \(remoteFlow.id)")
+        // Early return if no products defined in the flow
+        guard !remoteFlow.products.isEmpty else {
+            LogDebug("No products defined for flow: \(remoteFlow.id)")
             return []
         }
         
-        let storeProducts = try await productService.fetchProducts(for: Set(productIds))
+        // Use ProductService to fetch products for this flow
+        let flowProducts = try await productService.fetchProducts(for: [remoteFlow])
         
-        let flowProducts = storeProducts.map { storeProduct in
-            FlowProduct(
+        guard let storeProducts = flowProducts[remoteFlow.id] else {
+            LogWarning("ProductService returned no products for flow: \(remoteFlow.id)")
+            return []
+        }
+        
+        // Map to flow products with StoreKit data
+        let flowProductList = storeProducts.compactMap { storeProduct -> FlowProduct? in
+            guard let flowProductMetadata = remoteFlow.products.first(where: { $0.extId == storeProduct.id }) else {
+                LogWarning("Product \(storeProduct.id) not found in flow manifest")
+                return nil
+            }
+            
+            // Get period directly from StoreKit subscription info
+            let period = mapSubscriptionPeriod(storeProduct.subscriptionPeriod)
+            
+            return FlowProduct(
                 id: storeProduct.id,
                 name: storeProduct.displayName,
                 price: storeProduct.displayPrice,
-                period: mapSubscriptionPeriod(storeProduct.subscriptionPeriod)
+                period: period
             )
         }
         
-        return flowProducts
-    }
-    
-    private func extractProductIds(from remoteFlow: RemoteFlow) -> [String] {
-        var ids = Set<String>()
-        let instances = remoteFlow.viewModelInstances ?? []
-        let instancesByViewModelId = Dictionary(grouping: instances, by: { $0.viewModelId })
-
-        for viewModel in remoteFlow.viewModels {
-            let defaults = buildDefaultValues(schema: viewModel.properties)
-            if let viewModelInstances = instancesByViewModelId[viewModel.id],
-               !viewModelInstances.isEmpty {
-                for instance in viewModelInstances {
-                    let mergedValues = mergeValues(defaults: defaults, overrides: instance.values)
-                    collectProductIds(
-                        schema: viewModel.properties,
-                        values: mergedValues,
-                        into: &ids
-                    )
-                }
-            } else if !defaults.isEmpty {
-                collectProductIds(
-                    schema: viewModel.properties,
-                    values: defaults,
-                    into: &ids
-                )
-            }
-        }
-
-        return Array(ids)
-    }
-
-    private func buildDefaultValues(schema: [String: ViewModelProperty]) -> [String: AnyCodable] {
-        var values: [String: AnyCodable] = [:]
-
-        for (key, property) in schema {
-            if let defaultValue = property.defaultValue {
-                values[key] = defaultValue
-                continue
-            }
-            if property.type == .object, let schema = property.schema {
-                let nestedDefaults = buildDefaultValues(schema: schema)
-                let raw = nestedDefaults.mapValues { $0.value }
-                values[key] = AnyCodable(raw)
-                continue
-            }
-            if let fallback = defaultValue(for: property) {
-                values[key] = fallback
-            }
-        }
-
-        return values
-    }
-
-    private func defaultValue(for property: ViewModelProperty) -> AnyCodable? {
-        if let defaultValue = property.defaultValue {
-            return defaultValue
-        }
-        switch property.type {
-        case .list:
-            return AnyCodable([Any]())
-        case .object:
-            return AnyCodable([String: Any]())
-        case .viewModel:
-            return AnyCodable([String: Any]())
-        case .enum:
-            return AnyCodable(property.enumValues?.first ?? "")
-        case .string, .color, .image:
-            return AnyCodable("")
-        case .number:
-            return AnyCodable(0)
-        case .list_index, .trigger:
-            return AnyCodable(0)
-        case .boolean:
-            return AnyCodable(false)
-        }
-    }
-
-    private func mergeValues(
-        defaults: [String: AnyCodable],
-        overrides: [String: AnyCodable]
-    ) -> [String: AnyCodable] {
-        let defaultRaw = defaults.mapValues { unwrapAnyCodable($0.value) }
-        let overrideRaw = overrides.mapValues { unwrapAnyCodable($0.value) }
-        let merged = mergeRaw(defaultRaw, overrideRaw)
-        return merged.mapValues { AnyCodable($0) }
-    }
-
-    private func mergeRaw(_ base: [String: Any], _ overrides: [String: Any]) -> [String: Any] {
-        var result = base
-        for (key, value) in overrides {
-            if let baseDict = result[key] as? [String: Any],
-               let overrideDict = value as? [String: Any] {
-                result[key] = mergeRaw(baseDict, overrideDict)
-            } else {
-                result[key] = value
-            }
-        }
-        return result
-    }
-
-    private func unwrapAnyCodable(_ value: Any) -> Any {
-        if let dict = value as? [String: AnyCodable] {
-            return dict.mapValues { unwrapAnyCodable($0.value) }
-        }
-        if let dict = value as? [String: Any] {
-            return dict.mapValues { unwrapAnyCodable($0) }
-        }
-        if let list = value as? [AnyCodable] {
-            return list.map { unwrapAnyCodable($0.value) }
-        }
-        if let list = value as? [Any] {
-            return list.map { unwrapAnyCodable($0) }
-        }
-        return value
-    }
-    
-    private func collectProductIds(
-        schema: [String: ViewModelProperty],
-        values: [String: AnyCodable],
-        into ids: inout Set<String>
-    ) {
-        for (key, property) in schema {
-            let value = values[key]?.value
-            if key == "productId", let productId = extractProductId(from: value) {
-                ids.insert(productId)
-            }
-            switch property.type {
-            case .list:
-                if let itemType = property.itemType, itemType.type == .object,
-                          let list = value as? [Any],
-                          let schema = itemType.schema {
-                    for entry in list {
-                        if let dict = entry as? [String: AnyCodable] {
-                            collectProductIds(schema: schema, values: dict, into: &ids)
-                        } else if let dict = entry as? [String: Any] {
-                            let wrapped = dict.mapValues { AnyCodable($0) }
-                            collectProductIds(schema: schema, values: wrapped, into: &ids)
-                        }
-                    }
-                }
-            case .object:
-                if let schema = property.schema {
-                    if let dict = value as? [String: AnyCodable] {
-                        collectProductIds(schema: schema, values: dict, into: &ids)
-                    } else if let dict = value as? [String: Any] {
-                        let wrapped = dict.mapValues { AnyCodable($0) }
-                        collectProductIds(schema: schema, values: wrapped, into: &ids)
-                    }
-                }
-            default:
-                continue
-            }
-        }
-    }
-    
-    private func extractProductId(from value: Any?) -> String? {
-        if let string = value as? String {
-            return string
-        }
-        if let dict = value as? [String: Any] {
-            if let productId = dict["productId"] as? String {
-                return productId
-            }
-            if let productId = dict["id"] as? String {
-                return productId
-            }
-        }
-        if let dict = value as? [String: AnyCodable] {
-            if let productId = dict["productId"]?.value as? String {
-                return productId
-            }
-            if let productId = dict["id"]?.value as? String {
-                return productId
-            }
-        }
-        return nil
+        return flowProductList
     }
     
     private func mapSubscriptionPeriod(_ subscriptionPeriod: SubscriptionPeriod?) -> ProductPeriod? {

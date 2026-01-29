@@ -10,7 +10,7 @@ packages/nuxie-ios/
 │   ├── NuxieSDK.swift      # Main singleton class
 │   ├── NuxieConfiguration.swift  # Configuration classes
 │   ├── NuxieError.swift    # Error types
-│   ├── TriggerModels.swift # Trigger update models
+│   ├── EventResult.swift   # Event result enum
 │   ├── SDKVersion.swift    # Version constant
 │   ├── DI/                # Dependency injection
 │   │   └── DIContainer.swift  # Service container
@@ -37,7 +37,7 @@ packages/nuxie-ios/
 
 ## Core Design Principles
 
-1. **Event-Centric API**: The primary SDK interface is the `trigger()` method which handles both local storage and remote tracking
+1. **Event-Centric API**: The primary SDK interface is the `track()` method which handles both local storage and remote tracking
 2. **Offline-First Architecture**: Events persist locally immediately, remote sync is asynchronous 
 3. **Dependency Injection**: Services managed through `DIContainer` for testability and clean architecture
 4. **Plugin Architecture**: Extensible plugin system for modular functionality
@@ -52,7 +52,7 @@ packages/nuxie-ios/
 ### API Design
 - **Single Entry Point**: `NuxieSDK.shared` singleton pattern
 - **Setup Required**: Always check `isSetup` before operations, use `isEnabled()` helper for graceful degradation
-- **Trigger-First**: Primary method is `trigger()` for event recording and feature gating
+- **Track-First**: Primary method is `track()` for event recording and feature gating
 - **Immutable Config**: `NuxieConfiguration` properties are `let` where possible
 
 ### Dependency Injection
@@ -97,14 +97,14 @@ packages/nuxie-ios/
 ## API Endpoints
 
 Currently implemented:
-- `POST /api/i/profile` - Get campaigns, segments, and flows with flow execution data
+- `POST /api/i/profile` - Get campaigns, segments, and flows with workflow execution data
 - `POST /api/i/event` - Track events
 
 Authentication: API key in request body for all POST endpoints.
 
 ### Profile Response Structure
 The `/profile` endpoint now returns campaign-centric data optimized for client-side execution:
-- `campaigns`: Array of `Campaign` objects with flattened current version data and flow execution graphs
+- `campaigns`: Array of `Campaign` objects with flattened current version data and workflow execution graphs
 - `segments`: Array of `Segment` objects with compiled CEL expressions for client-side evaluation  
 - `flows`: Array of `FlowManifest` objects with build URLs and product information
 
@@ -121,7 +121,7 @@ The `/profile` endpoint now returns campaign-centric data optimized for client-s
 1. Extend `StoredEvent` model if new fields needed
 2. Update `EventStore` for new database operations (with migrations if needed)
 3. Add business logic to `EventStoreManager`
-4. Expose through `NuxieSDK` internal methods for flow evaluation
+4. Expose through `NuxieSDK` internal methods for workflow evaluation
 5. Add comprehensive tests covering all layers
 
 ### Error Handling
@@ -219,7 +219,7 @@ try NuxieSDK.shared.setup(with: config)
 ### Event Tracking with Local Storage
 ```swift
 // Events are stored locally immediately and synced remotely async
-NuxieSDK.shared.trigger("app_launched", properties: [
+NuxieSDK.shared.track("app_launched", properties: [
     "version": "1.0.0",
     "platform": "ios"
 ]) { result in
@@ -323,7 +323,7 @@ try eventStoreManager.storeEvent(name: "test", properties: [:])
 
 ### Event History Access (Internal)
 ```swift
-// Get recent events for flow evaluation
+// Get recent events for workflow evaluation
 let recentEvents = NuxieSDK.shared.getRecentEvents(limit: 50)
 let userEvents = NuxieSDK.shared.getCurrentUserEvents(limit: 100)
 let sessionEvents = NuxieSDK.shared.getCurrentSessionEvents()
@@ -363,8 +363,8 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 - **Dependency Injection**: DIContainer managing all services as singletons
 - **Plugin System**: Simple install/uninstall/start/stop plugin architecture
 - **App Lifecycle Plugin**: Auto-installed plugin tracking App Installed, App Updated, App Opened, App Backgrounded
-- **Event Tracking**: Full `trigger()` implementation with local storage + remote sync
-- **Campaign-Centric API**: Updated `/profile` endpoint response models to support new flow-based campaigns
+- **Event Tracking**: Full `track()` implementation with local storage + remote sync
+- **Campaign-Centric API**: Updated `/profile` endpoint response models to support new workflow-based campaigns
 - **Session Management**: Automatic session tracking with unique identifiers
 - **User Management**: User identification, attribution, and event filtering
 - **Test Suite**: Comprehensive Quick/Nimble tests covering all functionality
@@ -373,7 +373,7 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 
 ### 🚧 Next Phase Implementation
 - **Workflow Evaluation Engine**: Rule engine for processing campaigns against event history
-- **Campaign Management**: Enhanced FlowManager for flow processing and caching
+- **Campaign Management**: Enhanced FlowManager for workflow processing and caching
 - **Feature Gating Logic**: Real paywall/feature access decisions based on rules
 - **Background Sync**: Event queue with batching and offline resilience
 
@@ -388,7 +388,7 @@ All events include version information (CFBundleShortVersionString + CFBundleVer
 
 ### Event Storage Flow
 ```
-trigger() → EventStoreManager → EventStore → SQLite Database
+track() → EventStoreManager → EventStore → SQLite Database
    ↓            ↓                 ↓
 Remote API   Enrichment       Indexing
 (async)      (metadata)      (performance)
@@ -472,7 +472,7 @@ final class NetworkQueueTests: AsyncSpec {
 actor MockService: ServiceProtocol {
     private(set) var events: [Event] = []
     
-    func trigger(_ event: Event) {
+    func track(_ event: Event) {
         events.append(event)
     }
     
@@ -483,7 +483,7 @@ actor MockService: ServiceProtocol {
 
 // Test with async expectations
 it("should track events") {
-    await service.trigger(event)
+    await service.track(event)
     await expect { await service.events.count }.to(equal(1))
 }
 ```

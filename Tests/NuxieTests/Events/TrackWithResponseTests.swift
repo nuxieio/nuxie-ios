@@ -14,6 +14,7 @@ final class TrackWithResponseTests: AsyncSpec {
         var mockNetworkQueue: NuxieNetworkQueue!
         var mockNuxieApi: MockNuxieApi!
         var mockSessionService: TrackWithResponseMockSessionService!
+        var mockOutcomeBroker: MockOutcomeBroker!
 
         beforeEach {
 
@@ -26,12 +27,14 @@ final class TrackWithResponseTests: AsyncSpec {
             mockIdentityService = MockIdentityService()
             mockNuxieApi = MockNuxieApi()
             mockSessionService = TrackWithResponseMockSessionService()
+            mockOutcomeBroker = MockOutcomeBroker()
 
             // Register mocks with DI container
             Container.shared.identityService.register { mockIdentityService }
             Container.shared.nuxieApi.register { mockNuxieApi }
             Container.shared.sessionService.register { mockSessionService }
             Container.shared.dateProvider.register { MockDateProvider() }
+            Container.shared.outcomeBroker.register { mockOutcomeBroker }
 
             // Create event service with mock event store
             eventService = EventService(eventStore: mockEventStore)
@@ -125,8 +128,8 @@ final class TrackWithResponseTests: AsyncSpec {
             context("queue flush behavior") {
                 it("flushes pending events before sending") {
                     // Given - queue some events first
-                    eventService.track("event_1", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
-                    eventService.track("event_2", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    eventService.track("event_1", properties: nil, userProperties: nil, userPropertiesSetOnce: nil, completion: nil)
+                    eventService.track("event_2", properties: nil, userProperties: nil, userPropertiesSetOnce: nil, completion: nil)
                     await eventService.drain() // Wait for them to be queued
 
                     await mockNuxieApi.setTrackEventResponse(.success())

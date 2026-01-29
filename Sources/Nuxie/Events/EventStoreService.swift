@@ -148,7 +148,7 @@ final class EventStore: EventStoreProtocol {
         properties: [String: Any] = [:],
         distinctId: String
     ) async throws {
-        LogDebug("EventStore.storeEvent called - name: \(name), distinctId: \(distinctId)")
+        LogDebug("EventStore.storeEvent called - name: \(name), distinctId: \(distinctId ?? "nil")")
         
         // Create enriched properties with metadata
         var enrichedProperties = properties

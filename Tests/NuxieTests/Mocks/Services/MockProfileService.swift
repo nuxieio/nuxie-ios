@@ -19,8 +19,9 @@ public class MockProfileService: ProfileServiceProtocol {
             name: "Test Campaign",
             versionId: "version-1",
             versionNumber: 1,
-            versionName: nil,
-            reentry: .everyTime,
+            frequencyPolicy: "unlimited",
+            frequencyInterval: nil,
+            messageLimit: nil,
             publishedAt: "2024-01-01T00:00:00Z",
             trigger: .event(EventTriggerConfig(
                 eventName: "test_event",
@@ -31,7 +32,8 @@ public class MockProfileService: ProfileServiceProtocol {
                     expr: .bool(true)
                 )
             )),
-            flowId: "flow-1",
+            entryNodeId: "node-1",
+            workflow: Workflow(nodes: []),
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
@@ -49,10 +51,23 @@ public class MockProfileService: ProfileServiceProtocol {
             )
         )
         
+        let flow = RemoteFlow(
+            id: "flow-1",
+            name: "Test Flow",
+            url: "https://example.com/flow",
+            products: [],
+            manifest: BuildManifest(
+                totalFiles: 5,
+                totalSize: 1024,
+                contentHash: "hash123",
+                files: []
+            )
+        )
+        
         self.profileResponse = ProfileResponse(
             campaigns: [campaign],
             segments: [segment],
-            flows: [ResponseBuilders.buildRemoteFlow()],
+            flows: [flow],
             userProperties: nil,
             experiments: nil,
             features: nil,

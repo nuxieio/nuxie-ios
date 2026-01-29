@@ -7,6 +7,8 @@ options:
   groupSortPosition: top
   
 packages:
+  Nuxie:
+    path: .
   Quick:
     url: https://github.com/Quick/Quick.git
     from: 7.0.0

@@ -39,14 +39,16 @@ struct ResponseBuilders {
             name: name,
             versionId: versionId,
             versionNumber: versionNumber,
-            versionName: nil,
-            reentry: .oneTime,
+            frequencyPolicy: "once",
+            frequencyInterval: nil,
+            messageLimit: nil,
             publishedAt: Date().ISO8601Format(),
             trigger: .event(EventTriggerConfig(
                 eventName: eventName,
                 condition: nil
             )),
-            flowId: "flow-1",
+            entryNodeId: nil,
+            workflow: Workflow(nodes: []),
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
@@ -125,29 +127,32 @@ struct ResponseBuilders {
     }
     
     // MARK: - Flow Response
-
+    
     static func buildRemoteFlow(
         id: String = "flow-1",
+        name: String = "Test Flow",
         url: String = "https://example.com/builds/flow-1",
+        products: [RemoteFlowProduct] = [],
         manifest: BuildManifest? = nil
     ) -> RemoteFlow {
         return RemoteFlow(
             id: id,
-            bundle: FlowBundleRef(
-                url: url,
-                manifest: manifest ?? buildManifest(files: [])
-            ),
-            screens: [
-                RemoteFlowScreen(
-                    id: "screen-1",
-                    defaultViewModelId: nil,
-                    defaultInstanceId: nil
-                )
-            ],
-            interactions: [:],
-            viewModels: [],
-            viewModelInstances: nil,
-            converters: nil,
+            name: name,
+            url: url,
+            products: products,
+            manifest: manifest ?? buildManifest(files: [])
+        )
+    }
+    
+    static func buildRemoteFlowProduct(
+        id: String = "product-1",
+        extId: String = "com.example.premium",
+        name: String = "Premium"
+    ) -> RemoteFlowProduct {
+        return RemoteFlowProduct(
+            id: id,
+            extId: extId,
+            name: name
         )
     }
     

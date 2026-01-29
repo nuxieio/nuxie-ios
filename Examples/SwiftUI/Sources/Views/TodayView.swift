@@ -221,7 +221,7 @@ struct TodayView: View {
         selectedMood = mood
 
         /// Track mood selection event
-        NuxieSDK.shared.trigger(Constants.eventMoodSelected, properties: [
+        NuxieSDK.shared.track(Constants.eventMoodSelected, properties: [
             "mood": mood,
             "mood_emoji": Constants.moodEmojis[mood] ?? "",
             "mood_label": Constants.moodLabels[mood] ?? "",
@@ -254,7 +254,7 @@ struct TodayView: View {
             try moodStore.save(entry)
 
             /// Track mood saved event
-            NuxieSDK.shared.trigger(Constants.eventMoodSaved, properties: [
+            NuxieSDK.shared.track(Constants.eventMoodSaved, properties: [
                 "mood": mood,
                 "mood_emoji": Constants.moodEmojis[mood] ?? "",
                 "has_note": entry.hasNote,
@@ -281,39 +281,52 @@ struct TodayView: View {
     /// When user taps "Go Pro", track the event and let Nuxie decide
     /// whether to show a flow based on dashboard configuration.
     private func handleGoProTapped() {
-        NuxieSDK.shared.trigger(Constants.eventUpgradeTapped, properties: [
+        NuxieSDK.shared.track(Constants.eventUpgradeTapped, properties: [
             "source": "today_screen",
             "current_streak": streak,
             "total_entries": moodStore.count
-        ]) { update in
-            handleTriggerUpdate(update)
+        ]) { result in
+            DispatchQueue.main.async {
+                handleFlowResult(result)
+            }
         }
     }
 
     // MARK: - Nuxie Flow Handling
 
     /// Handles the result of a tracked event that may trigger a flow
-    private func handleTriggerUpdate(_ update: TriggerUpdate) {
-        switch update {
-        case .entitlement(let entitlement):
-            switch entitlement {
-            case .allowed:
-                print("[MoodLog] Pro unlocked! 🎉")
-            case .denied:
-                errorMessage = "Access denied."
-                showingError = true
-            case .pending:
-                break
-            }
-        case .decision(let decision):
-            if case .noMatch = decision {
-                print("[MoodLog] No flow shown - configure a campaign in Nuxie dashboard")
-            }
-        case .error(let error):
-            errorMessage = error.message
+    private func handleFlowResult(_ result: EventResult) {
+        switch result {
+        case .flow(let completion):
+            handleFlowCompletion(completion)
+
+        case .noInteraction:
+            // No flow configured - that's ok for this example
+            print("[MoodLog] No flow shown - configure a campaign in Nuxie dashboard")
+
+        case .failed(let error):
+            errorMessage = "Unable to load: \(error.localizedDescription)"
             showingError = true
-        case .journey:
+        }
+    }
+
+    /// Handles the completion of a Nuxie flow
+    private func handleFlowCompletion(_ completion: FlowCompletion) {
+        switch completion.outcome {
+        case .purchased, .trialStarted:
+            // User purchased or started trial!
+            print("[MoodLog] Pro unlocked! 🎉")
+
+        case .restored:
+            print("[MoodLog] Purchase restored")
+
+        case .dismissed, .skipped:
+            // User closed without purchasing
             break
+
+        case .error(let message):
+            errorMessage = message ?? "Something went wrong"
+            showingError = true
         }
     }
 }

@@ -17,9 +17,6 @@ public actor MockJourneyService: JourneyServiceProtocol {
 
     /// Track all handled events
     public var handledEvents: [NuxieEvent] = []
-
-    /// Results to return for trigger handling
-    public var triggerResults: [JourneyTriggerResult] = []
     
     /// Track segment changes
     public var segmentChanges: [(distinctId: String, segments: Set<String>)] = []
@@ -103,15 +100,6 @@ public actor MockJourneyService: JourneyServiceProtocol {
     public func handleEvent(_ event: NuxieEvent) async {
         handledEvents.append(event)
     }
-
-    public func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
-        handledEvents.append(event)
-        return triggerResults
-    }
-
-    public func setTriggerResults(_ results: [JourneyTriggerResult]) {
-        triggerResults = results
-    }
     
     public func handleSegmentChange(distinctId: String, segments: Set<String>) async {
         segmentChanges.append((distinctId: distinctId, segments: segments))
@@ -170,7 +158,6 @@ public actor MockJourneyService: JourneyServiceProtocol {
         mockJourneyToReturn = nil
         shouldThrowOnStart = false
         errorToThrow = nil
-        triggerResults = []
     }
     
     /// Add an active journey for a user (test helper)

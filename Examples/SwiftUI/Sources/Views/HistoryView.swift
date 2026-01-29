@@ -66,7 +66,7 @@ struct HistoryView: View {
             }
             .onAppear {
                 /// **Nuxie Integration: Track history_viewed event**
-                NuxieSDK.shared.trigger(Constants.eventHistoryViewed, properties: [
+                NuxieSDK.shared.track(Constants.eventHistoryViewed, properties: [
                     "entry_count": entries.count,
                     "is_pro": entitlementManager.isProUser,
                     "timestamp": Date().timeIntervalSince1970
@@ -166,12 +166,15 @@ struct HistoryView: View {
             performCSVExport()
         } else {
             /// Track gated feature attempt
-            NuxieSDK.shared.trigger(Constants.eventCSVExportGated, properties: [
+            NuxieSDK.shared.track(Constants.eventCSVExportGated, properties: [
                 "entry_count": moodStore.count,
                 "source": "history_toolbar"
-            ]) { [self] update in
-                handleTriggerUpdate(update) {
-                    self.performCSVExport()
+            ]) { [self] result in
+                DispatchQueue.main.async {
+                    handleFlowResult(result) {
+                        // If user just purchased, export now
+                        self.performCSVExport()
+                    }
                 }
             }
         }
@@ -182,19 +185,21 @@ struct HistoryView: View {
     /// Demonstrates soft feature gating - free users can see 7 days, but
     /// we show a prompt to unlock unlimited history.
     private func handleUnlockHistoryTapped() {
-        NuxieSDK.shared.trigger(Constants.eventUnlockHistoryTapped, properties: [
+        NuxieSDK.shared.track(Constants.eventUnlockHistoryTapped, properties: [
             "visible_entries": entries.count,
             "total_entries": moodStore.count,
             "source": "history_screen"
-        ]) { update in
-            handleTriggerUpdate(update)
+        ]) { result in
+            DispatchQueue.main.async {
+                handleFlowResult(result)
+            }
         }
     }
 
     /// Performs the actual CSV export
     private func performCSVExport() {
         /// Track successful export
-        NuxieSDK.shared.trigger(Constants.eventExportCSV, properties: [
+        NuxieSDK.shared.track(Constants.eventExportCSV, properties: [
             "entry_count": moodStore.count
         ])
 
@@ -221,28 +226,40 @@ struct HistoryView: View {
     // MARK: - Nuxie Flow Handling
 
     /// Handles the result of a tracked event that may trigger a flow
-    private func handleTriggerUpdate(_ update: TriggerUpdate, onAllowed: (() -> Void)? = nil) {
-        switch update {
-        case .entitlement(let entitlement):
-            switch entitlement {
-            case .allowed:
-                onAllowed?()
-            case .denied:
-                errorMessage = "This is a Pro feature"
-                showingError = true
-            case .pending:
-                break
-            }
-        case .decision(let decision):
-            if case .noMatch = decision {
-                errorMessage = "This is a Pro feature"
-                showingError = true
-            }
-        case .error(let error):
-            errorMessage = error.message
+    private func handleFlowResult(_ result: EventResult, onPurchased: (() -> Void)? = nil) {
+        switch result {
+        case .flow(let completion):
+            handleFlowCompletion(completion, onPurchased: onPurchased)
+
+        case .noInteraction:
+            // No flow configured - show message
+            errorMessage = "This is a Pro feature"
             showingError = true
-        case .journey:
+
+        case .failed(let error):
+            errorMessage = error.localizedDescription
+            showingError = true
+        }
+    }
+
+    /// Handles the completion of a Nuxie flow
+    private func handleFlowCompletion(_ completion: FlowCompletion, onPurchased: (() -> Void)? = nil) {
+        switch completion.outcome {
+        case .purchased, .trialStarted:
+            // User purchased or started trial!
+            onPurchased?()
+
+        case .restored:
+            // Purchase restored
             break
+
+        case .dismissed, .skipped:
+            // User closed without purchasing
+            break
+
+        case .error(let message):
+            errorMessage = message ?? "Something went wrong"
+            showingError = true
         }
     }
 }

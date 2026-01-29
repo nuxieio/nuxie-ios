@@ -7,11 +7,7 @@ public actor InMemoryCachedProfileStore: CachedProfileStore {
         var mtime: Date
         var size: Int64 { // rough size estimate for stats
             // Not exact, but good enough for tests
-            1 + Int64(
-                value.response.campaigns.count
-                + value.response.segments.count
-                + (value.response.journeys?.count ?? 0)
-            )
+            1 + Int64(value.response.campaigns.count + value.response.flows.count + value.response.segments.count)
         }
     }
     

@@ -36,6 +36,7 @@ private struct TrackPayload {
   let name: String
   let properties: [String: Any]
   let forcedDistinctId: String  // snapshot at call site
+  let completion: ((EventResult) -> Void)?
 }
 
 /// Protocol for event routing operations
@@ -62,28 +63,14 @@ public protocol EventServiceProtocol {
   ///   - properties: Event properties
   ///   - userProperties: Properties to set on the user profile (mapped to $set)
   ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
+  ///   - completion: Optional completion handler called when event completes
   func track(
     _ event: String,
     properties: [String: Any]?,
     userProperties: [String: Any]?,
-    userPropertiesSetOnce: [String: Any]?
+    userPropertiesSetOnce: [String: Any]?,
+    completion: ((EventResult) -> Void)?
   )
-
-  /// Track an event and return both the enriched event and server response
-  /// Used for trigger flows that need gate plans and local evaluation
-  /// - Parameters:
-  ///   - event: Event name
-  ///   - properties: Event properties
-  ///   - userProperties: Properties to set on the user profile (mapped to $set)
-  ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
-  /// - Returns: Tuple containing the enriched event and server response
-  /// - Throws: NuxieError if tracking fails
-  func trackForTrigger(
-    _ event: String,
-    properties: [String: Any]?,
-    userProperties: [String: Any]?,
-    userPropertiesSetOnce: [String: Any]?
-  ) async throws -> (NuxieEvent, EventResponse)
 
   /// Track an event synchronously and wait for server response
   /// Used for journey lifecycle events that need server-side state
@@ -241,6 +228,7 @@ public class EventService: EventServiceProtocol {
   @Injected(\.identityService) private var identityService: IdentityServiceProtocol
   @Injected(\.sessionService) private var sessionService: SessionServiceProtocol
   @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
+  @Injected(\.outcomeBroker) private var outcomeBroker: OutcomeBrokerProtocol
   @Injected(\.nuxieApi) private var apiClient: NuxieApiProtocol
 
   private var networkQueue: NuxieNetworkQueue?
@@ -293,14 +281,17 @@ public class EventService: EventServiceProtocol {
   ///   - properties: Event properties
   ///   - userProperties: Properties to set on the user profile (mapped to $set)
   ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
+  ///   - completion: Optional completion handler called when event completes
   public func track(
     _ event: String,
     properties: [String: Any]? = nil,
     userProperties: [String: Any]? = nil,
-    userPropertiesSetOnce: [String: Any]? = nil
+    userPropertiesSetOnce: [String: Any]? = nil,
+    completion: ((EventResult) -> Void)? = nil
   ) {
     guard !event.isEmpty else {
       LogWarning("Event name cannot be empty")
+      completion?(.failed(NuxieError.invalidConfiguration("Event name cannot be empty")))
       return
     }
 
@@ -317,7 +308,8 @@ public class EventService: EventServiceProtocol {
         .init(
           name: event,
           properties: custom,
-          forcedDistinctId: idSnapshot
+          forcedDistinctId: idSnapshot,
+          completion: completion
         )))
   }
 
@@ -358,7 +350,7 @@ public class EventService: EventServiceProtocol {
     }
 
     // Apply enrichment
-    finalProperties = await enrich(finalProperties)
+    finalProperties = enrich(finalProperties)
 
     // Store event locally (for history)
     do {
@@ -380,65 +372,6 @@ public class EventService: EventServiceProtocol {
       value: finalProperties["value"] as? Double,
       entityId: finalProperties["entityId"] as? String
     )
-  }
-
-  /// Track an event and return the enriched event plus server response
-  public func trackForTrigger(
-    _ event: String,
-    properties: [String: Any]? = nil,
-    userProperties: [String: Any]? = nil,
-    userPropertiesSetOnce: [String: Any]? = nil
-  ) async throws -> (NuxieEvent, EventResponse) {
-    guard !event.isEmpty else {
-      throw NuxieError.invalidConfiguration("Event name cannot be empty")
-    }
-
-    await ready.wait()
-
-    _ = await flushEvents()
-
-    let distinctId = identityService.getDistinctId()
-
-    var finalProperties = properties ?? [:]
-    if let userProperties { finalProperties["$set"] = userProperties }
-    if let userPropertiesSetOnce { finalProperties["$set_once"] = userPropertiesSetOnce }
-
-    if finalProperties["$session_id"] == nil {
-      if let sessionId = sessionService.getSessionId(at: Date(), readOnly: false) {
-        finalProperties["$session_id"] = sessionId
-        sessionService.touchSession()
-      }
-    }
-
-    finalProperties = await enrich(finalProperties)
-
-    do {
-      try await eventStore.storeEvent(
-        name: event,
-        properties: finalProperties,
-        distinctId: distinctId
-      )
-    } catch {
-      LogWarning("Failed to store event locally: \(error)")
-    }
-
-    let response = try await apiClient.trackEvent(
-      event: event,
-      distinctId: distinctId,
-      properties: finalProperties,
-      value: finalProperties["value"] as? Double,
-      entityId: finalProperties["entityId"] as? String
-    )
-
-    let eventId = response.event?.id ?? UUID.v7().uuidString
-    let enrichedEvent = NuxieEvent(
-      id: eventId,
-      name: event,
-      distinctId: distinctId,
-      properties: finalProperties
-    )
-
-    return (enrichedEvent, response)
   }
 
   /// Reassign events from one user to another (for anonymous → identified transitions)
@@ -485,6 +418,7 @@ public class EventService: EventServiceProtocol {
     }
 
     await journeyService?.handleEvent(event)
+    await outcomeBroker.observe(event: event)
 
     // 2) Network ordering: preserve $identify-first ordering during identity transitions
     await networkQueue?.enqueue(event)
@@ -576,7 +510,7 @@ public class EventService: EventServiceProtocol {
       }
     }
 
-    let finalProperties = await enrich(propertiesWithSession)
+    let finalProperties = enrich(propertiesWithSession)
 
     let nuxieEvent = NuxieEvent(
       name: p.name,
@@ -589,11 +523,23 @@ public class EventService: EventServiceProtocol {
     if let beforeSend = configuration?.beforeSend {
       guard let transformedEvent = beforeSend(nuxieEvent) else {
         LogDebug("Event '\(nuxieEvent.name)' dropped by beforeSend hook")
+        p.completion?(.failed(NuxieError.eventDropped("Event dropped by beforeSend hook")))
         return
       }
       finalEvent = transformedEvent
     } else {
       finalEvent = nuxieEvent
+    }
+
+    // Stage 3: Register completion with broker if provided
+    if let completion = p.completion {
+      // Get timeout from configuration, default to 1.0 second
+      let timeout = configuration?.immediateOutcomeWindowSeconds ?? 1.0
+      await outcomeBroker.register(
+        eventId: finalEvent.id,
+        timeout: timeout,
+        completion: completion
+      )
     }
 
     // Stage 8: Route Event (handles storage/network/journeys)
@@ -602,11 +548,11 @@ public class EventService: EventServiceProtocol {
 
   // MARK: - Worker helpers
 
-  private func enrich(_ custom: [String: Any]) async -> [String: Any] {
+  private func enrich(_ custom: [String: Any]) -> [String: Any] {
     let sanitized = EventSanitizer.sanitizeDataTypes(custom)
     let withContext: [String: Any]
     if let contextBuilder {
-      withContext = await contextBuilder.buildEnrichedProperties(customProperties: sanitized)
+      withContext = contextBuilder.buildEnrichedProperties(customProperties: sanitized)
     } else {
       withContext = sanitized
     }

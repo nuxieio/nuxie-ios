@@ -30,7 +30,8 @@ public class MockEventService: EventServiceProtocol {
         _ event: String,
         properties: [String: Any]? = nil,
         userProperties: [String: Any]? = nil,
-        userPropertiesSetOnce: [String: Any]? = nil
+        userPropertiesSetOnce: [String: Any]? = nil,
+        completion: ((EventResult) -> Void)? = nil
     ) {
         // Track the event for test verification
         lock.withLock {
@@ -43,7 +44,10 @@ public class MockEventService: EventServiceProtocol {
             .withProperties(properties ?? [:])
             .build()
         
-        Task { await route(nuxieEvent) }
+        Task {
+            await route(nuxieEvent)
+            completion?(.noInteraction)
+        }
     }
     
     @discardableResult
@@ -260,7 +264,6 @@ public class MockEventService: EventServiceProtocol {
             _eventHandlers.removeAll()
             lastEventTimes.removeAll()
             _trackWithResponseCalls.removeAll()
-            _trackForTriggerCalls.removeAll()
             _trackWithResponseResult = nil
             _trackWithResponseError = nil
         }
@@ -301,7 +304,6 @@ public class MockEventService: EventServiceProtocol {
     private var _trackWithResponseResult: EventResponse?
     private var _trackWithResponseError: Error?
     private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
-    private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?)] = []
     
     public var trackWithResponseResult: EventResponse? {
         get { lock.withLock { _trackWithResponseResult } }
@@ -316,50 +318,6 @@ public class MockEventService: EventServiceProtocol {
     public private(set) var trackWithResponseCalls: [(event: String, properties: [String: Any]?)] {
         get { lock.withLock { _trackWithResponseCalls } }
         set { lock.withLock { _trackWithResponseCalls = newValue } }
-    }
-
-    public private(set) var trackForTriggerCalls: [(event: String, properties: [String: Any]?)] {
-        get { lock.withLock { _trackForTriggerCalls } }
-        set { lock.withLock { _trackForTriggerCalls = newValue } }
-    }
-
-    public func trackForTrigger(
-        _ event: String,
-        properties: [String: Any]?,
-        userProperties: [String: Any]?,
-        userPropertiesSetOnce: [String: Any]?
-    ) async throws -> (NuxieEvent, EventResponse) {
-        lock.withLock {
-            _trackForTriggerCalls.append((event: event, properties: properties))
-        }
-
-        let (result, error): (EventResponse?, Error?) = lock.withLock {
-            (_trackWithResponseResult, _trackWithResponseError)
-        }
-        if let error = error {
-            throw error
-        }
-
-        let nuxieEvent = TestEventBuilder(name: event)
-            .withDistinctId("test-distinct-id")
-            .withProperties(properties ?? [:])
-            .build()
-
-        await route(nuxieEvent)
-
-        let response = result ?? EventResponse(
-            status: "ok",
-            payload: nil,
-            customer: nil,
-            event: nil,
-            message: nil,
-            featuresMatched: nil,
-            usage: nil,
-            journey: nil,
-            execution: nil
-        )
-
-        return (nuxieEvent, response)
     }
 
     public func trackWithResponse(

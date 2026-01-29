@@ -14,7 +14,6 @@ final class EventMigrationIntegrationTests: AsyncSpec {
             
             beforeEach {
                 print("DEBUG: beforeEach starting")
-                await NuxieSDK.shared.shutdown()
 
 
                 // Create and register mock API to prevent network calls
@@ -81,14 +80,9 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         
                         // Track some events as anonymous
                         print("DEBUG: Tracking events as anonymous")
-                        let handles = [
-                            NuxieSDK.shared.trigger("app_opened", properties: ["source": "test"]),
-                            NuxieSDK.shared.trigger("button_clicked", properties: ["button": "start"]),
-                            NuxieSDK.shared.trigger("page_viewed", properties: ["page": "home"])
-                        ]
-                        for handle in handles {
-                            for await _ in handle {}
-                        }
+                        NuxieSDK.shared.track("app_opened", properties: ["source": "test"])
+                        NuxieSDK.shared.track("button_clicked", properties: ["button": "start"])
+                        NuxieSDK.shared.track("page_viewed", properties: ["page": "home"])
                         print("DEBUG: Events tracked")
 
                         // Wait for events to be processed (drain the event queue)
@@ -98,7 +92,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Verify events are stored with anonymous ID
                         print("DEBUG: Querying events for anonymous user")
                         await expect { await eventService.getEventsForUser(anonymousId, limit: 10).count }
-                            .toEventually(equal(3), timeout: .seconds(5))
+                            .toEventually(equal(3), timeout: .seconds(2))
                         print("DEBUG: Found expected anonymous events")
                         
                         // Identify user
@@ -110,11 +104,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Verify events were reassigned to identified user
                         print("DEBUG: Querying events for identified user")
                         await expect { await eventService.getEventsForUser(userId, limit: 10).count }
-                            .toEventually(beGreaterThanOrEqualTo(3), timeout: .seconds(5)) // At least the 3 tracked events
-                        await expect {
-                            await eventService.getEventsForUser(userId, limit: 10)
-                                .first { $0.name == "app_opened" }
-                        }.toEventuallyNot(beNil(), timeout: .seconds(5))
+                            .toEventually(beGreaterThanOrEqualTo(3), timeout: .seconds(2)) // At least the 3 tracked events
                         let identifiedEvents = await eventService.getEventsForUser(userId, limit: 10)
                         print("DEBUG: Found \(identifiedEvents.count) identified events")
                         
@@ -123,7 +113,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         await expect { 
                             let events = await eventService.getEventsForUser(anonymousId, limit: 10)
                             return events.filter { $0.name != "$identify" }.count 
-                        }.toEventually(equal(0), timeout: .seconds(5))
+                        }.toEventually(equal(0), timeout: .seconds(2))
                         print("DEBUG: Verified anonymous events migrated")
                         
                         // Verify the migrated events maintain their properties
@@ -158,9 +148,9 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Track journey-relevant events as anonymous
                         let anonymousId = NuxieSDK.shared.getAnonymousId()
                         
-                        NuxieSDK.shared.trigger("onboarding_started")
-                        NuxieSDK.shared.trigger("onboarding_step_1_completed")
-                        NuxieSDK.shared.trigger("onboarding_step_2_completed")
+                        NuxieSDK.shared.track("onboarding_started")
+                        NuxieSDK.shared.track("onboarding_step_1_completed")
+                        NuxieSDK.shared.track("onboarding_step_2_completed")
                         
                         // Wait for events to be stored
                         await eventService.drain()
@@ -170,8 +160,8 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         NuxieSDK.shared.identify(userId)
                         
                         // Continue tracking after identification
-                        NuxieSDK.shared.trigger("onboarding_step_3_completed")
-                        NuxieSDK.shared.trigger("onboarding_completed")
+                        NuxieSDK.shared.track("onboarding_step_3_completed")
+                        NuxieSDK.shared.track("onboarding_completed")
                         await eventService.drain()
                         
                         // Verify all events are under the identified user
@@ -220,8 +210,8 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         // Track events as anonymous user
                         let anonymousId = NuxieSDK.shared.getAnonymousId()
                         
-                        NuxieSDK.shared.trigger("anonymous_event_1")
-                        NuxieSDK.shared.trigger("anonymous_event_2")
+                        NuxieSDK.shared.track("anonymous_event_1")
+                        NuxieSDK.shared.track("anonymous_event_2")
                         
                         // Verify events are stored with anonymous ID
                         await expect { await eventService.getEventsForUser(anonymousId, limit: 10).count }
@@ -259,8 +249,8 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     NuxieSDK.shared.identify(userId1)
                     
                     // Track events as identified user
-                    NuxieSDK.shared.trigger("identified_event_1")
-                    NuxieSDK.shared.trigger("identified_event_2")
+                    NuxieSDK.shared.track("identified_event_1")
+                    NuxieSDK.shared.track("identified_event_2")
                     
                     // Give time for events to be stored
                     await eventService.drain()
@@ -295,17 +285,12 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     NuxieSDK.shared.identify(userId)
                     
                     // Track events
-                    NuxieSDK.shared.trigger("event_1")
-                    NuxieSDK.shared.trigger("event_2")
+                    NuxieSDK.shared.track("event_1")
+                    NuxieSDK.shared.track("event_2")
                     
                     // Give time for events to be stored
                     await eventService.drain()
-
-                    await expect {
-                        await eventService.getEventsForUser(userId, limit: 20)
-                            .filter { $0.name.starts(with: "event_") }
-                            .count
-                    }.toEventually(equal(2), timeout: .seconds(2))
+                    
                     let eventCountBefore = await eventService.getEventsForUser(userId, limit: 20).count
                     
                     // Identify again with same ID
@@ -322,7 +307,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                 it("should continue with identify even if migration fails") {
                     // Track events as anonymous
                     let anonymousId = NuxieSDK.shared.getAnonymousId()
-                    NuxieSDK.shared.trigger("test_event")
+                    NuxieSDK.shared.track("test_event")
                     
                     // Give time for event to be stored
                     await eventService.drain()
@@ -339,7 +324,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     expect(NuxieSDK.shared.isIdentified).to(beTrue())
                     
                     // Can still track events after failed migration
-                    NuxieSDK.shared.trigger("post_error_event")
+                    NuxieSDK.shared.track("post_error_event")
                     
                     // No crash should occur
                     expect(true).to(beTrue()) // Test passes if we get here
@@ -352,18 +337,15 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                     let eventCount = 100
                     
                     for i in 0..<eventCount {
-                        NuxieSDK.shared.trigger("bulk_event_\(i)", properties: ["index": i])
+                        NuxieSDK.shared.track("bulk_event_\(i)", properties: ["index": i])
                     }
                     
                     // Ensure events are stored before migration begins.
                     await eventService.drain()
-                    await expect {
-                        await eventService.getRecentEvents(limit: 200)
-                            .filter { $0.name.starts(with: "bulk_event") }
-                            .count
-                    }.toEventually(equal(eventCount), timeout: .seconds(5))
+
                     let recentEvents = await eventService.getRecentEvents(limit: 200)
                     let bulkEvents = recentEvents.filter { $0.name.starts(with: "bulk_event") }
+                    expect(bulkEvents.count).to(equal(eventCount))
                     guard let sourceDistinctId = bulkEvents.first?.distinctId else {
                         fail("Expected bulk events to include a distinctId")
                         return

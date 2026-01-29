@@ -9,8 +9,6 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
     public var presentedFlows: [(flowId: String, journey: Journey?)] = []
     public var dismissedFlows: [String] = []
     public var isPresentingFlow = false
-    public var mockViewControllers: [String: FlowViewController] = [:]
-    public var defaultMockViewController: FlowViewController?
     
     // MARK: - Error Testing Properties
     
@@ -30,9 +28,8 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
         return isPresentingFlow
     }
     
-    @discardableResult
     @MainActor
-    public func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+    public func presentFlow(_ flowId: String, from journey: Journey?) async throws {
         LogDebug("[MockFlowPresentationService] presentFlow called with flowId: \(flowId), journey: \(journey?.id ?? "nil")")
         presentFlowCallCount += 1
         
@@ -53,12 +50,6 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
         LogInfo("[MockFlowPresentationService] Successfully presenting flow: \(flowId)")
         presentedFlows.append((flowId: flowId, journey: journey))
         isPresentingFlow = true
-
-        let controller = mockViewControllers[flowId]
-            ?? defaultMockViewController
-            ?? MockFlowViewController(mockFlowId: flowId)
-        controller.runtimeDelegate = runtimeDelegate
-        return controller
     }
     
     @MainActor
@@ -153,7 +144,5 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
         presentationDelay = 0
         presentFlowCallCount = 0
         dismissCurrentFlowCallCount = 0
-        mockViewControllers = [:]
-        defaultMockViewController = nil
     }
 }

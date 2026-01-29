@@ -75,7 +75,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
             "background_date": dateProvider().timeIntervalSince1970
         ]
         
-        sdk?.trigger("$app_backgrounded", properties: properties)
+        sdk?.track("$app_backgrounded", properties: properties)
     }
     
     public func onAppWillEnterForeground() {
@@ -87,7 +87,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
             "app_version": appVersionProvider()
         ]
         
-        sdk?.trigger("$app_opened", properties: properties)
+        sdk?.track("$app_opened", properties: properties)
     }
     
     // MARK: - Private Methods
@@ -106,7 +106,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
         if !hasLaunchedBefore {
             // First launch - App Installed
             properties["install_date"] = dateProvider().timeIntervalSince1970
-            sdk?.trigger("$app_installed", properties: properties)
+            sdk?.track("$app_installed", properties: properties)
             
             // Mark as launched and save version
             userDefaults.set(true, forKey: hasLaunchedBeforeKey)
@@ -116,7 +116,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
             // App Updated
             properties["previous_version"] = lastVersion
             properties["update_date"] = dateProvider().timeIntervalSince1970
-            sdk?.trigger("$app_updated", properties: properties)
+            sdk?.track("$app_updated", properties: properties)
             
             // Update stored version
             userDefaults.set(currentVersion, forKey: lastVersionKey)
@@ -124,7 +124,7 @@ public class AppLifecyclePlugin: NuxiePlugin {
         
         // Always track App Opened (including first launch and updates)
         properties["open_date"] = dateProvider().timeIntervalSince1970
-        sdk?.trigger("$app_opened", properties: properties)
+        sdk?.track("$app_opened", properties: properties)
     }
     
     public static func defaultAppVersion() -> String {

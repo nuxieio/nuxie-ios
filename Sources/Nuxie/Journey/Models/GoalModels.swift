@@ -107,8 +107,8 @@ public struct ConversionWindowDefaults {
 
 /// Types of conversion anchors supported
 public enum ConversionAnchor: String, Codable {
-    /// Anchor to journey start (default)
-    case journeyStart = "journey_start"
+    /// Anchor to workflow entry (default)
+    case workflowEntry = "workflow_entry"
     
     /// Anchor to last flow shown (Phase 3)
     case lastFlowShown = "last_flow_shown"

@@ -53,8 +53,9 @@ public actor MockNuxieApi: NuxieApiProtocol {
             name: "Test Campaign",
             versionId: "version-1",
             versionNumber: 1,
-            versionName: nil,
-            reentry: .everyTime,
+            frequencyPolicy: "unlimited",
+            frequencyInterval: nil,
+            messageLimit: nil,
             publishedAt: "2024-01-01T00:00:00Z",
             trigger: .event(EventTriggerConfig(
                 eventName: "test_event",
@@ -65,7 +66,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
                     expr: .bool(true)
                 )
             )),
-            flowId: "flow-1",
+            entryNodeId: "node-1",
+            workflow: Workflow(nodes: []),
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
@@ -83,10 +85,23 @@ public actor MockNuxieApi: NuxieApiProtocol {
             )
         )
         
+        let flow = RemoteFlow(
+            id: "flow-1",
+            name: "Test Flow",
+            url: "https://example.com/flow",
+            products: [],
+            manifest: BuildManifest(
+                totalFiles: 5,
+                totalSize: 1024,
+                contentHash: "hash123",
+                files: []
+            )
+        )
+        
         self.profileResponse = ProfileResponse(
             campaigns: [campaign],
             segments: [segment],
-            flows: [ResponseBuilders.buildRemoteFlow()],
+            flows: [flow],
             userProperties: nil,
             experiments: nil,
             features: nil,
@@ -179,26 +194,15 @@ public actor MockNuxieApi: NuxieApiProtocol {
         
         return RemoteFlow(
             id: flowId,
-            bundle: FlowBundleRef(
-                url: "https://example.com/flow",
-                manifest: BuildManifest(
-                    totalFiles: 5,
-                    totalSize: 1024,
-                    contentHash: "hash123",
-                    files: []
-                )
-            ),
-            screens: [
-                RemoteFlowScreen(
-                    id: "screen-1",
-                    defaultViewModelId: nil,
-                    defaultInstanceId: nil
-                )
-            ],
-            interactions: [:],
-            viewModels: [],
-            viewModelInstances: nil,
-            converters: nil,
+            name: "Test Flow",
+            url: "https://example.com/flow",
+            products: [],
+            manifest: BuildManifest(
+                totalFiles: 5,
+                totalSize: 1024,
+                contentHash: "hash123",
+                files: []
+            )
         )
     }
     

@@ -11,9 +11,6 @@ public class MockPurchaseDelegate: NuxiePurchaseDelegate {
     
     /// Set this to control what restore() returns
     public var restoreResult: RestoreResult = .success(restoredCount: 0)
-
-    /// Override purchaseOutcome when you need transaction data
-    public var purchaseOutcomeOverride: PurchaseOutcome?
     
     /// Delay in seconds before returning results (simulates network delay)
     public var simulatedDelay: TimeInterval = 0.5
@@ -66,14 +63,6 @@ public class MockPurchaseDelegate: NuxiePurchaseDelegate {
         LogDebug("MockPurchaseDelegate: Purchase called for product: \(product.id)")
         return purchaseResult
     }
-
-    public func purchaseOutcome(_ product: any StoreProductProtocol) async -> PurchaseOutcome {
-        if let override = purchaseOutcomeOverride {
-            return override
-        }
-        let result = await purchase(product)
-        return PurchaseOutcome(result: result, productId: product.id)
-    }
     
     public func restore() async -> RestoreResult {
         restoreCalled = true
@@ -105,7 +94,6 @@ public class MockPurchaseDelegate: NuxiePurchaseDelegate {
         restoreCallCount = 0
         purchaseResult = .success
         restoreResult = .success(restoredCount: 0)
-        purchaseOutcomeOverride = nil
         simulatedDelay = 0.5
         shouldThrowError = false
         customError = StoreKitError.networkUnavailable

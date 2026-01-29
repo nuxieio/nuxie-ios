@@ -5,8 +5,7 @@ import FactoryKit
 /// Protocol for presenting flows in dedicated windows
 protocol FlowPresentationServiceProtocol: AnyObject {
     /// Present a flow by ID in a dedicated window
-    @discardableResult
-    @MainActor func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController
+    @MainActor func presentFlow(_ flowId: String, from journey: Journey?) async throws
     
     /// Dismiss the currently presented flow
     @MainActor func dismissCurrentFlow() async
@@ -29,7 +28,6 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     
     @Injected(\.flowService) private var flowService: FlowServiceProtocol
     @Injected(\.eventService) private var eventService: EventServiceProtocol
-    @Injected(\.triggerBroker) private var triggerBroker: TriggerBrokerProtocol
     private let windowProvider: WindowProviderProtocol
     
     // MARK: - State
@@ -55,8 +53,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         currentWindow?.isPresenting ?? false
     }
     
-    @discardableResult
-    func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+    func presentFlow(_ flowId: String, from journey: Journey?) async throws {
         LogInfo("FlowPresentationService: Presenting flow \(flowId)")
         
         // Check if we're within the grace period
@@ -82,7 +79,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         }
         
         // 2. Get flow view controller from FlowService
-        let flowViewController = try await flowService.viewController(for: flowId, runtimeDelegate: runtimeDelegate)
+        let flowViewController = try await flowService.viewController(for: flowId)
         
         // 3. Create presentation window
         guard let window = windowProvider.createPresentationWindow() else {
@@ -104,26 +101,8 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         
         // 6. Present flow
         await window.present(flowViewController)
-
-        if let journey = journey {
-            eventService.track(
-                JourneyEvents.flowShown,
-                properties: JourneyEvents.flowShownProperties(flowId: flowId, journey: journey),
-                userProperties: nil,
-                userPropertiesSetOnce: nil
-            )
-            if let originEventId = journey.getContext("_origin_event_id") as? String {
-                let ref = JourneyRef(
-                    journeyId: journey.id,
-                    campaignId: journey.campaignId,
-                    flowId: journey.flowId
-                )
-                await triggerBroker.emit(eventId: originEventId, update: .decision(.flowShown(ref)))
-            }
-        }
-
+        
         LogDebug("FlowPresentationService: Successfully presented flow \(flowId)")
-        return flowViewController
     }
     
     func dismissCurrentFlow() async {
@@ -169,7 +148,8 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowDismissed,
                     properties: JourneyEvents.flowDismissedProperties(flowId: flowId, journey: journey),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil
+                    userPropertiesSetOnce: nil,
+                    completion: nil
                 )
 
             case .purchaseCompleted:
@@ -177,7 +157,8 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowPurchased,
                     properties: JourneyEvents.flowPurchasedProperties(flowId: flowId, journey: journey, productId: nil),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil
+                    userPropertiesSetOnce: nil,
+                    completion: nil
                 )
 
             case .timeout:
@@ -185,7 +166,8 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowTimedOut,
                     properties: JourneyEvents.flowTimedOutProperties(flowId: flowId, journey: journey),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil
+                    userPropertiesSetOnce: nil,
+                    completion: nil
                 )
 
             case .error(let error):
@@ -193,7 +175,8 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
                     JourneyEvents.flowErrored,
                     properties: JourneyEvents.flowErroredProperties(flowId: flowId, journey: journey, errorMessage: error.localizedDescription),
                     userProperties: nil,
-                    userPropertiesSetOnce: nil
+                    userPropertiesSetOnce: nil,
+                    completion: nil
                 )
             }
         }
