@@ -193,10 +193,7 @@ public actor JourneyService: JourneyServiceProtocol {
     distinctId: String,
     originEventId: String? = nil
   ) async -> Journey? {
-    guard let flowId = campaign.flowId else {
-      LogError("Campaign \(campaign.id) missing flowId, cannot start journey")
-      return nil
-    }
+    let flowId = campaign.flowId
 
     let journey = Journey(campaign: campaign, distinctId: distinctId)
     journey.status = .active
@@ -214,7 +211,7 @@ public actor JourneyService: JourneyServiceProtocol {
       properties: [
         "session_id": journey.id,
         "campaign_id": campaign.id,
-        "campaign_version_id": campaign.versionId,
+        "flow_id": campaign.flowId,
         "entry_node_id": entryScreenId as Any,
       ],
       userProperties: nil,

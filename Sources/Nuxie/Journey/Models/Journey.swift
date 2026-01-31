@@ -46,8 +46,7 @@ public class Journey: Codable {
 
     /// Campaign this journey belongs to
     public let campaignId: String
-    public let campaignVersionId: String
-    public let flowId: String?
+    public let flowId: String
 
     /// User on this journey
     public let distinctId: String
@@ -107,7 +106,6 @@ public class Journey: Codable {
     ) {
         self.id = id ?? UUID.v7().uuidString
         self.campaignId = campaign.id
-        self.campaignVersionId = campaign.versionId
         self.flowId = campaign.flowId
         self.distinctId = distinctId
         self.status = .pending

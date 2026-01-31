@@ -227,15 +227,14 @@ public enum CampaignReentry: Codable {
 public struct Campaign: Codable {
     public let id: String
     public let name: String
-    public let versionId: String
-    public let versionNumber: Int
-    public let versionName: String?
+    public let flowId: String
+    public let flowNumber: Int
+    public let flowName: String?
     public let reentry: CampaignReentry
     public let publishedAt: String
     
     // Trigger configuration (discriminated union)
     public let trigger: CampaignTrigger
-    public let flowId: String?
     
     // Goal and exit configuration (optional for backward compatibility)
     public let goal: GoalConfig?

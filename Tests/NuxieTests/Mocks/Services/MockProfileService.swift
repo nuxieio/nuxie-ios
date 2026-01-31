@@ -17,9 +17,9 @@ public class MockProfileService: ProfileServiceProtocol {
         let campaign = Campaign(
             id: "campaign-1",
             name: "Test Campaign",
-            versionId: "version-1",
-            versionNumber: 1,
-            versionName: nil,
+            flowId: "flow-1",
+            flowNumber: 1,
+            flowName: nil,
             reentry: .everyTime,
             publishedAt: "2024-01-01T00:00:00Z",
             trigger: .event(EventTriggerConfig(
@@ -31,7 +31,6 @@ public class MockProfileService: ProfileServiceProtocol {
                     expr: .bool(true)
                 )
             )),
-            flowId: "flow-1",
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,

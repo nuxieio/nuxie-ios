@@ -29,24 +29,24 @@ struct ResponseBuilders {
     static func buildCampaign(
         id: String = "campaign-1",
         name: String = "Test Campaign",
-        versionId: String = "version-1",
-        versionNumber: Int = 1,
+        flowId: String = "flow-1",
+        flowNumber: Int = 1,
+        flowName: String? = nil,
         triggerType: String = "event",
         eventName: String = "app_open"
     ) -> Campaign {
         return Campaign(
             id: id,
             name: name,
-            versionId: versionId,
-            versionNumber: versionNumber,
-            versionName: nil,
+            flowId: flowId,
+            flowNumber: flowNumber,
+            flowName: flowName,
             reentry: .oneTime,
             publishedAt: Date().ISO8601Format(),
             trigger: .event(EventTriggerConfig(
                 eventName: eventName,
                 condition: nil
             )),
-            flowId: "flow-1",
             goal: nil,
             exitPolicy: nil,
             conversionAnchor: nil,
