@@ -16,6 +16,7 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     // MARK: - Properties
     
     private let viewModel: FlowViewModel
+    private let fontStore: FontStore
 
     /// Delegate for runtime bridge messages
     weak var runtimeDelegate: FlowRuntimeDelegate?
@@ -47,8 +48,13 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     
     // MARK: - Initialization
     
-    init(flow: Flow, archiveService: FlowArchiver) {
-        self.viewModel = FlowViewModel(flow: flow, archiveService: archiveService)
+    init(flow: Flow, archiveService: FlowArchiver, fontStore: FontStore = FontStore()) {
+        self.viewModel = FlowViewModel(
+            flow: flow,
+            archiveService: archiveService,
+            fontStore: fontStore
+        )
+        self.fontStore = fontStore
         super.init(nibName: nil, bundle: nil)
         
         setupBindings()
@@ -171,7 +177,7 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     }
     
     private func setupWebView() {
-        flowWebView = FlowWebView(messageHandlerDelegate: self)
+        flowWebView = FlowWebView(messageHandlerDelegate: self, fontStore: fontStore)
         flowWebView.isHidden = true
         view.addSubview(flowWebView)
         
