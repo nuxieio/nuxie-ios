@@ -42,7 +42,7 @@ actor FontStore {
         guard let entry = entriesById[id] else {
             return nil
         }
-        let mimeType = resolveMimeType(format: entry.format)
+        let mimeType = Self.mimeType(for: entry.format)
         if let cached = cachedURL(for: entry), let data = try? Data(contentsOf: cached) {
             return (data, mimeType)
         }
@@ -83,7 +83,7 @@ actor FontStore {
         return cacheDirectory.appendingPathComponent("\(hash).\(ext)")
     }
 
-    private func resolveMimeType(format: String) -> String {
+    static func mimeType(for format: String) -> String {
         let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
         case "woff2":
