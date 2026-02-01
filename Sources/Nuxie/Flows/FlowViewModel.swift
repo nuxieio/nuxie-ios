@@ -24,6 +24,7 @@ class FlowViewModel {
     }
     
     private let archiveService: FlowArchiver
+    private let fontStore: FontStore?
     
     // MARK: - Bindings (Closures)
     
@@ -46,10 +47,11 @@ class FlowViewModel {
     
     // MARK: - Initialization
     
-    init(flow: Flow, archiveService: FlowArchiver) {
+    init(flow: Flow, archiveService: FlowArchiver, fontStore: FontStore? = nil) {
         self.flow = flow
         self.products = flow.products
         self.archiveService = archiveService
+        self.fontStore = fontStore
         LogDebug("FlowViewModel initialized for flow: \(flow.id)")
     }
     
@@ -72,6 +74,9 @@ class FlowViewModel {
     
     /// Async version of loadFlow
     private func loadFlowAsync() async {
+        if let fontStore {
+            await fontStore.registerManifest(flow.remoteFlow.fontManifest)
+        }
         // 1. Try loading from cached WebArchive first
         if let archiveURL = await archiveService.getArchiveURL(for: flow) {
             onLoadURL?(archiveURL)

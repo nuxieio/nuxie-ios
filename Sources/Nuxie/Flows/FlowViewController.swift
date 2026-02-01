@@ -49,12 +49,15 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     // MARK: - Initialization
     
     init(flow: Flow, archiveService: FlowArchiver, fontStore: FontStore = FontStore()) {
-        self.viewModel = FlowViewModel(flow: flow, archiveService: archiveService)
+        self.viewModel = FlowViewModel(
+            flow: flow,
+            archiveService: archiveService,
+            fontStore: fontStore
+        )
         self.fontStore = fontStore
         super.init(nibName: nil, bundle: nil)
         
         setupBindings()
-        Task { await fontStore.registerManifest(flow.remoteFlow.fontManifest) }
         LogDebug("FlowViewController initialized for flow: \(flow.id)")
     }
     
