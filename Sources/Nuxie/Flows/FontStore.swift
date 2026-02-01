@@ -38,17 +38,23 @@ actor FontStore {
         }
     }
 
-    func fontData(for id: String) async -> Data? {
+    func fontPayload(for id: String) async -> (data: Data, mimeType: String)? {
         guard let entry = entriesById[id] else {
             return nil
         }
-        if let cached = cachedURL(for: entry) {
-            return try? Data(contentsOf: cached)
+        let mimeType = resolveMimeType(format: entry.format)
+        if let cached = cachedURL(for: entry), let data = try? Data(contentsOf: cached) {
+            return (data, mimeType)
         }
-        if let fetched = await fetchFontIfNeeded(entry) {
-            return try? Data(contentsOf: fetched)
+        if let fetched = await fetchFontIfNeeded(entry),
+           let data = try? Data(contentsOf: fetched) {
+            return (data, mimeType)
         }
         return nil
+    }
+
+    func fontData(for id: String) async -> Data? {
+        return await fontPayload(for: id)?.data
     }
 
     func clearCache() {
@@ -75,6 +81,22 @@ actor FontStore {
         let hash = entry.contentHash.replacingOccurrences(of: "sha256:", with: "")
         let ext = entry.format.isEmpty ? "woff2" : entry.format
         return cacheDirectory.appendingPathComponent("\(hash).\(ext)")
+    }
+
+    private func resolveMimeType(format: String) -> String {
+        let normalized = format.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "woff2":
+            return "font/woff2"
+        case "woff":
+            return "font/woff"
+        case "ttf", "truetype":
+            return "font/ttf"
+        case "otf", "opentype":
+            return "font/otf"
+        default:
+            return "application/octet-stream"
+        }
     }
 
     private func fetchFontIfNeeded(_ entry: FontManifestEntry) async -> URL? {

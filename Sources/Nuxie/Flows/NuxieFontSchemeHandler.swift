@@ -23,15 +23,15 @@ final class NuxieFontSchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         Task {
-            if let data = await fontStore.fontData(for: fontId) {
+            if let payload = await fontStore.fontPayload(for: fontId) {
                 let response = URLResponse(
                     url: url,
-                    mimeType: "font/woff2",
-                    expectedContentLength: data.count,
+                    mimeType: payload.mimeType,
+                    expectedContentLength: payload.data.count,
                     textEncodingName: nil
                 )
                 urlSchemeTask.didReceive(response)
-                urlSchemeTask.didReceive(data)
+                urlSchemeTask.didReceive(payload.data)
                 urlSchemeTask.didFinish()
             } else {
                 LogWarning("Missing font for id: \(fontId)")
