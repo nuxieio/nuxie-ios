@@ -52,7 +52,7 @@ final class FlowWebViewBridgeSpec: QuickSpec {
             }
 
             beforeEach {
-                webView = FlowWebView(messageHandlerDelegate: DummyDelegate())
+                webView = FlowWebView(messageHandlerDelegate: DummyDelegate(), fontStore: FontStore())
                 loadHTML("<html><head><script>\(scriptBootstrap())</script></head><body>OK</body></html>")
             }
 

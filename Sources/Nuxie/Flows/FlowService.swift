@@ -33,11 +33,12 @@ final class FlowService: FlowServiceProtocol {
     
     private let flowStore: FlowStore
     private let flowArchiver: FlowArchiver
+    private let fontStore: FontStore
     
     // Lazy initialization ensures this is created on MainActor when first accessed
     @MainActor
     private lazy var viewControllerCache: FlowViewControllerCache = {
-        FlowViewControllerCache(flowArchiver: self.flowArchiver)
+        FlowViewControllerCache(flowArchiver: self.flowArchiver, fontStore: self.fontStore)
     }()
     
     // MARK: - Initialization
@@ -46,6 +47,7 @@ final class FlowService: FlowServiceProtocol {
         self.flowStore = FlowStore()
         // Use injected flowArchiver or create new instance
         self.flowArchiver = flowArchiver ?? FlowArchiver()
+        self.fontStore = FontStore()
         
         LogInfo("FlowService initialized with all subsystems")
     }
@@ -57,6 +59,10 @@ final class FlowService: FlowServiceProtocol {
         LogInfo("Prefetching \(remoteFlows.count) flows")
         
         Task {
+            let fontEntries = remoteFlows.flatMap { $0.fontManifest?.fonts ?? [] }
+            if !fontEntries.isEmpty {
+                await fontStore.prefetchFonts(fontEntries)
+            }
             // Preload all flows with products into cache (concurrent)
             await flowStore.preloadFlows(remoteFlows)
             
@@ -151,6 +157,9 @@ final class FlowService: FlowServiceProtocol {
             }
             group.addTask { [weak self] in
                 await self?.flowArchiver.clearAllArchives()
+            }
+            group.addTask { [weak self] in
+                await self?.fontStore.clearCache()
             }
         }
         

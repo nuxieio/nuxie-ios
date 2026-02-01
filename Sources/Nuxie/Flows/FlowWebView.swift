@@ -13,10 +13,11 @@ public class FlowWebView: WKWebView {
     
     /// Message handler for JavaScript communication
     private var messageHandler: FlowMessageHandler!
+    private var fontSchemeHandler: NuxieFontSchemeHandler?
     
     // MARK: - Initialization
     
-    init(messageHandlerDelegate: FlowMessageHandlerDelegate) {
+    init(messageHandlerDelegate: FlowMessageHandlerDelegate, fontStore: FontStore) {
         let configuration = WKWebViewConfiguration()
         
         // JavaScript Configuration
@@ -35,6 +36,10 @@ public class FlowWebView: WKWebView {
         configuration.allowsPictureInPictureMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.suppressesIncrementalRendering = false
+
+        let schemeHandler = NuxieFontSchemeHandler(fontStore: fontStore)
+        configuration.setURLSchemeHandler(schemeHandler, forURLScheme: "nuxie-font")
+        self.fontSchemeHandler = schemeHandler
         
         // Initialize the web view first
         super.init(frame: .zero, configuration: configuration)

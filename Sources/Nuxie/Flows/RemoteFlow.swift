@@ -5,6 +5,7 @@ import Foundation
 public struct RemoteFlow: Codable {
     public let id: String
     public let bundle: FlowBundleRef
+    public let fontManifest: FontManifest? = nil
     public let screens: [RemoteFlowScreen]
     public let interactions: [String: [Interaction]]
     public let viewModels: [ViewModel]
@@ -15,6 +16,21 @@ public struct RemoteFlow: Codable {
 public struct FlowBundleRef: Codable {
     public let url: String
     public let manifest: BuildManifest
+}
+
+public struct FontManifest: Codable {
+    public let version: Int
+    public let fonts: [FontManifestEntry]
+}
+
+public struct FontManifestEntry: Codable {
+    public let id: String
+    public let family: String
+    public let style: String
+    public let weight: String
+    public let format: String
+    public let contentHash: String
+    public let assetUrl: String
 }
 
 public struct RemoteFlowScreen: Codable {
