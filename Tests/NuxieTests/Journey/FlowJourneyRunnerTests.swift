@@ -719,6 +719,180 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(journey.context["_variant_key"]?.value as? String).to(equal("b"))
             }
 
+            it("tracks experiment exposure for running assignment") {
+                let flowId = "flow-experiment-exposure"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "variant": ViewModelProperty(
+                            type: .string,
+                            propertyId: 1,
+                            defaultValue: AnyCodable("none"),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let variantA = ExperimentVariant(
+                    id: "a",
+                    name: "A",
+                    percentage: 50,
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            value: AnyCodable(["literal": "a"] as [String: Any])
+                        ))
+                    ]
+                )
+                let variantB = ExperimentVariant(
+                    id: "b",
+                    name: "B",
+                    percentage: 50,
+                    actions: [
+                        .setViewModel(SetViewModelAction(
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            value: AnyCodable(["literal": "b"] as [String: Any])
+                        ))
+                    ]
+                )
+
+                let experiment = ExperimentAction(
+                    experimentId: "exp-1",
+                    variants: [variantA, variantB]
+                )
+
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.experiment(experiment)],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let assignment = ExperimentAssignment(
+                    experimentKey: "exp-1",
+                    variantKey: "b",
+                    status: "running",
+                    isHoldout: true
+                )
+                let profile = ProfileResponse(
+                    campaigns: [],
+                    segments: [],
+                    flows: [],
+                    userProperties: nil,
+                    experiments: ["exp-1": assignment],
+                    features: nil,
+                    journeys: nil
+                )
+                mocks.profileService.setProfileResponse(profile)
+                _ = try? await mocks.profileService.fetchProfile(distinctId: journey.distinctId)
+
+                _ = await runner.handleRuntimeReady()
+
+                let exposure = mocks.eventService.trackedEvents.first {
+                    $0.name == JourneyEvents.experimentExposure
+                }
+                expect(exposure).toNot(beNil())
+                let props = exposure?.properties ?? [:]
+                expect(props["experiment_key"] as? String).to(equal("exp-1"))
+                expect(props["variant_key"] as? String).to(equal("b"))
+                expect(props["campaign_id"] as? String).to(equal("camp-1"))
+                expect(props["flow_id"] as? String).to(equal(flowId))
+                expect(props["journey_id"] as? String).to(equal(journey.id))
+                expect(props["is_holdout"] as? Bool).to(beTrue())
+            }
+
+            it("tracks experiment exposure errors for missing variants") {
+                let flowId = "flow-experiment-missing"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "variant": ViewModelProperty(
+                            type: .string,
+                            propertyId: 1,
+                            defaultValue: AnyCodable("none"),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let variantA = ExperimentVariant(
+                    id: "a",
+                    name: "A",
+                    percentage: 50,
+                    actions: []
+                )
+                let variantB = ExperimentVariant(
+                    id: "b",
+                    name: "B",
+                    percentage: 50,
+                    actions: []
+                )
+
+                let experiment = ExperimentAction(
+                    experimentId: "exp-1",
+                    variants: [variantA, variantB]
+                )
+
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.experiment(experiment)],
+                    viewModels: [viewModel]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let assignment = ExperimentAssignment(
+                    experimentKey: "exp-1",
+                    variantKey: "missing",
+                    status: "running",
+                    isHoldout: false
+                )
+                let profile = ProfileResponse(
+                    campaigns: [],
+                    segments: [],
+                    flows: [],
+                    userProperties: nil,
+                    experiments: ["exp-1": assignment],
+                    features: nil,
+                    journeys: nil
+                )
+                mocks.profileService.setProfileResponse(profile)
+                _ = try? await mocks.profileService.fetchProfile(distinctId: journey.distinctId)
+
+                _ = await runner.handleRuntimeReady()
+
+                let errorEvent = mocks.eventService.trackedEvents.first {
+                    $0.name == "$experiment_exposure_error"
+                }
+                expect(errorEvent).toNot(beNil())
+                let props = errorEvent?.properties ?? [:]
+                expect(props["experiment_key"] as? String).to(equal("exp-1"))
+                expect(props["variant_key"] as? String).to(equal("missing"))
+                expect(props["reason"] as? String).to(equal("variant_not_found"))
+
+                let trackedNames = mocks.eventService.trackedEvents.map(\.name)
+                expect(trackedNames).toNot(contain(JourneyEvents.experimentExposure))
+            }
+
             it("updates context from remote action success") {
                 let flowId = "flow-remote"
                 let remoteFlow = makeRemoteFlow(
