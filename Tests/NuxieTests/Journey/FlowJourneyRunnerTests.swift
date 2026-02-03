@@ -692,10 +692,10 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
 
                 let assignment = ExperimentAssignment(
-                    experimentId: "exp-1",
-                    variantId: "b",
-                    flowId: nil,
-                    status: "running"
+                    experimentKey: "exp-1",
+                    variantKey: "b",
+                    status: "running",
+                    isHoldout: false
                 )
                 let profile = ProfileResponse(
                     campaigns: [],
@@ -715,8 +715,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let values = snapshot?.viewModelInstances.first?.values
                 let variant = values?["variant"]?.value as? String
                 expect(variant).to(equal("b"))
-                expect(journey.context["_experiment_id"]?.value as? String).to(equal("exp-1"))
-                expect(journey.context["_variant_id"]?.value as? String).to(equal("b"))
+                expect(journey.context["_experiment_key"]?.value as? String).to(equal("exp-1"))
+                expect(journey.context["_variant_key"]?.value as? String).to(equal("b"))
             }
 
             it("updates context from remote action success") {

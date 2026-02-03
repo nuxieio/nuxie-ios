@@ -738,29 +738,41 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         guard !action.variants.isEmpty else { return .continue }
         let assignment = await getServerAssignment(experimentId: action.experimentId)
-        guard let variant = resolveExperimentVariant(action, assignment: assignment) else {
+        let resolution = resolveExperimentVariant(action, assignment: assignment)
+        guard let variant = resolution.variant else {
             return .continue
         }
 
-        journey.setContext("_experiment_id", value: action.experimentId)
-        journey.setContext("_variant_id", value: variant.id)
+        journey.setContext("_experiment_key", value: action.experimentId)
+        journey.setContext("_variant_key", value: variant.id)
 
         let status = assignment?.status
         if status == "running" {
-            let variantIndex = action.variants.firstIndex { $0.id == variant.id }
-            eventService.track(
-                JourneyEvents.experimentVariantAssigned,
-                properties: JourneyEvents.experimentVariantAssignedProperties(
-                    journey: journey,
-                    experimentId: action.experimentId,
-                    variantId: variant.id,
-                    variantName: variant.name,
-                    variantIndex: variantIndex,
-                    flowId: journey.flowId
-                ),
-                userProperties: nil,
-                userPropertiesSetOnce: nil
-            )
+            if resolution.matchedAssignment {
+                eventService.track(
+                    JourneyEvents.experimentExposure,
+                    properties: JourneyEvents.experimentExposureProperties(
+                        journey: journey,
+                        experimentKey: action.experimentId,
+                        variantKey: variant.id,
+                        flowId: journey.flowId,
+                        isHoldout: assignment?.isHoldout ?? false
+                    ),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil
+                )
+            } else {
+                eventService.track(
+                    "$experiment_exposure_error",
+                    properties: [
+                        "experiment_key": action.experimentId,
+                        "variant_key": assignment?.variantKey as Any,
+                        "reason": "variant_not_found"
+                    ],
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil
+                )
+            }
         }
 
         let result = await runNestedActions(variant.actions, context: context)
@@ -1688,20 +1700,20 @@ final class FlowJourneyRunner {
     private func resolveExperimentVariant(
         _ action: ExperimentAction,
         assignment: ExperimentAssignment?
-    ) -> ExperimentVariant? {
+    ) -> (variant: ExperimentVariant?, matchedAssignment: Bool) {
         guard let assignment else {
-            return action.variants.first
+            return (action.variants.first, false)
         }
 
         switch assignment.status {
         case "running", "concluded":
-            if let variantId = assignment.variantId,
-               let variant = action.variants.first(where: { $0.id == variantId }) {
-                return variant
+            if let variantKey = assignment.variantKey,
+               let variant = action.variants.first(where: { $0.id == variantKey }) {
+                return (variant, true)
             }
-            return action.variants.first
+            return (action.variants.first, false)
         default:
-            return action.variants.first
+            return (action.variants.first, false)
         }
     }
 
