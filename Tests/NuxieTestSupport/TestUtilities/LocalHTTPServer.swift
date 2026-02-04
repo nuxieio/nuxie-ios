@@ -129,7 +129,74 @@ final class LocalHTTPServer {
                 return
             }
 
-            let response = self.handler(request)
+            let contentLength = Int(request.headers["content-length"] ?? "") ?? 0
+            if contentLength > request.body.count {
+                self.receiveBody(
+                    connection,
+                    request: request,
+                    expectedLength: contentLength,
+                    buffer: request.body
+                )
+                return
+            }
+
+            let body = contentLength > 0 ? Data(request.body.prefix(contentLength)) : request.body
+            let finalRequest = Request(
+                method: request.method,
+                path: request.path,
+                query: request.query,
+                headers: request.headers,
+                body: body
+            )
+
+            let response = self.handler(finalRequest)
+            self.send(connection, response: response)
+        }
+    }
+
+    private func receiveBody(
+        _ connection: NWConnection,
+        request: Request,
+        expectedLength: Int,
+        buffer: Data
+    ) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, _, error in
+            guard let self else { return }
+            if error != nil {
+                connection.cancel()
+                return
+            }
+
+            var nextBuffer = buffer
+            if let data {
+                nextBuffer.append(data)
+            }
+
+            guard nextBuffer.count < 10 * 1024 * 1024 else {
+                self.send(connection, response: Response.text("Request too large", statusCode: 400))
+                return
+            }
+
+            if nextBuffer.count < expectedLength {
+                self.receiveBody(
+                    connection,
+                    request: request,
+                    expectedLength: expectedLength,
+                    buffer: nextBuffer
+                )
+                return
+            }
+
+            let body = Data(nextBuffer.prefix(expectedLength))
+            let finalRequest = Request(
+                method: request.method,
+                path: request.path,
+                query: request.query,
+                headers: request.headers,
+                body: body
+            )
+
+            let response = self.handler(finalRequest)
             self.send(connection, response: response)
         }
     }
