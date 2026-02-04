@@ -97,8 +97,8 @@ packages/nuxie-ios/
 ## API Endpoints
 
 Currently implemented:
-- `POST /api/i/profile` - Get campaigns, segments, and flows with flow execution data
-- `POST /api/i/event` - Track events
+- `POST /profile` - Get campaigns, segments, and flows with flow execution data
+- `POST /event` - Track events
 
 Authentication: API key in request body for all POST endpoints.
 
