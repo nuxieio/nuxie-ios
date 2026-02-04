@@ -542,6 +542,163 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(didReceiveTap.get()).to(beTrue())
             }
 
+            it("caches and loads a WebArchive on the next load (fixture mode)") {
+                guard let requestLog else { return }
+                guard server != nil else { return }
+
+                let didLoadFirst = LockedValue(false)
+                let didLoadSecond = LockedValue(false)
+
+                waitUntil(timeout: .seconds(25)) { done in
+                    var finished = false
+
+                    func finishOnce() {
+                        guard !finished else { return }
+                        finished = true
+                        done()
+                    }
+
+                    Task {
+                        do {
+                            Container.shared.reset()
+                            let config = NuxieConfiguration(apiKey: apiKey)
+                            config.apiEndpoint = baseURL
+                            config.enablePlugins = false
+                            config.customStoragePath = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                            Container.shared.sdkConfiguration.register { config }
+                            Container.shared.eventService.register { MockEventService() }
+
+                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                            let remoteFlow = try await api.fetchFlow(flowId: flowId)
+                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                            let archiveService = FlowArchiver()
+                            await archiveService.removeArchive(for: flow.id)
+
+                            // First presentation (remote URL; kicks off background WebArchive preload).
+                            await MainActor.run {
+                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: flowId)
+                                let journey = Journey(campaign: campaign, distinctId: "e2e-user")
+                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner.attach(viewController: vc)
+
+                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge, onMessage: nil)
+                                runtimeDelegate = delegate
+                                vc.runtimeDelegate = delegate
+                                flowViewController = vc
+
+                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                testWindow.rootViewController = vc
+                                testWindow.makeKeyAndVisible()
+                                window = testWindow
+                                _ = vc.view
+                            }
+
+                            guard let vc = flowViewController else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView = await MainActor.run { vc.flowWebView }
+                            guard let webView else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 8.0)) == true {
+                                didLoadFirst.set(true)
+                            } else {
+                                fail("E2E: first load did not reach runtime/view_model_init")
+                                finishOnce()
+                                return
+                            }
+
+                            guard let archiveURL = try await waitForArchiveURL(archiveService, for: flow) else {
+                                fail("E2E: expected WebArchive to be cached after first load")
+                                finishOnce()
+                                return
+                            }
+                            if !archiveURL.isFileURL {
+                                fail("E2E: expected cached WebArchive URL to be a file URL")
+                                finishOnce()
+                                return
+                            }
+
+                            let logAfterFirst = requestLog.snapshot()
+                            let firstLogCount = logAfterFirst.count
+
+                            // Second presentation should load from cached WebArchive (no /bundles/* network).
+                            await MainActor.run {
+                                window?.rootViewController = nil
+                                flowViewController = nil
+                                runtimeDelegate = nil
+
+                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: flowId)
+                                let journey = Journey(campaign: campaign, distinctId: "e2e-user-2")
+                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner.attach(viewController: vc)
+
+                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge, onMessage: nil)
+                                runtimeDelegate = delegate
+                                vc.runtimeDelegate = delegate
+                                flowViewController = vc
+
+                                window?.rootViewController = vc
+                                window?.makeKeyAndVisible()
+                                _ = vc.view
+                            }
+
+                            guard let vc2 = flowViewController else {
+                                fail("E2E: second FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView2 = await MainActor.run { vc2.flowWebView }
+                            guard let webView2 else {
+                                fail("E2E: second FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            if (try? await waitForVmText(webView2, equals: "hello", timeoutSeconds: 8.0)) == true {
+                                didLoadSecond.set(true)
+                            } else {
+                                fail("E2E: second load did not reach runtime/view_model_init (cached WebArchive)")
+                                finishOnce()
+                                return
+                            }
+
+                            let logAfterSecond = requestLog.snapshot()
+                            if logAfterSecond.count > firstLogCount {
+                                let delta = logAfterSecond[firstLogCount..<logAfterSecond.count]
+                                let didFetchBundleAgain = delta.contains(where: { $0.contains("/bundles/") })
+                                if didFetchBundleAgain {
+                                    fail("E2E: expected cached WebArchive load to avoid /bundles/* fetches; delta=\(Array(delta))")
+                                    finishOnce()
+                                    return
+                                }
+                            }
+
+                            if didLoadFirst.get(), didLoadSecond.get() {
+                                finishOnce()
+                            }
+                        } catch {
+                            fail("E2E setup failed: \(error)")
+                            finishOnce()
+                        }
+                    }
+                }
+
+                expect(didLoadFirst.get()).to(beTrue())
+                expect(didLoadSecond.get()).to(beTrue())
+            }
+
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
                 guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
@@ -798,4 +955,15 @@ private func waitForScreenId(_ webView: FlowWebView, equals expected: String, ti
         try await Task.sleep(nanoseconds: 50_000_000)
     }
     return false
+}
+
+private func waitForArchiveURL(_ archiveService: FlowArchiver, for flow: Flow, timeoutSeconds: Double = 8.0) async throws -> URL? {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    while Date() < deadline {
+        if let url = await archiveService.getArchiveURL(for: flow) {
+            return url
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return nil
 }
