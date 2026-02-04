@@ -147,6 +147,32 @@ final class WebArchiverTests: AsyncSpec {
                         )
                     }.to(throwError())
                 }
+
+                it("should treat non-2xx HTTP responses as failures") {
+                    let manifest = BuildManifest(
+                        totalFiles: 1,
+                        totalSize: 100,
+                        contentHash: "test-hash",
+                        files: [
+                            BuildFile(path: "index.html", size: 100, contentType: "text/html")
+                        ]
+                    )
+                    let baseURL = URL(string: "https://example.com")!
+
+                    StubURLProtocol.registerSuccess(
+                        path: "/index.html",
+                        data: "Not Found".data(using: .utf8)!,
+                        statusCode: 404,
+                        headers: ["Content-Type": "text/html"]
+                    )
+
+                    await expect {
+                        try await webArchiver.downloadAndBuildArchive(
+                            manifest: manifest,
+                            baseURL: baseURL
+                        )
+                    }.to(throwError())
+                }
                 
                 it("should download files in parallel") {
                     let manifest = BuildManifest(
