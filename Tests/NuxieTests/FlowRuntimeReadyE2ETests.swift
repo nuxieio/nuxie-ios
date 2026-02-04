@@ -2,6 +2,7 @@ import Foundation
 import Quick
 import Nimble
 import WebKit
+import FactoryKit
 @testable import Nuxie
 
 final class FlowRuntimeReadyE2ESpec: QuickSpec {
@@ -14,8 +15,26 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             var flowId: String = "flow_e2e_ready"
 
             var flowViewController: FlowViewController?
-            var runtimeDelegate: CapturingRuntimeDelegate?
+            var runtimeDelegate: FlowRuntimeDelegate?
             var requestLog: LockedArray<String>?
+
+            func makeCampaign(flowId: String) -> Campaign {
+                let publishedAt = ISO8601DateFormatter().string(from: Date())
+                return Campaign(
+                    id: "camp-e2e-1",
+                    name: "E2E Campaign",
+                    flowId: flowId,
+                    flowNumber: 1,
+                    flowName: nil,
+                    reentry: .oneTime,
+                    publishedAt: publishedAt,
+                    trigger: .event(EventTriggerConfig(eventName: "test_event", condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil,
+                    conversionAnchor: nil,
+                    campaignType: nil
+                )
+            }
 
             beforeEach {
                 flowViewController = nil
@@ -63,12 +82,47 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             screens: [
                                 RemoteFlowScreen(
                                     id: "screen-1",
-                                    defaultViewModelId: nil,
+                                    defaultViewModelId: "vm-1",
                                     defaultInstanceId: nil
                                 )
                             ],
-                            interactions: [:],
-                            viewModels: [],
+                            interactions: [
+                                "tap": [
+                                    Interaction(
+                                        id: "int-tap",
+                                        trigger: .tap,
+                                        actions: [
+                                            .setViewModel(
+                                                SetViewModelAction(
+                                                    path: .ids(VmPathIds(pathIds: [0, 1])),
+                                                    value: AnyCodable(["literal": "world"] as [String: Any])
+                                                )
+                                            )
+                                        ],
+                                        enabled: true
+                                    )
+                                ]
+                            ],
+                            viewModels: [
+                                ViewModel(
+                                    id: "vm-1",
+                                    name: "VM",
+                                    viewModelPathId: 0,
+                                    properties: [
+                                        "title": ViewModelProperty(
+                                            type: .string,
+                                            propertyId: 1,
+                                            defaultValue: AnyCodable("hello"),
+                                            required: nil,
+                                            enumValues: nil,
+                                            itemType: nil,
+                                            schema: nil,
+                                            viewModelId: nil,
+                                            validation: nil
+                                        )
+                                    ]
+                                )
+                            ],
                             viewModelInstances: nil,
                             converters: nil
                         )
@@ -127,6 +181,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                       if (!envelope || !envelope.type) return;
                                       if (envelope.type === "runtime/navigate") {
                                         var screenId = (envelope.payload && envelope.payload.screenId) || null;
+                                        window.__nuxieScreenId = screenId;
                                         post("runtime/screen_changed", { screenId: screenId });
                                         return;
                                       }
@@ -149,7 +204,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                                 try {
                                   document.getElementById("tap").addEventListener("click", function() {
-                                    post("action/tap", { elementId: "tap" });
+                                    post("action/tap", { componentId: "tap", screenId: window.__nuxieScreenId || null });
                                   });
                                 } catch (e) {}
 
@@ -296,14 +351,12 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE1"] == "1" else { return }
 
                 let messages = LockedArray<String>()
-                let expectedScreenId = LockedValue<String?>(nil)
                 let didApplyInit = LockedValue(false)
                 let didApplyPatch = LockedValue(false)
                 let didReceiveTap = LockedValue(false)
 
                 waitUntil(timeout: .seconds(25)) { done in
                     var finished = false
-                    var didReceiveReady = false
 
                     func finishOnce() {
                         guard !finished else { return }
@@ -311,104 +364,18 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         done()
                     }
 
-                    runtimeDelegate = CapturingRuntimeDelegate(onMessage: { type, payload, _ in
-                        let payloadKeys = payload.keys.sorted().joined(separator: ",")
-                        messages.append("\(type) keys=[\(payloadKeys)]")
-
-                        if type == "runtime/ready" {
-                            didReceiveReady = true
-                            Task { @MainActor in
-                                guard let vc = flowViewController else {
-                                    fail("E2E: FlowViewController was not created")
-                                    finishOnce()
-                                    return
-                                }
-                                guard let screenId = vc.flow.remoteFlow.screens.first?.id else {
-                                    fail("E2E: RemoteFlow has no screens; cannot test runtime/navigate")
-                                    finishOnce()
-                                    return
-                                }
-
-                                expectedScreenId.set(screenId)
-                                vc.sendRuntimeMessage(type: "runtime/navigate", payload: ["screenId": screenId])
-                            }
-                            return
-                        }
-
-                        if type == "runtime/screen_changed" {
-                            guard didReceiveReady else { return }
-                            guard let expected = expectedScreenId.get() else { return }
-                            let got = payload["screenId"] as? String
-                            guard got == expected else { return }
-
-                            Task { @MainActor in
-                                guard let vc = flowViewController else {
-                                    fail("E2E: FlowViewController was not created")
-                                    finishOnce()
-                                    return
-                                }
-
-                                vc.sendRuntimeMessage(
-                                    type: "runtime/view_model_init",
-                                    payload: [
-                                        "instances": [
-                                            [
-                                                "viewModelId": "vm-1",
-                                                "instanceId": "inst-1",
-                                                "values": [
-                                                    "title": "hello"
-                                                ]
-                                            ]
-                                        ]
-                                    ]
-                                )
-                                if let webView = vc.flowWebView,
-                                   (try? await waitForVmText(webView, equals: "hello")) == true {
-                                    didApplyInit.set(true)
-                                } else {
-                                    fail("E2E: view model init did not update DOM")
-                                    finishOnce()
-                                    return
-                                }
-
-                                vc.sendRuntimeMessage(
-                                    type: "runtime/view_model_patch",
-                                    payload: [
-                                        "pathIds": [0],
-                                        "value": "world"
-                                    ]
-                                )
-                                if let webView = vc.flowWebView,
-                                   (try? await waitForVmText(webView, equals: "world")) == true {
-                                    didApplyPatch.set(true)
-                                } else {
-                                    fail("E2E: view model patch did not update DOM")
-                                    finishOnce()
-                                    return
-                                }
-
-                                if let webView = vc.flowWebView {
-                                    _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
-                                }
-
-                                if didReceiveTap.get(), didApplyInit.get(), didApplyPatch.get() {
-                                    finishOnce()
-                                }
-                            }
-                            return
-                        }
-
-                        if type == "action/tap" {
-                            guard payload["elementId"] as? String == "tap" else { return }
-                            didReceiveTap.set(true)
-                            if didApplyInit.get(), didApplyPatch.get() {
-                                finishOnce()
-                            }
-                        }
-                    })
-
                     Task {
                         do {
+                            // Ensure FlowJourneyRunner can resolve injected dependencies without requiring full SDK setup.
+                            Container.shared.reset()
+                            let config = NuxieConfiguration(apiKey: apiKey)
+                            config.apiEndpoint = baseURL
+                            config.enablePlugins = false
+                            config.customStoragePath = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                            Container.shared.sdkConfiguration.register { config }
+                            Container.shared.eventService.register { MockEventService() }
+
                             let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
                             let remoteFlow = try await api.fetchFlow(flowId: flowId)
                             let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -421,9 +388,59 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             await MainActor.run {
                                 let vc = FlowViewController(flow: flow, archiveService: archiveService)
-                                vc.runtimeDelegate = runtimeDelegate
+                                let campaign = makeCampaign(flowId: flowId)
+                                let journey = Journey(campaign: campaign, distinctId: "e2e-user")
+                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner.attach(viewController: vc)
+
+                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, id in
+                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
+                                    messages.append("\(type) keys=[\(payloadKeys)]")
+                                    if type == "action/tap" {
+                                        if payload["componentId"] as? String == "tap" || payload["elementId"] as? String == "tap" {
+                                            didReceiveTap.set(true)
+                                        }
+                                    }
+                                }
+                                runtimeDelegate = delegate
+                                vc.runtimeDelegate = delegate
                                 flowViewController = vc
                                 _ = vc.view
+                            }
+
+                            guard let vc = flowViewController else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView = await MainActor.run { vc.flowWebView }
+                            guard let webView else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            if (try? await waitForVmText(webView, equals: "hello")) == true {
+                                didApplyInit.set(true)
+                            } else {
+                                fail("E2E: view model init did not update DOM")
+                                finishOnce()
+                                return
+                            }
+
+                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+                            if (try? await waitForVmText(webView, equals: "world")) == true {
+                                didApplyPatch.set(true)
+                            } else {
+                                fail("E2E: view model patch did not update DOM")
+                                finishOnce()
+                                return
+                            }
+
+                            if didReceiveTap.get(), didApplyInit.get(), didApplyPatch.get() {
+                                finishOnce()
                             }
                         } catch {
                             fail("E2E setup failed: \(error)")
@@ -434,6 +451,8 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                 let messagesSnapshot = messages.snapshot()
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/screen_changed") })).to(beTrue())
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
                 expect(didApplyInit.get()).to(beTrue())
                 expect(didApplyPatch.get()).to(beTrue())
                 expect(didReceiveTap.get()).to(beTrue())
