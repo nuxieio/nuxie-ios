@@ -19,6 +19,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             var runtimeDelegate: FlowRuntimeDelegate?
             var window: UIWindow?
             var requestLog: LockedArray<String>?
+            var batchBodies: LockedArray<Data>?
 
             func makeCampaign(flowId: String) -> Campaign {
                 let publishedAt = ISO8601DateFormatter().string(from: Date())
@@ -43,6 +44,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 runtimeDelegate = nil
                 window = nil
                 requestLog = LockedArray<String>()
+                batchBodies = LockedArray<Data>()
 
                 let env = ProcessInfo.processInfo.environment
                 let envApiKey = env["NUXIE_E2E_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,6 +65,23 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
 	                server = try? LocalHTTPServer { request in
 	                    requestLog?.append("\(request.method) \(request.path)")
+	                    if request.method == "POST", request.path.hasSuffix("/batch") {
+	                        batchBodies?.append(request.body)
+
+	                        // Best-effort count for nicer logs/debugging.
+	                        let decoded = decodeMaybeGzippedJSON(request.body)
+	                        let batchCount = ((decoded as? [String: Any])?["batch"] as? [Any])?.count ?? 0
+	                        let response = BatchResponse(
+	                            status: "ok",
+	                            processed: batchCount,
+	                            failed: 0,
+	                            total: batchCount,
+	                            errors: nil
+	                        )
+	                        let json = (try? JSONEncoder().encode(response))
+	                            ?? Data("{\"status\":\"ok\",\"processed\":0,\"failed\":0,\"total\":0}".utf8)
+	                        return LocalHTTPServer.Response.json(json)
+	                    }
 	                    if (request.method == "POST" || request.method == "GET"), request.path == "/profile" {
 	                        var requestedDistinctId: String? = request.query["distinct_id"]
 	                        if requestedDistinctId == nil, !request.body.isEmpty {
@@ -362,6 +381,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window?.rootViewController = nil
                 window = nil
                 requestLog = nil
+                batchBodies = nil
             }
 
             it("fetches /flows/:id, receives runtime/ready, and completes a navigate→screen_changed handshake") {
@@ -759,8 +779,26 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
 	                            Container.shared.sdkConfiguration.register { config }
 
-	                            let mockEventService = MockEventService()
-	                            Container.shared.eventService.register { mockEventService }
+	                            let identityService = Container.shared.identityService()
+	                            identityService.setDistinctId(distinctId)
+
+	                            let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
+	                            let networkQueue = NuxieNetworkQueue(
+	                                flushAt: 1_000_000,
+	                                flushIntervalSeconds: config.flushInterval,
+	                                maxQueueSize: config.maxQueueSize,
+	                                maxBatchSize: config.eventBatchSize,
+	                                maxRetries: config.retryCount,
+	                                baseRetryDelay: config.retryDelay,
+	                                apiClient: Container.shared.nuxieApi()
+	                            )
+	                            let eventService = Container.shared.eventService()
+	                            try await eventService.configure(
+	                                networkQueue: networkQueue,
+	                                journeyService: nil,
+	                                contextBuilder: contextBuilder,
+	                                configuration: config
+	                            )
 	                            let profileService = Container.shared.profileService()
 	                            let profile = try await profileService.fetchProfile(distinctId: distinctId)
 	                            guard profile.experiments?["exp-1"]?.variantKey == variantKey else {
@@ -832,8 +870,21 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            let exposure = mockEventService.trackedEvents.first { $0.name == JourneyEvents.experimentExposure }
-                            exposureProps.set(exposure?.properties)
+                            await eventService.drain()
+                            let didFlush = await eventService.flushEvents()
+                            if !didFlush {
+                                fail("E2E: expected flushEvents() to initiate a flush (didFlush=false)")
+                                finishOnce()
+                                return
+                            }
+
+                            let bodies = batchBodies?.snapshot() ?? []
+                            guard let props = firstExposureProperties(fromBatchBodies: bodies) else {
+                                fail("E2E: expected a $experiment_exposure event in POST /batch payload; requests=\(bodies.count)")
+                                finishOnce()
+                                return
+                            }
+                            exposureProps.set(props)
                             finishOnce()
                         } catch {
                             fail("E2E setup failed: \(error)")
@@ -858,6 +909,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
 	                let requestSnapshot = requestLog?.snapshot() ?? []
 	                expect(requestSnapshot.contains("POST /profile") || requestSnapshot.contains("GET /profile")).to(beTrue())
+	                expect(requestSnapshot.contains("POST /batch")).to(beTrue())
 	            }
 
             it("branches to screen-a and tracks exposure (fixture mode)") {
@@ -928,6 +980,28 @@ private final class LockedValue<T> {
         lock.unlock()
         return current
     }
+}
+
+private func decodeMaybeGzippedJSON(_ data: Data) -> Any? {
+    let decoded: Data
+    if data.isGzipped, let unzipped = try? data.gunzipped() {
+        decoded = unzipped
+    } else {
+        decoded = data
+    }
+    return try? JSONSerialization.jsonObject(with: decoded, options: [])
+}
+
+private func firstExposureProperties(fromBatchBodies bodies: [Data]) -> [String: Any]? {
+    for body in bodies {
+        guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { continue }
+        guard let batch = root["batch"] as? [[String: Any]] else { continue }
+        for item in batch {
+            guard (item["event"] as? String) == JourneyEvents.experimentExposure else { continue }
+            return item["properties"] as? [String: Any]
+        }
+    }
+    return nil
 }
 
 @MainActor
