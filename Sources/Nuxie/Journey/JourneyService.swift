@@ -450,7 +450,7 @@ public actor JourneyService: JourneyServiceProtocol {
       }
 
     case "action/purchase":
-      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
+      let screenId: String? = payload["screenId"] as? String ?? journey.flowState.currentScreenId
       let instanceId = payload["instanceId"] as? String
       let resolvedProductId = runner.resolveRuntimeValue(
         payload["productId"] ?? "",
@@ -599,7 +599,7 @@ public actor JourneyService: JourneyServiceProtocol {
       return existing
     }
 
-    guard let flowId = campaign.flowId else { return nil }
+    let flowId = campaign.flowId
 
     do {
       let flow = try await flowService.fetchFlow(id: flowId)
@@ -633,7 +633,7 @@ public actor JourneyService: JourneyServiceProtocol {
 
       return runner
     } catch {
-      LogError("Failed to load flow \(campaign.flowId ?? "") for journey \(journey.id): \(error)")
+      LogError("Failed to load flow \(campaign.flowId) for journey \(journey.id): \(error)")
       return nil
     }
   }
@@ -866,10 +866,6 @@ public actor JourneyService: JourneyServiceProtocol {
   // MARK: - Reentry Policy
 
   private func suppressionReason(campaign: Campaign, distinctId: String) -> SuppressReason? {
-    if campaign.flowId == nil {
-      return .noFlow
-    }
-
     let live = inMemoryJourneysById.values.filter {
       $0.distinctId == distinctId && $0.campaignId == campaign.id && $0.status.isLive
     }

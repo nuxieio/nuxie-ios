@@ -90,13 +90,17 @@ public final class NuxieSDK {
     let journeyService = Container.shared.journeyService()
 
     Task {
-      try await eventService.configure(
-        networkQueue: networkQueue,
-        journeyService: journeyService,
-        contextBuilder: contextBuilder,
-        configuration: configuration
-      )
-      LogDebug("Event system setup complete")
+      do {
+        try await eventService.configure(
+          networkQueue: networkQueue,
+          journeyService: journeyService,
+          contextBuilder: contextBuilder,
+          configuration: configuration
+        )
+        LogDebug("Event system setup complete")
+      } catch {
+        LogError("Event system setup failed: \(error)")
+      }
     }
 
     Task {

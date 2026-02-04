@@ -62,6 +62,18 @@ final class EventMigrationIntegrationTests: AsyncSpec {
             }
             
             afterEach {
+                // Ensure we fully shut down before deleting the DB directory. Global teardown runs
+                // later, but many specs delete their temp dirs in local afterEach.
+                let semaphore = DispatchSemaphore(value: 0)
+                Task.detached {
+                    await NuxieSDK.shared.shutdown()
+                    semaphore.signal()
+                }
+                let result = semaphore.wait(timeout: .now() + 15.0)
+                if result == .timedOut {
+                    print("WARN: Timed out waiting for NuxieSDK.shutdown (EventMigrationIntegrationTests.afterEach)")
+                }
+
                 // Clean up test database directory
                 if let dbPath = dbPath {
                     try? FileManager.default.removeItem(atPath: dbPath)
