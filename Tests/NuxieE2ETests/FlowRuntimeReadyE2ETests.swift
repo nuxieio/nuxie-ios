@@ -112,9 +112,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-                        if request.method == "GET", request.path.hasPrefix("/flows/") {
+                    if request.method == "GET", request.path.hasPrefix("/flows/") {
                             let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
                             let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
                             let host = request.headers["host"] ?? "127.0.0.1"
                         // Serve a per-flow bundle root to avoid cache collisions and to more closely
                         // match real bundle shapes (base URL + manifest-relative paths).
@@ -135,6 +136,17 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 files: fixture.buildFiles
                             )
                         } else {
+                            if isMissingAssetFlow {
+                                manifest = BuildManifest(
+                                    totalFiles: 2,
+                                    totalSize: 0,
+                                    contentHash: "e2e-missing-asset-\(reqFlowId)",
+                                    files: [
+                                        BuildFile(path: "index.html", size: 0, contentType: "text/html"),
+                                        BuildFile(path: "missing.js", size: 0, contentType: "text/javascript")
+                                    ]
+                                )
+                            } else {
                             manifest = BuildManifest(
                                 totalFiles: 1,
                                 totalSize: 0,
@@ -143,6 +155,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                     BuildFile(path: "index.html", size: 0, contentType: "text/html")
                                 ]
                             )
+                            }
                         }
 
                         let remoteFlow: RemoteFlow
@@ -267,6 +280,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
                         let reqFlowId = parts.first.map(String.init) ?? ""
                         let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                        let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+                        let requestedFile = parts.dropFirst().joined(separator: "/")
+                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
                         if isExperimentFlow {
                             guard let fixture = phase2CompiledBundleFixture else {
@@ -275,8 +291,6 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                     statusCode: 500
                                 )
                             }
-                            let requestedFile = parts.dropFirst().joined(separator: "/")
-                            let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
                             guard let file = fixture.filesByPath[fileName] else {
                                 return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
                             }
@@ -285,6 +299,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 headers: ["Content-Type": "\(file.contentType); charset=utf-8"],
                                 body: file.data
                             )
+                        }
+
+                        if isMissingAssetFlow, fileName != "index.html" {
+                            return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
                         }
 
                         let html = """
@@ -790,6 +808,594 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(didLoadSecond.get()).to(beTrue())
             }
 
+            it("does not cache a WebArchive when a manifest file is 404 (fixture mode)") {
+                guard let requestLog else { return }
+                guard server != nil else { return }
+
+                let missingFlowId = "flow_e2e_missing_asset_\(UUID().uuidString)"
+                let didLoadFirst = LockedValue(false)
+                let didLoadSecond = LockedValue(false)
+
+                waitUntil(timeout: .seconds(25)) { done in
+                    var finished = false
+
+                    func finishOnce() {
+                        guard !finished else { return }
+                        finished = true
+                        done()
+                    }
+
+                    Task {
+                        do {
+                            Container.shared.reset()
+                            let config = NuxieConfiguration(apiKey: apiKey)
+                            config.apiEndpoint = baseURL
+                            config.enablePlugins = false
+                            config.customStoragePath = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                            Container.shared.sdkConfiguration.register { config }
+                            Container.shared.eventService.register { MockEventService() }
+
+                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                            let remoteFlow = try await api.fetchFlow(flowId: missingFlowId)
+                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                            let archiveService = FlowArchiver()
+                            await archiveService.removeArchive(for: flow.id)
+
+                            // First presentation (remote URL; archive preload should fail on missing.js).
+                            await MainActor.run {
+                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: missingFlowId)
+                                let journey = Journey(campaign: campaign, distinctId: "e2e-user-missing")
+                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner.attach(viewController: vc)
+
+                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge, onMessage: nil)
+                                runtimeDelegate = delegate
+                                vc.runtimeDelegate = delegate
+                                flowViewController = vc
+
+                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                testWindow.rootViewController = vc
+                                testWindow.makeKeyAndVisible()
+                                window = testWindow
+                                _ = vc.view
+                            }
+
+                            guard let vc = flowViewController else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView = await MainActor.run { vc.flowWebView }
+                            guard let webView else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            guard (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 8.0)) == true else {
+                                fail("E2E: first load did not reach runtime/view_model_init")
+                                finishOnce()
+                                return
+                            }
+                            didLoadFirst.set(true)
+
+                            let missingRequest = "GET /bundles/\(missingFlowId)/missing.js"
+                            let firstMissingDeadline = Date().addingTimeInterval(8.0)
+                            while Date() < firstMissingDeadline {
+                                if requestLog.snapshot().contains(missingRequest) {
+                                    break
+                                }
+                                try await Task.sleep(nanoseconds: 50_000_000)
+                            }
+                            guard requestLog.snapshot().contains(missingRequest) else {
+                                fail("E2E: expected WebArchiver to request missing file (missing.js)")
+                                finishOnce()
+                                return
+                            }
+
+                            // Give the archiver a moment to attempt caching (it should fail).
+                            try await Task.sleep(nanoseconds: 200_000_000)
+                            if let url = await archiveService.getArchiveURL(for: flow) {
+                                fail("E2E: expected no cached WebArchive after 404; got \(url)")
+                                finishOnce()
+                                return
+                            }
+
+                            let missingCountAfterFirst = requestLog.snapshot().filter { $0 == missingRequest }.count
+
+                            // Second presentation should still load from remote URL (no cached archive).
+                            await MainActor.run {
+                                window?.rootViewController = nil
+                                flowViewController = nil
+                                runtimeDelegate = nil
+
+                                let vc2 = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: missingFlowId)
+                                let journey = Journey(campaign: campaign, distinctId: "e2e-user-missing-2")
+                                let runner2 = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner2.attach(viewController: vc2)
+
+                                let bridge2 = FlowJourneyRunnerRuntimeBridge(runner: runner2)
+                                let delegate2 = FlowJourneyRunnerRuntimeDelegate(bridge: bridge2, onMessage: nil)
+                                runtimeDelegate = delegate2
+                                vc2.runtimeDelegate = delegate2
+                                flowViewController = vc2
+
+                                window?.rootViewController = vc2
+                                window?.makeKeyAndVisible()
+                                _ = vc2.view
+                            }
+
+                            guard let vc2 = flowViewController else {
+                                fail("E2E: second FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView2 = await MainActor.run { vc2.flowWebView }
+                            guard let webView2 else {
+                                fail("E2E: second FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            guard (try? await waitForVmText(webView2, equals: "hello", timeoutSeconds: 8.0)) == true else {
+                                fail("E2E: second load did not reach runtime/view_model_init")
+                                finishOnce()
+                                return
+                            }
+                            didLoadSecond.set(true)
+
+                            let secondMissingDeadline = Date().addingTimeInterval(8.0)
+                            while Date() < secondMissingDeadline {
+                                let count = requestLog.snapshot().filter { $0 == missingRequest }.count
+                                if count >= missingCountAfterFirst + 1 {
+                                    break
+                                }
+                                try await Task.sleep(nanoseconds: 50_000_000)
+                            }
+                            let missingCountAfterSecond = requestLog.snapshot().filter { $0 == missingRequest }.count
+                            guard missingCountAfterSecond >= missingCountAfterFirst + 1 else {
+                                fail("E2E: expected second load to attempt missing.js again (no cache)")
+                                finishOnce()
+                                return
+                            }
+
+                            if let url = await archiveService.getArchiveURL(for: flow) {
+                                fail("E2E: expected no cached WebArchive after second 404; got \(url)")
+                                finishOnce()
+                                return
+                            }
+
+                            finishOnce()
+                        } catch {
+                            fail("E2E setup failed: \(error)")
+                            finishOnce()
+                        }
+                    }
+                }
+
+                expect(didLoadFirst.get()).to(beTrue())
+                expect(didLoadSecond.get()).to(beTrue())
+            }
+
+            it("caches and loads a compiled WebArchive on the next load (fixture mode)") {
+                guard let requestLog else { return }
+                guard let batchBodies else { return }
+                guard server != nil else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard phase2CompiledBundleFixture != nil else {
+                    fail("E2E: missing phase2 compiled bundle fixture")
+                    return
+                }
+
+                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
+                let distinctId = "e2e-user-archive-a"
+                let variantKey = "a"
+                let expectedScreenId = "screen-a"
+
+                let didLoadFirst = LockedValue(false)
+                let didLoadSecond = LockedValue(false)
+                let didAvoidBundlesOnSecond = LockedValue(false)
+                let secondExposureProps = LockedValue<[String: Any]?>(nil)
+                let expectedSecondJourneyId = LockedValue<String?>(nil)
+
+                waitUntil(timeout: .seconds(45)) { done in
+                    var finished = false
+
+                    func finishOnce() {
+                        guard !finished else { return }
+                        finished = true
+                        done()
+                    }
+
+                    Task {
+                        do {
+                            Container.shared.reset()
+                            let config = NuxieConfiguration(apiKey: apiKey)
+                            config.apiEndpoint = baseURL
+                            config.enablePlugins = false
+                            config.customStoragePath = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                            Container.shared.sdkConfiguration.register { config }
+
+                            let identityService = Container.shared.identityService()
+                            identityService.setDistinctId(distinctId)
+
+                            let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
+                            let networkQueue = NuxieNetworkQueue(
+                                flushAt: 1_000_000,
+                                flushIntervalSeconds: config.flushInterval,
+                                maxQueueSize: config.maxQueueSize,
+                                maxBatchSize: config.eventBatchSize,
+                                maxRetries: config.retryCount,
+                                baseRetryDelay: config.retryDelay,
+                                apiClient: Container.shared.nuxieApi()
+                            )
+                            let eventService = Container.shared.eventService()
+                            try await eventService.configure(
+                                networkQueue: networkQueue,
+                                journeyService: nil,
+                                contextBuilder: contextBuilder,
+                                configuration: config
+                            )
+
+                            let profileService = Container.shared.profileService()
+                            let profile = try await profileService.fetchProfile(distinctId: distinctId)
+                            let gotVariant = profile.experiments?["exp-1"]?.variantKey ?? "nil"
+                            guard gotVariant == variantKey else {
+                                fail("E2E: expected server profile assignment variant '\(variantKey)' but got '\(gotVariant)'")
+                                finishOnce()
+                                return
+                            }
+
+                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                            let remoteFlow = try await api.fetchFlow(flowId: phase2FlowId)
+                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                            let archiveService = FlowArchiver()
+                            await archiveService.removeArchive(for: flow.id)
+
+                            // First presentation (remote URL; caches compiled WebArchive in background).
+                            await MainActor.run {
+                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: phase2FlowId)
+                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner.attach(viewController: vc)
+
+                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge, onMessage: nil)
+                                runtimeDelegate = delegate
+                                vc.runtimeDelegate = delegate
+                                flowViewController = vc
+
+                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                testWindow.rootViewController = vc
+                                testWindow.makeKeyAndVisible()
+                                window = testWindow
+                                _ = vc.view
+                            }
+
+                            guard let vc = flowViewController else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView = await MainActor.run { vc.flowWebView }
+                            guard let webView else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            let entryMarkerId = "screen-screen-entry-marker"
+                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 10.0)) == true else {
+                                fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+                                finishOnce()
+                                return
+                            }
+
+                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+                            let expectedMarkerId = "screen-\(expectedScreenId)-marker"
+                            guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 10.0)) == true else {
+                                fail("E2E: experiment did not render expected marker '\(expectedMarkerId)' on first load")
+                                finishOnce()
+                                return
+                            }
+                            didLoadFirst.set(true)
+
+                            guard (try? await waitForArchiveURL(archiveService, for: flow, timeoutSeconds: 12.0)) != nil else {
+                                fail("E2E: expected compiled WebArchive to be cached after first load")
+                                finishOnce()
+                                return
+                            }
+
+                            let logAfterFirst = requestLog.snapshot()
+                            let firstLogCount = logAfterFirst.count
+                            let didFetchBundleOnFirst = logAfterFirst.contains(where: { $0.contains("/bundles/") })
+                            if !didFetchBundleOnFirst {
+                                fail("E2E: expected first load to fetch /bundles/* resources (compiled runtime)")
+                                finishOnce()
+                                return
+                            }
+
+                            // Second presentation should load from cached WebArchive (no /bundles/* network).
+                            await MainActor.run {
+                                window?.rootViewController = nil
+                                flowViewController = nil
+                                runtimeDelegate = nil
+
+                                let vc2 = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: phase2FlowId)
+                                let journey2 = Journey(campaign: campaign, distinctId: distinctId)
+                                expectedSecondJourneyId.set(journey2.id)
+
+                                let runner2 = FlowJourneyRunner(journey: journey2, campaign: campaign, flow: flow)
+                                runner2.attach(viewController: vc2)
+
+                                let bridge2 = FlowJourneyRunnerRuntimeBridge(runner: runner2)
+                                let delegate2 = FlowJourneyRunnerRuntimeDelegate(bridge: bridge2, onMessage: nil)
+                                runtimeDelegate = delegate2
+                                vc2.runtimeDelegate = delegate2
+                                flowViewController = vc2
+
+                                window?.rootViewController = vc2
+                                window?.makeKeyAndVisible()
+                                _ = vc2.view
+                            }
+
+                            guard let vc2 = flowViewController else {
+                                fail("E2E: second FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView2 = await MainActor.run { vc2.flowWebView }
+                            guard let webView2 else {
+                                fail("E2E: second FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            guard (try? await waitForElementExists(webView2, elementId: entryMarkerId, timeoutSeconds: 10.0)) == true else {
+                                fail("E2E: compiled web runtime did not render entry marker on cached load")
+                                finishOnce()
+                                return
+                            }
+
+                            _ = try? await evaluateJavaScript(webView2, script: "document.getElementById('tap').click()")
+
+                            guard (try? await waitForElementExists(webView2, elementId: expectedMarkerId, timeoutSeconds: 10.0)) == true else {
+                                fail("E2E: experiment did not render expected marker '\(expectedMarkerId)' on cached load")
+                                finishOnce()
+                                return
+                            }
+                            didLoadSecond.set(true)
+
+                            let logAfterSecond = requestLog.snapshot()
+                            if logAfterSecond.count > firstLogCount {
+                                let delta = logAfterSecond[firstLogCount..<logAfterSecond.count]
+                                let didFetchBundleAgain = delta.contains(where: { $0.contains("/bundles/") })
+                                if didFetchBundleAgain {
+                                    fail("E2E: expected cached compiled WebArchive load to avoid /bundles/* fetches; delta=\(Array(delta))")
+                                    finishOnce()
+                                    return
+                                }
+                            }
+                            didAvoidBundlesOnSecond.set(true)
+
+                            await eventService.drain()
+                            let didFlush = await eventService.flushEvents()
+                            if !didFlush {
+                                fail("E2E: expected flushEvents() to initiate a flush (didFlush=false)")
+                                finishOnce()
+                                return
+                            }
+
+                            guard let journeyId2 = expectedSecondJourneyId.get() else {
+                                fail("E2E: expected second journey id to be set")
+                                finishOnce()
+                                return
+                            }
+                            let bodies = batchBodies.snapshot()
+                            guard let props = exposureProperties(forJourneyId: journeyId2, fromBatchBodies: bodies) else {
+                                fail("E2E: expected a $experiment_exposure event for second journey in POST /batch payload; requests=\(bodies.count)")
+                                finishOnce()
+                                return
+                            }
+                            secondExposureProps.set(props)
+                            finishOnce()
+                        } catch {
+                            fail("E2E setup failed: \(error)")
+                            finishOnce()
+                        }
+                    }
+                }
+
+                expect(didLoadFirst.get()).to(beTrue())
+                expect(didLoadSecond.get()).to(beTrue())
+                expect(didAvoidBundlesOnSecond.get()).to(beTrue())
+
+                let props = secondExposureProps.get() ?? [:]
+                expect(props["experiment_key"] as? String).to(equal("exp-1"))
+                expect(props["variant_key"] as? String).to(equal(variantKey))
+                expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
+                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
+                expect(props["journey_id"] as? String).to(equal(expectedSecondJourneyId.get()))
+                expect(props["is_holdout"] as? Bool).to(equal(false))
+            }
+
+            it("tracks $flow_shown and $flow_dismissed when dismissed via action/dismiss (fixture mode)") {
+                guard let batchBodies else { return }
+                guard server != nil else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+
+                let distinctId = "e2e-user-dismiss-1"
+                let didPresent = LockedValue(false)
+                let didDismiss = LockedValue(false)
+                let shownProps = LockedValue<[String: Any]?>(nil)
+                let dismissedProps = LockedValue<[String: Any]?>(nil)
+                let expectedJourneyId = LockedValue<String?>(nil)
+
+                waitUntil(timeout: .seconds(35)) { done in
+                    var finished = false
+
+                    func finishOnce() {
+                        guard !finished else { return }
+                        finished = true
+                        done()
+                    }
+
+                    Task {
+                        do {
+                            Container.shared.reset()
+                            let config = NuxieConfiguration(apiKey: apiKey)
+                            config.apiEndpoint = baseURL
+                            config.enablePlugins = false
+                            config.customStoragePath = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                            Container.shared.sdkConfiguration.register { config }
+
+                            let identityService = Container.shared.identityService()
+                            identityService.setDistinctId(distinctId)
+
+                            let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
+                            let networkQueue = NuxieNetworkQueue(
+                                flushAt: 1_000_000,
+                                flushIntervalSeconds: config.flushInterval,
+                                maxQueueSize: config.maxQueueSize,
+                                maxBatchSize: config.eventBatchSize,
+                                maxRetries: config.retryCount,
+                                baseRetryDelay: config.retryDelay,
+                                apiClient: Container.shared.nuxieApi()
+                            )
+                            let eventService = Container.shared.eventService()
+                            try await eventService.configure(
+                                networkQueue: networkQueue,
+                                journeyService: nil,
+                                contextBuilder: contextBuilder,
+                                configuration: config
+                            )
+
+                            let campaign = makeCampaign(flowId: flowId)
+                            let journey = Journey(campaign: campaign, distinctId: distinctId)
+                            expectedJourneyId.set(journey.id)
+
+                            let sawReady = LockedValue(false)
+                            let delegate = CapturingRuntimeDelegate { type, _, _ in
+                                if type == "runtime/ready" {
+                                    sawReady.set(true)
+                                }
+                            }
+                            runtimeDelegate = delegate
+
+                            let presentationService = await MainActor.run {
+                                FlowPresentationService(windowProvider: E2ETestWindowProvider())
+                            }
+
+                            let vc = try await presentationService.presentFlow(flowId, from: journey, runtimeDelegate: delegate)
+                            flowViewController = vc
+                            didPresent.set(true)
+
+                            let webView = await MainActor.run { vc.flowWebView }
+                            guard let webView else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            let deadline = Date().addingTimeInterval(8.0)
+                            while Date() < deadline, !sawReady.get() {
+                                try await Task.sleep(nanoseconds: 50_000_000)
+                            }
+                            guard sawReady.get() else {
+                                fail("E2E: expected runtime/ready after presenting flow")
+                                finishOnce()
+                                return
+                            }
+
+                            _ = try? await evaluateJavaScript(
+                                webView,
+                                script: "window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge && window.webkit.messageHandlers.bridge.postMessage({ type: 'action/dismiss', payload: {} })"
+                            )
+
+                            let dismissDeadline = Date().addingTimeInterval(10.0)
+                            while Date() < dismissDeadline {
+                                if !(await presentationService.isFlowPresented) {
+                                    didDismiss.set(true)
+                                    break
+                                }
+                                try await Task.sleep(nanoseconds: 50_000_000)
+                            }
+
+                            guard didDismiss.get() else {
+                                fail("E2E: expected flow to dismiss after action/dismiss")
+                                finishOnce()
+                                return
+                            }
+
+                            await eventService.drain()
+                            let didFlush = await eventService.flushEvents()
+                            if !didFlush {
+                                fail("E2E: expected flushEvents() to initiate a flush (didFlush=false)")
+                                finishOnce()
+                                return
+                            }
+
+                            guard let journeyId = expectedJourneyId.get() else {
+                                fail("E2E: expected journey id")
+                                finishOnce()
+                                return
+                            }
+                            let bodies = batchBodies.snapshot()
+                            guard let shown = eventProperties(
+                                forEventName: JourneyEvents.flowShown,
+                                forJourneyId: journeyId,
+                                fromBatchBodies: bodies
+                            ) else {
+                                fail("E2E: expected \(JourneyEvents.flowShown) event in POST /batch payload; requests=\(bodies.count)")
+                                finishOnce()
+                                return
+                            }
+                            guard let dismissed = eventProperties(
+                                forEventName: JourneyEvents.flowDismissed,
+                                forJourneyId: journeyId,
+                                fromBatchBodies: bodies
+                            ) else {
+                                fail("E2E: expected \(JourneyEvents.flowDismissed) event in POST /batch payload; requests=\(bodies.count)")
+                                finishOnce()
+                                return
+                            }
+                            shownProps.set(shown)
+                            dismissedProps.set(dismissed)
+                            finishOnce()
+                        } catch {
+                            fail("E2E setup failed: \(error)")
+                            finishOnce()
+                        }
+                    }
+                }
+
+                expect(didPresent.get()).to(beTrue())
+                expect(didDismiss.get()).to(beTrue())
+
+                let journeyId = expectedJourneyId.get()
+
+                let shown = shownProps.get() ?? [:]
+                expect(shown["journey_id"] as? String).to(equal(journeyId))
+                expect(shown["campaign_id"] as? String).to(equal("camp-e2e-1"))
+                expect(shown["flow_id"] as? String).to(equal(flowId))
+
+                let dismissed = dismissedProps.get() ?? [:]
+                expect(dismissed["journey_id"] as? String).to(equal(journeyId))
+                expect(dismissed["campaign_id"] as? String).to(equal("camp-e2e-1"))
+                expect(dismissed["flow_id"] as? String).to(equal(flowId))
+            }
+
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
                 guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
@@ -1049,6 +1655,89 @@ private func firstExposureProperties(fromBatchBodies bodies: [Data]) -> [String:
         }
     }
     return nil
+}
+
+private func exposureProperties(forJourneyId journeyId: String, fromBatchBodies bodies: [Data]) -> [String: Any]? {
+    for body in bodies {
+        guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { continue }
+        guard let batch = root["batch"] as? [[String: Any]] else { continue }
+        for item in batch {
+            guard (item["event"] as? String) == JourneyEvents.experimentExposure else { continue }
+            guard let props = item["properties"] as? [String: Any] else { continue }
+            guard (props["journey_id"] as? String) == journeyId else { continue }
+            return props
+        }
+    }
+    return nil
+}
+
+private func eventProperties(
+    forEventName eventName: String,
+    forJourneyId journeyId: String,
+    fromBatchBodies bodies: [Data]
+) -> [String: Any]? {
+    for body in bodies {
+        guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { continue }
+        guard let batch = root["batch"] as? [[String: Any]] else { continue }
+        for item in batch {
+            guard (item["event"] as? String) == eventName else { continue }
+            guard let props = item["properties"] as? [String: Any] else { continue }
+            guard (props["journey_id"] as? String) == journeyId else { continue }
+            return props
+        }
+    }
+    return nil
+}
+
+@MainActor
+private final class E2ETestWindowProvider: WindowProviderProtocol {
+    func canPresentWindow() -> Bool { true }
+
+    func createPresentationWindow() -> PresentationWindowProtocol? {
+        E2ETestPresentationWindow()
+    }
+}
+
+@MainActor
+private final class E2ETestPresentationWindow: PresentationWindowProtocol {
+    private let window: UIWindow
+    private let rootViewController: UIViewController
+
+    init() {
+        window = UIWindow(frame: UIScreen.main.bounds)
+        rootViewController = UIViewController()
+        rootViewController.view.backgroundColor = .clear
+        window.rootViewController = rootViewController
+        window.windowLevel = .alert
+        window.backgroundColor = .clear
+    }
+
+    func present(_ viewController: UIViewController) async {
+        window.makeKeyAndVisible()
+        await withCheckedContinuation { continuation in
+            rootViewController.present(viewController, animated: false) {
+                continuation.resume()
+            }
+        }
+    }
+
+    func dismiss() async {
+        guard rootViewController.presentedViewController != nil else { return }
+        await withCheckedContinuation { continuation in
+            rootViewController.dismiss(animated: false) {
+                continuation.resume()
+            }
+        }
+    }
+
+    func destroy() {
+        window.isHidden = true
+        window.rootViewController = nil
+    }
+
+    var isPresenting: Bool {
+        rootViewController.presentedViewController != nil
+    }
 }
 
 private struct Phase2CompiledBundleFixture {
