@@ -1,6 +1,7 @@
 .PHONY: generate test test-ios test-xcode test-unit test-integration test-e2e test-all clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
+XCODEGEN_INPUTS := .xcodegen.inputs
 XCODEPROJ := NuxieSDK.xcodeproj
 SCHEME_UNIT := NuxieSDKUnitTests
 SCHEME_INTEGRATION := NuxieSDKIntegrationTests
@@ -38,11 +39,14 @@ install-deps:
 
 # Generate Xcode project
 generate: check-xcodegen
-	@if [ -f "$(XCODEGEN_STAMP)" ] && [ "$(XCODEGEN_STAMP)" -nt project.yml ] && [ -d "$(XCODEPROJ)" ]; then \
+	@CURRENT_HASH=$$( (cat project.yml; find Sources Tests -type f -print | sort) | shasum -a 256 | awk '{print $$1}' ); \
+	STORED_HASH=$$(cat "$(XCODEGEN_INPUTS)" 2>/dev/null || true); \
+	if [ -d "$(XCODEPROJ)" ] && [ "$$CURRENT_HASH" = "$$STORED_HASH" ]; then \
 		echo "Xcode project is up to date."; \
 	else \
 		echo "Generating Xcode project..."; \
 		xcodegen generate; \
+		echo "$$CURRENT_HASH" > "$(XCODEGEN_INPUTS)"; \
 		touch "$(XCODEGEN_STAMP)"; \
 	fi
 
@@ -95,6 +99,7 @@ clean:
 	@rm -rf *.xcodeproj
 	@rm -rf *.xcworkspace
 	@rm -f "$(XCODEGEN_STAMP)"
+	@rm -f "$(XCODEGEN_INPUTS)"
 	@rm -rf DerivedData
 	@rm -rf .build
 	@rm -rf coverage
