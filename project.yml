@@ -98,6 +98,8 @@ targets:
         name: NuxieE2ETests
       - path: Tests/NuxieTestSupport
         name: NuxieTestSupport
+    resources:
+      - path: Tests/NuxieE2ETests/Fixtures/phase2-compiled-bundle
     dependencies:
       - target: NuxieSDK
       - package: Quick

@@ -20,6 +20,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             var window: UIWindow?
             var requestLog: LockedArray<String>?
             var batchBodies: LockedArray<Data>?
+            var phase2CompiledBundleFixture: Phase2CompiledBundleFixture?
 
             func makeCampaign(flowId: String) -> Campaign {
                 let publishedAt = ISO8601DateFormatter().string(from: Date())
@@ -45,6 +46,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = LockedArray<String>()
                 batchBodies = LockedArray<Data>()
+                phase2CompiledBundleFixture = loadPhase2CompiledBundleFixture()
 
                 let env = ProcessInfo.processInfo.environment
                 let envApiKey = env["NUXIE_E2E_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,69 +65,85 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     return
                 }
 
-	                server = try? LocalHTTPServer { request in
-	                    requestLog?.append("\(request.method) \(request.path)")
-	                    if request.method == "POST", request.path.hasSuffix("/batch") {
-	                        batchBodies?.append(request.body)
+                    server = try? LocalHTTPServer { request in
+                        requestLog?.append("\(request.method) \(request.path)")
+                        if request.method == "POST", request.path.hasSuffix("/batch") {
+                            batchBodies?.append(request.body)
 
-	                        // Best-effort count for nicer logs/debugging.
-	                        let decoded = decodeMaybeGzippedJSON(request.body)
-	                        let batchCount = ((decoded as? [String: Any])?["batch"] as? [Any])?.count ?? 0
-	                        let response = BatchResponse(
-	                            status: "ok",
-	                            processed: batchCount,
-	                            failed: 0,
-	                            total: batchCount,
-	                            errors: nil
-	                        )
-	                        let json = (try? JSONEncoder().encode(response))
-	                            ?? Data("{\"status\":\"ok\",\"processed\":0,\"failed\":0,\"total\":0}".utf8)
-	                        return LocalHTTPServer.Response.json(json)
-	                    }
-	                    if (request.method == "POST" || request.method == "GET"), request.path == "/profile" {
-	                        var requestedDistinctId: String? = request.query["distinct_id"]
-	                        if requestedDistinctId == nil, !request.body.isEmpty {
-	                            if let profileRequest = try? JSONDecoder().decode(ProfileRequest.self, from: request.body) {
-	                                requestedDistinctId = profileRequest.distinctId
-	                            }
-	                        }
+                            // Best-effort count for nicer logs/debugging.
+                            let decoded = decodeMaybeGzippedJSON(request.body)
+                            let batchCount = ((decoded as? [String: Any])?["batch"] as? [Any])?.count ?? 0
+                            let response = BatchResponse(
+                                status: "ok",
+                                processed: batchCount,
+                                failed: 0,
+                                total: batchCount,
+                                errors: nil
+                            )
+                            let json = (try? JSONEncoder().encode(response))
+                                ?? Data("{\"status\":\"ok\",\"processed\":0,\"failed\":0,\"total\":0}".utf8)
+                            return LocalHTTPServer.Response.json(json)
+                        }
+                        if (request.method == "POST" || request.method == "GET"), request.path == "/profile" {
+                            var requestedDistinctId: String? = request.query["distinct_id"]
+                            if requestedDistinctId == nil, !request.body.isEmpty {
+                                if let profileRequest = try? JSONDecoder().decode(ProfileRequest.self, from: request.body) {
+                                    requestedDistinctId = profileRequest.distinctId
+                                }
+                            }
 
-	                        let distinctId = requestedDistinctId ?? "unknown"
-	                        let variantKey = distinctId.hasSuffix("-b") ? "b" : "a"
-	                        let assignment = ExperimentAssignment(
-	                            experimentKey: "exp-1",
-	                            variantKey: variantKey,
-	                            status: "running",
-	                            isHoldout: false
-	                        )
-	                        let response = ProfileResponse(
-	                            campaigns: [],
-	                            segments: [],
-	                            flows: [],
-	                            userProperties: nil,
-	                            experiments: ["exp-1": assignment],
-	                            features: nil,
-	                            journeys: nil
-	                        )
-	                        let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
-	                        return LocalHTTPServer.Response.json(json)
-	                    }
-	                    if request.method == "GET", request.path.hasPrefix("/flows/") {
-	                        let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-	                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
-	                        let host = request.headers["host"] ?? "127.0.0.1"
+                            let distinctId = requestedDistinctId ?? "unknown"
+                            let variantKey = distinctId.hasSuffix("-b") ? "b" : "a"
+                            let assignment = ExperimentAssignment(
+                                experimentKey: "exp-1",
+                                variantKey: variantKey,
+                                status: "running",
+                                isHoldout: false
+                            )
+                            let response = ProfileResponse(
+                                campaigns: [],
+                                segments: [],
+                                flows: [],
+                                userProperties: nil,
+                                experiments: ["exp-1": assignment],
+                                features: nil,
+                                journeys: nil
+                            )
+                            let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
+                            return LocalHTTPServer.Response.json(json)
+                        }
+                        if request.method == "GET", request.path.hasPrefix("/flows/") {
+                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+                            let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                            let host = request.headers["host"] ?? "127.0.0.1"
                         // Serve a per-flow bundle root to avoid cache collisions and to more closely
                         // match real bundle shapes (base URL + manifest-relative paths).
                         let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
-                        let manifest = BuildManifest(
-                            totalFiles: 1,
-                            totalSize: 0,
-                            contentHash: "e2e-ready-\(reqFlowId)",
-                            files: [
-                                BuildFile(path: "index.html", size: 0, contentType: "text/html")
-                            ]
-                        )
+                        let manifest: BuildManifest
+                        if isExperimentFlow {
+                            guard let fixture = phase2CompiledBundleFixture else {
+                                return LocalHTTPServer.Response.text(
+                                    "Missing phase2 compiled bundle fixture",
+                                    statusCode: 500
+                                )
+                            }
+                            manifest = BuildManifest(
+                                totalFiles: fixture.buildFiles.count,
+                                totalSize: fixture.totalSize,
+                                contentHash: "e2e-phase2-compiled-\(reqFlowId)",
+                                files: fixture.buildFiles
+                            )
+                        } else {
+                            manifest = BuildManifest(
+                                totalFiles: 1,
+                                totalSize: 0,
+                                contentHash: "e2e-ready-\(reqFlowId)",
+                                files: [
+                                    BuildFile(path: "index.html", size: 0, contentType: "text/html")
+                                ]
+                            )
+                        }
 
                         let remoteFlow: RemoteFlow
                         if isExperimentFlow {
@@ -245,6 +263,30 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     }
 
                     if request.method == "GET", request.path.hasPrefix("/bundles/") {
+                        let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+                        let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+                        let reqFlowId = parts.first.map(String.init) ?? ""
+                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+
+                        if isExperimentFlow {
+                            guard let fixture = phase2CompiledBundleFixture else {
+                                return LocalHTTPServer.Response.text(
+                                    "Missing phase2 compiled bundle fixture",
+                                    statusCode: 500
+                                )
+                            }
+                            let requestedFile = parts.dropFirst().joined(separator: "/")
+                            let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
+                            guard let file = fixture.filesByPath[fileName] else {
+                                return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
+                            }
+                            return LocalHTTPServer.Response(
+                                statusCode: 200,
+                                headers: ["Content-Type": "\(file.contentType); charset=utf-8"],
+                                body: file.data
+                            )
+                        }
+
                         let html = """
                         <!doctype html>
                         <html>
@@ -382,6 +424,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = nil
                 batchBodies = nil
+                phase2CompiledBundleFixture = nil
             }
 
             it("fetches /flows/:id, receives runtime/ready, and completes a navigate→screen_changed handshake") {
@@ -749,10 +792,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
-	                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
 
-	                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
-	                let distinctId = "e2e-user-1-\(variantKey)"
+                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
+                let distinctId = "e2e-user-1-\(variantKey)"
 
                 let messages = LockedArray<String>()
                 let didReceiveTap = LockedValue(false)
@@ -777,35 +820,37 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             config.enablePlugins = false
                             config.customStoragePath = FileManager.default.temporaryDirectory
                                 .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
-	                            Container.shared.sdkConfiguration.register { config }
+                            Container.shared.sdkConfiguration.register { config }
 
-	                            let identityService = Container.shared.identityService()
-	                            identityService.setDistinctId(distinctId)
+                            let identityService = Container.shared.identityService()
+                            identityService.setDistinctId(distinctId)
 
-	                            let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
-	                            let networkQueue = NuxieNetworkQueue(
-	                                flushAt: 1_000_000,
-	                                flushIntervalSeconds: config.flushInterval,
-	                                maxQueueSize: config.maxQueueSize,
-	                                maxBatchSize: config.eventBatchSize,
-	                                maxRetries: config.retryCount,
-	                                baseRetryDelay: config.retryDelay,
-	                                apiClient: Container.shared.nuxieApi()
-	                            )
-	                            let eventService = Container.shared.eventService()
-	                            try await eventService.configure(
-	                                networkQueue: networkQueue,
-	                                journeyService: nil,
-	                                contextBuilder: contextBuilder,
-	                                configuration: config
-	                            )
-	                            let profileService = Container.shared.profileService()
-	                            let profile = try await profileService.fetchProfile(distinctId: distinctId)
-	                            guard profile.experiments?["exp-1"]?.variantKey == variantKey else {
-	                                fail("E2E: expected server profile assignment variant '\(variantKey)' but got '\(profile.experiments?["exp-1"]?.variantKey ?? "nil")'")
-	                                finishOnce()
-	                                return
-	                            }
+                            let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
+                            let networkQueue = NuxieNetworkQueue(
+                                flushAt: 1_000_000,
+                                flushIntervalSeconds: config.flushInterval,
+                                maxQueueSize: config.maxQueueSize,
+                                maxBatchSize: config.eventBatchSize,
+                                maxRetries: config.retryCount,
+                                baseRetryDelay: config.retryDelay,
+                                apiClient: Container.shared.nuxieApi()
+                            )
+                            let eventService = Container.shared.eventService()
+                            try await eventService.configure(
+                                networkQueue: networkQueue,
+                                journeyService: nil,
+                                contextBuilder: contextBuilder,
+                                configuration: config
+                            )
+
+                            let profileService = Container.shared.profileService()
+                            let profile = try await profileService.fetchProfile(distinctId: distinctId)
+                            let gotVariant = profile.experiments?["exp-1"]?.variantKey ?? "nil"
+                            guard gotVariant == variantKey else {
+                                fail("E2E: expected server profile assignment variant '\(variantKey)' but got '\(gotVariant)'")
+                                finishOnce()
+                                return
+                            }
 
                             let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
                             let remoteFlow = try await api.fetchFlow(flowId: phase2FlowId)
@@ -854,18 +899,20 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            guard (try? await waitForScreenId(webView, equals: "screen-entry")) == true else {
-                                fail("E2E: initial navigate did not update DOM to screen-entry")
+                            let entryMarkerId = "screen-screen-entry-marker"
+                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 8.0)) == true else {
+                                fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
                                 finishOnce()
                                 return
                             }
 
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
-                            if (try? await waitForScreenId(webView, equals: expectedScreenId)) == true {
+                            let expectedMarkerId = "screen-\(expectedScreenId)-marker"
+                            if (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 8.0)) == true {
                                 didNavigateToExpected.set(true)
                             } else {
-                                fail("E2E: experiment did not navigate to expected screen '\(expectedScreenId)'")
+                                fail("E2E: experiment did not render expected marker '\(expectedMarkerId)'")
                                 finishOnce()
                                 return
                             }
@@ -903,14 +950,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(props["experiment_key"] as? String).to(equal("exp-1"))
                 expect(props["variant_key"] as? String).to(equal(variantKey))
                 expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
-	                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
-	                expect(props["journey_id"] as? String).to(equal(expectedJourneyId.get()))
-	                expect(props["is_holdout"] as? Bool).to(equal(false))
+                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
+                expect(props["journey_id"] as? String).to(equal(expectedJourneyId.get()))
+                expect(props["is_holdout"] as? Bool).to(equal(false))
 
-	                let requestSnapshot = requestLog?.snapshot() ?? []
-	                expect(requestSnapshot.contains("POST /profile") || requestSnapshot.contains("GET /profile")).to(beTrue())
-	                expect(requestSnapshot.contains("POST /batch")).to(beTrue())
-	            }
+                let requestSnapshot = requestLog?.snapshot() ?? []
+                expect(requestSnapshot.contains("POST /profile") || requestSnapshot.contains("GET /profile")).to(beTrue())
+                expect(requestSnapshot.contains("POST /batch")).to(beTrue())
+            }
 
             it("branches to screen-a and tracks exposure (fixture mode)") {
                 runExperimentBranchTest(variantKey: "a", expectedScreenId: "screen-a")
@@ -919,9 +966,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             it("branches to screen-b and tracks exposure (fixture mode)") {
                 runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
             }
-	        }
-	    }
-	}
+            }
+        }
+    }
 
 // MARK: - Test helpers
 
@@ -1004,6 +1051,80 @@ private func firstExposureProperties(fromBatchBodies bodies: [Data]) -> [String:
     return nil
 }
 
+private struct Phase2CompiledBundleFixture {
+    struct FileEntry {
+        let data: Data
+        let contentType: String
+        let size: Int
+    }
+
+    let filesByPath: [String: FileEntry]
+    let buildFiles: [BuildFile]
+    let totalSize: Int
+}
+
+private func contentTypeForFixtureFile(path: String) -> String {
+    if path.hasSuffix(".html") { return "text/html" }
+    if path.hasSuffix(".css") { return "text/css" }
+    if path.hasSuffix(".js") { return "text/javascript" }
+    if path.hasSuffix(".map") { return "application/json" }
+    return "application/octet-stream"
+}
+
+private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
+    let bundle = Bundle(for: FlowRuntimeReadyE2ESpec.self)
+    guard let resourceURL = bundle.resourceURL else { return nil }
+    let root = resourceURL.appendingPathComponent("phase2-compiled-bundle", isDirectory: true)
+    guard FileManager.default.fileExists(atPath: root.path) else { return nil }
+
+    let urls: [URL]
+    do {
+        urls = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+    } catch {
+        return nil
+    }
+
+    var filesByPath: [String: Phase2CompiledBundleFixture.FileEntry] = [:]
+    var buildFiles: [BuildFile] = []
+    var totalSize = 0
+
+    for url in urls {
+        guard
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+            values.isRegularFile == true
+        else {
+            continue
+        }
+
+        let fileName = url.lastPathComponent
+        let data = (try? Data(contentsOf: url)) ?? Data()
+        let size = values.fileSize ?? data.count
+        let contentType = contentTypeForFixtureFile(path: fileName)
+
+        filesByPath[fileName] = .init(data: data, contentType: contentType, size: size)
+        buildFiles.append(BuildFile(path: fileName, size: size, contentType: contentType))
+        totalSize += size
+    }
+
+    buildFiles.sort { $0.path < $1.path }
+    return Phase2CompiledBundleFixture(
+        filesByPath: filesByPath,
+        buildFiles: buildFiles,
+        totalSize: totalSize
+    )
+}
+
+private func jsStringLiteral(_ value: String) -> String {
+    let escaped = value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "'", with: "\\'")
+    return "'\(escaped)'"
+}
+
 @MainActor
 private func evaluateJavaScript(_ webView: FlowWebView, script: String) async throws -> Any? {
     try await withCheckedThrowingContinuation { continuation in
@@ -1018,15 +1139,44 @@ private func evaluateJavaScript(_ webView: FlowWebView, script: String) async th
 }
 
 @MainActor
+private func waitForElementExists(
+    _ webView: FlowWebView,
+    elementId: String,
+    timeoutSeconds: Double = 3.0
+) async throws -> Bool {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    let quoted = jsStringLiteral(elementId)
+    while Date() < deadline {
+        do {
+            let value = try await evaluateJavaScript(
+                webView,
+                script: "Boolean(document.getElementById(\(quoted)))"
+            ) as? Bool
+            if value == true {
+                return true
+            }
+        } catch {
+            // Ignore transient WebKit errors while the page is still loading.
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return false
+}
+
+@MainActor
 private func waitForVmText(_ webView: FlowWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     while Date() < deadline {
-        let value = try await evaluateJavaScript(
-            webView,
-            script: "document.getElementById('vm-text') && document.getElementById('vm-text').textContent"
-        ) as? String
-        if value == expected {
-            return true
+        do {
+            let value = try await evaluateJavaScript(
+                webView,
+                script: "document.getElementById('vm-text') && document.getElementById('vm-text').textContent"
+            ) as? String
+            if value == expected {
+                return true
+            }
+        } catch {
+            // Ignore transient WebKit errors while the page is still loading.
         }
         try await Task.sleep(nanoseconds: 50_000_000)
     }
@@ -1037,12 +1187,16 @@ private func waitForVmText(_ webView: FlowWebView, equals expected: String, time
 private func waitForScreenId(_ webView: FlowWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     while Date() < deadline {
-        let value = try await evaluateJavaScript(
-            webView,
-            script: "document.getElementById('screen-id') && document.getElementById('screen-id').textContent"
-        ) as? String
-        if value == expected {
-            return true
+        do {
+            let value = try await evaluateJavaScript(
+                webView,
+                script: "document.getElementById('screen-id') && document.getElementById('screen-id').textContent"
+            ) as? String
+            if value == expected {
+                return true
+            }
+        } catch {
+            // Ignore transient WebKit errors while the page is still loading.
         }
         try await Task.sleep(nanoseconds: 50_000_000)
     }
