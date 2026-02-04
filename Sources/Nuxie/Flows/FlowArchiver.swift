@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 /// Top-level WebArchive orchestrator that manages storage and coordinates with WebArchiver
@@ -31,7 +30,7 @@ actor FlowArchiver {
     func preloadArchive(for flow: Flow) async {
         LogDebug("Preloading archive for flow: \(flow.id)")
         
-        guard let baseURL = archiveBaseURL(for: flow) else {
+        guard let baseURL = URL(string: flow.url) else {
             LogError("Invalid URL for flow: \(flow.id)")
             return
         }
@@ -94,7 +93,7 @@ actor FlowArchiver {
             return cachedURL
         }
         
-        guard let baseURL = archiveBaseURL(for: flow) else {
+        guard let baseURL = URL(string: flow.url) else {
             throw FlowError.invalidManifest
         }
         
@@ -143,40 +142,12 @@ actor FlowArchiver {
     
     // MARK: - Private Methods
     
-    private static func sha256Hex(_ input: String) -> String {
-        let digest = SHA256.hash(data: Data(input.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-    
-    private func archiveBaseURL(for flow: Flow) -> URL? {
-        guard let url = URL(string: flow.url) else {
-            return nil
-        }
-        
-        let entryFile = flow.manifest.files.first { $0.path.contains("index.html") }
-            ?? flow.manifest.files.first { $0.contentType.contains("html") }
-            ?? flow.manifest.files.first
-        
-        let entryFilename = entryFile.map { ($0.path as NSString).lastPathComponent }
-        let remoteFilename = url.lastPathComponent
-        
-        let remoteLooksLikeFile = !url.pathExtension.isEmpty
-            || remoteFilename.contains(".")
-            || (entryFilename != nil && remoteFilename == entryFilename)
-        
-        if remoteLooksLikeFile {
-            return url.deletingLastPathComponent()
-        }
-        
-        return url
-    }
-    
     /// Generate canonical filesystem path based on flow URL
     private func canonicalURL(for flow: Flow) -> URL {
+        // Use the content hash and flow ID for canonical path
+        // This ensures same content = same file
         let hash = flow.manifest.contentHash
-        let baseKey = archiveBaseURL(for: flow)?.absoluteString ?? flow.url
-        let baseHash = Self.sha256Hex(baseKey)
-        let filename = "flow_v2_\(flow.id)_\(hash)_\(baseHash.prefix(12)).webarchive"
+        let filename = "flow_\(flow.id)_\(hash).webarchive"
         return cacheDirectory.appendingPathComponent(filename)
     }
 }
