@@ -1,6 +1,7 @@
 import Foundation
 import Quick
 import Nimble
+import UIKit
 import WebKit
 import FactoryKit
 @testable import Nuxie
@@ -16,6 +17,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             var flowViewController: FlowViewController?
             var runtimeDelegate: FlowRuntimeDelegate?
+            var window: UIWindow?
             var requestLog: LockedArray<String>?
 
             func makeCampaign(flowId: String) -> Campaign {
@@ -39,6 +41,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             beforeEach {
                 flowViewController = nil
                 runtimeDelegate = nil
+                window = nil
                 requestLog = LockedArray<String>()
 
                 let env = ProcessInfo.processInfo.environment
@@ -62,6 +65,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     requestLog?.append("\(request.method) \(request.path)")
                     if request.method == "GET", request.path.hasPrefix("/flows/") {
                         let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
                         let host = request.headers["host"] ?? "127.0.0.1"
                         // Serve a per-flow bundle root to avoid cache collisions and to more closely
                         // match real bundle shapes (base URL + manifest-relative paths).
@@ -76,56 +80,117 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             ]
                         )
 
-                        let remoteFlow = RemoteFlow(
-                            id: reqFlowId,
-                            bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
-                            screens: [
-                                RemoteFlowScreen(
-                                    id: "screen-1",
-                                    defaultViewModelId: "vm-1",
-                                    defaultInstanceId: nil
-                                )
-                            ],
-                            interactions: [
-                                "tap": [
-                                    Interaction(
-                                        id: "int-tap",
-                                        trigger: .tap,
-                                        actions: [
-                                            .setViewModel(
-                                                SetViewModelAction(
-                                                    path: .ids(VmPathIds(pathIds: [0, 1])),
-                                                    value: AnyCodable(["literal": "world"] as [String: Any])
-                                                )
-                                            )
-                                        ],
-                                        enabled: true
-                                    )
+                        let remoteFlow: RemoteFlow
+                        if isExperimentFlow {
+                            let variantA = ExperimentVariant(
+                                id: "a",
+                                name: "A",
+                                percentage: 50,
+                                actions: [
+                                    .navigate(NavigateAction(screenId: "screen-a"))
                                 ]
-                            ],
-                            viewModels: [
-                                ViewModel(
-                                    id: "vm-1",
-                                    name: "VM",
-                                    viewModelPathId: 0,
-                                    properties: [
-                                        "title": ViewModelProperty(
-                                            type: .string,
-                                            propertyId: 1,
-                                            defaultValue: AnyCodable("hello"),
-                                            required: nil,
-                                            enumValues: nil,
-                                            itemType: nil,
-                                            schema: nil,
-                                            viewModelId: nil,
-                                            validation: nil
+                            )
+                            let variantB = ExperimentVariant(
+                                id: "b",
+                                name: "B",
+                                percentage: 50,
+                                actions: [
+                                    .navigate(NavigateAction(screenId: "screen-b"))
+                                ]
+                            )
+                            let experiment = ExperimentAction(
+                                experimentId: "exp-1",
+                                variants: [variantA, variantB]
+                            )
+
+                            remoteFlow = RemoteFlow(
+                                id: reqFlowId,
+                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+                                screens: [
+                                    RemoteFlowScreen(
+                                        id: "screen-entry",
+                                        defaultViewModelId: nil,
+                                        defaultInstanceId: nil
+                                    ),
+                                    RemoteFlowScreen(
+                                        id: "screen-a",
+                                        defaultViewModelId: nil,
+                                        defaultInstanceId: nil
+                                    ),
+                                    RemoteFlowScreen(
+                                        id: "screen-b",
+                                        defaultViewModelId: nil,
+                                        defaultInstanceId: nil
+                                    )
+                                ],
+                                interactions: [
+                                    "tap": [
+                                        Interaction(
+                                            id: "int-tap",
+                                            trigger: .tap,
+                                            actions: [
+                                                .experiment(experiment)
+                                            ],
+                                            enabled: true
                                         )
                                     ]
-                                )
-                            ],
-                            viewModelInstances: nil,
-                            converters: nil
-                        )
+                                ],
+                                viewModels: [],
+                                viewModelInstances: nil,
+                                converters: nil
+                            )
+                        } else {
+                            remoteFlow = RemoteFlow(
+                                id: reqFlowId,
+                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+                                screens: [
+                                    RemoteFlowScreen(
+                                        id: "screen-1",
+                                        defaultViewModelId: "vm-1",
+                                        defaultInstanceId: nil
+                                    )
+                                ],
+                                interactions: [
+                                    "tap": [
+                                        Interaction(
+                                            id: "int-tap",
+                                            trigger: .tap,
+                                            actions: [
+                                                .setViewModel(
+                                                    SetViewModelAction(
+                                                        path: .ids(VmPathIds(pathIds: [0, 1])),
+                                                        value: AnyCodable(["literal": "world"] as [String: Any])
+                                                    )
+                                                )
+                                            ],
+                                            enabled: true
+                                        )
+                                    ]
+                                ],
+                                viewModels: [
+                                    ViewModel(
+                                        id: "vm-1",
+                                        name: "VM",
+                                        viewModelPathId: 0,
+                                        properties: [
+                                            "title": ViewModelProperty(
+                                                type: .string,
+                                                propertyId: 1,
+                                                defaultValue: AnyCodable("hello"),
+                                                required: nil,
+                                                enumValues: nil,
+                                                itemType: nil,
+                                                schema: nil,
+                                                viewModelId: nil,
+                                                validation: nil
+                                            )
+                                        ]
+                                    )
+                                ],
+                                viewModelInstances: nil,
+                                converters: nil
+                            )
+                        }
 
                         let encoder = JSONEncoder()
                         let json = (try? encoder.encode(remoteFlow)) ?? Data("{}".utf8)
@@ -143,13 +208,15 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                           </head>
                           <body>
                             <div id="status">loading</div>
+                            <div id="screen-id">(unset)</div>
                             <div id="vm-text">(unset)</div>
                             <button id="tap" type="button">Tap</button>
                             <script>
                               (function(){
-                                // Minimal runtime surface for Phase 0 + 1:
+                                // Minimal runtime surface for Phase 0 + 1 + 2:
                                 // - Provide window.nuxie._handleHostMessage (host -> web)
                                 // - Emit runtime/ready and runtime/screen_changed (web -> host)
+                                // - Reflect runtime/navigate into the DOM
                                 // - Apply runtime/view_model_init + runtime/view_model_patch into the DOM
                                 // - Emit a deterministic action/tap from a button click
 
@@ -163,6 +230,18 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                   return false;
                                 }
 
+                                function setScreenId(value) {
+                                  try {
+                                    var el = document.getElementById("screen-id");
+                                    if (!el) return;
+                                    if (value === null || value === undefined) {
+                                      el.textContent = "(null)";
+                                    } else {
+                                      el.textContent = String(value);
+                                    }
+                                  } catch (e) {}
+                                }
+
                                 function setVmText(value) {
                                   try {
                                     var el = document.getElementById("vm-text");
@@ -173,8 +252,6 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                       el.textContent = String(value);
                                     }
                                   } catch (e) {}
-                                  }
-                                } catch (e) {}
                                 }
 
                                 window.nuxie = {
@@ -184,6 +261,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                       if (envelope.type === "runtime/navigate") {
                                         var screenId = (envelope.payload && envelope.payload.screenId) || null;
                                         window.__nuxieScreenId = screenId;
+                                        setScreenId(screenId);
                                         post("runtime/screen_changed", { screenId: screenId });
                                         return;
                                       }
@@ -252,6 +330,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 server = nil
                 flowViewController = nil
                 runtimeDelegate = nil
+                window?.isHidden = true
+                window?.rootViewController = nil
+                window = nil
                 requestLog = nil
             }
 
@@ -318,15 +399,15 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             // This conformance check should reflect the current backend response, not a cached
                             // WebArchive from a previous run.
                             await archiveService.removeArchive(for: flow.id)
-                            if server != nil {
-                                // Prefer loading from a freshly-built WebArchive to reduce WKWebView/network flake.
-                                await archiveService.preloadArchive(for: flow)
-                            }
 
                             await MainActor.run {
                                 let vc = FlowViewController(flow: flow, archiveService: archiveService)
                                 vc.runtimeDelegate = runtimeDelegate
                                 flowViewController = vc
+                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                testWindow.rootViewController = vc
+                                testWindow.makeKeyAndVisible()
+                                window = testWindow
                                 _ = vc.view
                             }
                         } catch {
@@ -384,9 +465,6 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             let archiveService = FlowArchiver()
                             await archiveService.removeArchive(for: flow.id)
-                            if server != nil {
-                                await archiveService.preloadArchive(for: flow)
-                            }
 
                             await MainActor.run {
                                 let vc = FlowViewController(flow: flow, archiveService: archiveService)
@@ -408,6 +486,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 runtimeDelegate = delegate
                                 vc.runtimeDelegate = delegate
                                 flowViewController = vc
+                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                testWindow.rootViewController = vc
+                                testWindow.makeKeyAndVisible()
+                                window = testWindow
                                 _ = vc.view
                             }
 
@@ -458,6 +540,157 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(didApplyInit.get()).to(beTrue())
                 expect(didApplyPatch.get()).to(beTrue())
                 expect(didReceiveTap.get()).to(beTrue())
+            }
+
+            func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
+                guard server != nil else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+
+                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
+                let distinctId = "e2e-user-1"
+
+                let messages = LockedArray<String>()
+                let didReceiveTap = LockedValue(false)
+                let didNavigateToExpected = LockedValue(false)
+                let exposureProps = LockedValue<[String: Any]?>(nil)
+                let expectedJourneyId = LockedValue<String?>(nil)
+
+                waitUntil(timeout: .seconds(25)) { done in
+                    var finished = false
+
+                    func finishOnce() {
+                        guard !finished else { return }
+                        finished = true
+                        done()
+                    }
+
+                    Task {
+                        do {
+                            Container.shared.reset()
+                            let config = NuxieConfiguration(apiKey: apiKey)
+                            config.apiEndpoint = baseURL
+                            config.enablePlugins = false
+                            config.customStoragePath = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                            Container.shared.sdkConfiguration.register { config }
+
+                            let mockEventService = MockEventService()
+                            let mockProfileService = MockProfileService()
+                            Container.shared.eventService.register { mockEventService }
+                            Container.shared.profileService.register { mockProfileService }
+
+                            let assignment = ExperimentAssignment(
+                                experimentKey: "exp-1",
+                                variantKey: variantKey,
+                                status: "running",
+                                isHoldout: false
+                            )
+                            let profile = ProfileResponse(
+                                campaigns: [],
+                                segments: [],
+                                flows: [],
+                                userProperties: nil,
+                                experiments: ["exp-1": assignment],
+                                features: nil,
+                                journeys: nil
+                            )
+                            mockProfileService.setProfileResponse(profile)
+                            _ = try? await mockProfileService.fetchProfile(distinctId: distinctId)
+
+                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                            let remoteFlow = try await api.fetchFlow(flowId: phase2FlowId)
+                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                            let archiveService = FlowArchiver()
+                            await archiveService.removeArchive(for: flow.id)
+
+                            await MainActor.run {
+                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                let campaign = makeCampaign(flowId: phase2FlowId)
+                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+                                expectedJourneyId.set(journey.id)
+
+                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                runner.attach(viewController: vc)
+
+                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
+                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
+                                    messages.append("\(type) keys=[\(payloadKeys)]")
+                                    if type == "action/tap" {
+                                        didReceiveTap.set(true)
+                                    }
+                                }
+
+                                runtimeDelegate = delegate
+                                vc.runtimeDelegate = delegate
+                                flowViewController = vc
+                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                testWindow.rootViewController = vc
+                                testWindow.makeKeyAndVisible()
+                                window = testWindow
+                                _ = vc.view
+                            }
+
+                            guard let vc = flowViewController else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+                            let webView = await MainActor.run { vc.flowWebView }
+                            guard let webView else {
+                                fail("E2E: FlowViewController/webView was not created")
+                                finishOnce()
+                                return
+                            }
+
+                            guard (try? await waitForScreenId(webView, equals: "screen-entry")) == true else {
+                                fail("E2E: initial navigate did not update DOM to screen-entry")
+                                finishOnce()
+                                return
+                            }
+
+                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+                            if (try? await waitForScreenId(webView, equals: expectedScreenId)) == true {
+                                didNavigateToExpected.set(true)
+                            } else {
+                                fail("E2E: experiment did not navigate to expected screen '\(expectedScreenId)'")
+                                finishOnce()
+                                return
+                            }
+
+                            let exposure = mockEventService.trackedEvents.first { $0.name == JourneyEvents.experimentExposure }
+                            exposureProps.set(exposure?.properties)
+                            finishOnce()
+                        } catch {
+                            fail("E2E setup failed: \(error)")
+                            finishOnce()
+                        }
+                    }
+                }
+
+                let messagesSnapshot = messages.snapshot()
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
+                expect(didReceiveTap.get()).to(beTrue())
+                expect(didNavigateToExpected.get()).to(beTrue())
+
+                let props = exposureProps.get() ?? [:]
+                expect(props["experiment_key"] as? String).to(equal("exp-1"))
+                expect(props["variant_key"] as? String).to(equal(variantKey))
+                expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
+                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
+                expect(props["journey_id"] as? String).to(equal(expectedJourneyId.get()))
+                expect(props["is_holdout"] as? Bool).to(equal(false))
+            }
+
+            it("branches to screen-a and tracks exposure (fixture mode)") {
+                runExperimentBranchTest(variantKey: "a", expectedScreenId: "screen-a")
+            }
+
+            it("branches to screen-b and tracks exposure (fixture mode)") {
+                runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
             }
 	        }
 	    }
@@ -542,6 +775,22 @@ private func waitForVmText(_ webView: FlowWebView, equals expected: String, time
         let value = try await evaluateJavaScript(
             webView,
             script: "document.getElementById('vm-text') && document.getElementById('vm-text').textContent"
+        ) as? String
+        if value == expected {
+            return true
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return false
+}
+
+@MainActor
+private func waitForScreenId(_ webView: FlowWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    while Date() < deadline {
+        let value = try await evaluateJavaScript(
+            webView,
+            script: "document.getElementById('screen-id') && document.getElementById('screen-id').textContent"
         ) as? String
         if value == expected {
             return true
