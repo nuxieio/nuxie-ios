@@ -8,6 +8,10 @@ fileprivate actor StoreReadySignal {
   private var opened = false
   private var waiters: [CheckedContinuation<Void, Never>] = []
 
+  func reset() {
+    opened = false
+  }
+
   func open() {
     guard !opened else { return }
     opened = true
@@ -224,19 +228,26 @@ public class EventService: EventServiceProtocol {
 
   private let closeLock = NSLock()
   private var isClosing = false
+  private var pipelineClosed = false
 
   // the pipeline
-  private let stream: AsyncStream<Command>
-  private let continuation: AsyncStream<Command>.Continuation
+  private var stream: AsyncStream<Command>
+  private var continuation: AsyncStream<Command>.Continuation
   private var worker: Task<Void, Never>?
 
   internal init(eventStore: EventStoreProtocol? = nil) {
     self.eventStore = eventStore ?? EventStore()
     // Create the channel immediately so calls before configure() are buffered.
     var cont: AsyncStream<Command>.Continuation!
-    self.stream = AsyncStream { c in cont = c }
+    let s = AsyncStream<Command> { c in cont = c }
+    self.stream = s
     self.continuation = cont
-    startWorker()
+    startWorker(stream: s)
+  }
+
+  deinit {
+    continuation.finish()
+    worker?.cancel()
   }
 
   // MARK: - Dependencies
@@ -266,6 +277,21 @@ public class EventService: EventServiceProtocol {
     contextBuilder: NuxieContextBuilder? = nil,
     configuration: NuxieConfiguration? = nil
   ) async throws {
+    closeLock.lock()
+    isClosing = false
+    if pipelineClosed {
+      // close() finished the stream; recreate the pipeline so this instance can be reused.
+      pipelineClosed = false
+      var cont: AsyncStream<Command>.Continuation!
+      let s = AsyncStream<Command> { c in cont = c }
+      stream = s
+      continuation = cont
+      startWorker(stream: s)
+    }
+    closeLock.unlock()
+
+    await ready.reset()
+
     self.networkQueue = networkQueue
     self.journeyService = journeyService
     self.contextBuilder = contextBuilder
@@ -475,6 +501,7 @@ public class EventService: EventServiceProtocol {
       return
     }
     isClosing = true
+    pipelineClosed = true
     closeLock.unlock()
 
     // Unblock any in-flight work waiting on storage init (e.g. tests that never called setup()).
@@ -545,7 +572,12 @@ public class EventService: EventServiceProtocol {
   /// - Returns: True if flush was initiated
   @discardableResult
   public func flushEvents() async -> Bool {
-    await withCheckedContinuation { cont in
+    closeLock.lock()
+    let closing = isClosing
+    closeLock.unlock()
+    if closing { return false }
+
+    return await withCheckedContinuation { cont in
       continuation.yield(.flush(cont))
     }
   }
@@ -568,15 +600,16 @@ public class EventService: EventServiceProtocol {
 
   // MARK: - Worker
 
-  private func startWorker() {
-    worker = Task {
+  private func startWorker(stream: AsyncStream<Command>) {
+    worker = Task { [weak self] in
       for await cmd in stream {
         switch cmd {
         case .track(let payload):
-          await handleTrack(payload)
+          guard let self else { return }
+          await self.handleTrack(payload)
 
         case .flush(let cont):
-          let ok = await networkQueue?.flush() ?? false
+          let ok = await self?.networkQueue?.flush() ?? false
           cont.resume(returning: ok)
 
         case .barrier(let cont):
@@ -648,6 +681,11 @@ public class EventService: EventServiceProtocol {
   /// Wait until all previously enqueued commands are processed.
   /// Useful in tests for determinism and ensuring events are stored before querying.
   public func drain() async {
+    closeLock.lock()
+    let closing = isClosing
+    closeLock.unlock()
+    if closing { return }
+
     await withCheckedContinuation { cont in
       continuation.yield(.barrier(cont))
     }

@@ -35,6 +35,12 @@ public final class NuxieSDK {
 
   private var lifecycleCoordinator: NuxieLifecycleCoordinator?
 
+  private var eventSystemSetupTask: Task<Void, Never>?
+  private var journeyInitializeTask: Task<Void, Never>?
+  private var featureInfoDelegateTask: Task<Void, Never>?
+  private var profilePrefetchTask: Task<Void, Never>?
+  private var transactionObserverTask: Task<Void, Never>?
+
   // MARK: - Setup
 
   /// Setup the SDK (must be called before any other methods)
@@ -89,7 +95,8 @@ public final class NuxieSDK {
     let eventService = Container.shared.eventService()
     let journeyService = Container.shared.journeyService()
 
-    Task {
+    eventSystemSetupTask = Task {
+      guard !Task.isCancelled else { return }
       do {
         try await eventService.configure(
           networkQueue: networkQueue,
@@ -103,7 +110,8 @@ public final class NuxieSDK {
       }
     }
 
-    Task {
+    journeyInitializeTask = Task {
+      guard !Task.isCancelled else { return }
       await journeyService.initialize()
     }
 
@@ -115,7 +123,8 @@ public final class NuxieSDK {
     }
 
     // Wire up FeatureInfo delegate callback
-    Task { @MainActor in
+    featureInfoDelegateTask = Task { @MainActor in
+      guard !Task.isCancelled else { return }
       let featureInfo = container.featureInfo()
       featureInfo.onFeatureChange = { [weak self] featureId, oldValue, newValue in
         self?.delegate?.featureAccessDidChange(featureId, from: oldValue, to: newValue)
@@ -123,16 +132,19 @@ public final class NuxieSDK {
     }
 
     // Fetch initial profile data and sync feature info
-    Task {
+    profilePrefetchTask = Task {
+      guard !Task.isCancelled else { return }
       do {
         _ = try await Container.shared.profileService().refetchProfile()
+        guard !Task.isCancelled else { return }
         await Container.shared.featureService().syncFeatureInfo()
       }
       catch { LogWarning("Profile fetch failed: \(error)") }
     }
 
     // Start transaction observer to sync StoreKit 2 purchases with backend
-    Task {
+    transactionObserverTask = Task {
+      guard !Task.isCancelled else { return }
       await container.transactionObserver().startListening()
     }
 
@@ -143,6 +155,9 @@ public final class NuxieSDK {
   /// This is typically not needed as the singleton will clean up automatically
   public func shutdown() async {
     guard isSetup else { return }
+
+    // Stop background setup work to prevent it from touching disk during teardown.
+    cleanupStartupTasks()
 
     // Stop transaction observer
     await container.transactionObserver().stopListening()
@@ -164,6 +179,22 @@ public final class NuxieSDK {
     lifecycleCoordinator = nil
 
     LogInfo("SDK shutdown completed")
+  }
+
+  // MARK: - Startup tasks
+
+  private func cleanupStartupTasks() {
+    eventSystemSetupTask?.cancel()
+    journeyInitializeTask?.cancel()
+    featureInfoDelegateTask?.cancel()
+    profilePrefetchTask?.cancel()
+    transactionObserverTask?.cancel()
+
+    eventSystemSetupTask = nil
+    journeyInitializeTask = nil
+    featureInfoDelegateTask = nil
+    profilePrefetchTask = nil
+    transactionObserverTask = nil
   }
 
   // MARK: - Trigger (Event) API
