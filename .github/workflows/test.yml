@@ -280,6 +280,9 @@ jobs:
           echo "destination=$DESTINATION" >> "$GITHUB_OUTPUT"
 
       - name: Run E2E Tests on iOS Simulator
+        env:
+          NUXIE_E2E_PHASE1: "1"
+          NUXIE_E2E_PHASE2: "1"
         run: |
           xcodebuild test \
             -project NuxieSDK.xcodeproj \
