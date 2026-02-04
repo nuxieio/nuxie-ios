@@ -719,6 +719,97 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(journey.context["_variant_key"]?.value as? String).to(equal("b"))
             }
 
+            it("does not freeze experiment variant key without a running assignment") {
+                let flowId = "flow-experiment-freeze-non-running"
+                let variantA = ExperimentVariant(
+                    id: "a",
+                    name: "A",
+                    percentage: 50,
+                    actions: []
+                )
+                let variantB = ExperimentVariant(
+                    id: "b",
+                    name: "B",
+                    percentage: 50,
+                    actions: []
+                )
+
+                let experiment = ExperimentAction(
+                    experimentId: "exp-1",
+                    variants: [variantA, variantB]
+                )
+
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.experiment(experiment)]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                // No cached profile => no assignment => should not freeze fallback variant.
+                _ = await runner.handleRuntimeReady()
+
+                expect(journey.getContext("_experiment_variants")).to(beNil())
+            }
+
+            it("freezes experiment variant key when assignment is running and matches") {
+                let flowId = "flow-experiment-freeze-running"
+                let variantA = ExperimentVariant(
+                    id: "a",
+                    name: "A",
+                    percentage: 50,
+                    actions: []
+                )
+                let variantB = ExperimentVariant(
+                    id: "b",
+                    name: "B",
+                    percentage: 50,
+                    actions: []
+                )
+
+                let experiment = ExperimentAction(
+                    experimentId: "exp-1",
+                    variants: [variantA, variantB]
+                )
+
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.experiment(experiment)]
+                )
+
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let assignment = ExperimentAssignment(
+                    experimentKey: "exp-1",
+                    variantKey: "b",
+                    status: "running",
+                    isHoldout: false
+                )
+                let profile = ProfileResponse(
+                    campaigns: [],
+                    segments: [],
+                    flows: [],
+                    userProperties: nil,
+                    experiments: ["exp-1": assignment],
+                    features: nil,
+                    journeys: nil
+                )
+                mocks.profileService.setProfileResponse(profile)
+                _ = try? await mocks.profileService.fetchProfile(distinctId: journey.distinctId)
+
+                _ = await runner.handleRuntimeReady()
+
+                let frozen =
+                    journey.getContext("_experiment_variants") as? [String: Any]
+                expect(frozen?["exp-1"] as? String).to(equal("b"))
+            }
+
             it("tracks experiment exposure for running assignment") {
                 let flowId = "flow-experiment-exposure"
                 let viewModel = ViewModel(
