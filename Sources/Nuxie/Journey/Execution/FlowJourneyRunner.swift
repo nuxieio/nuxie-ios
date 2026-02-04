@@ -755,14 +755,17 @@ final class FlowJourneyRunner {
             return .continue
         }
 
-        if frozenVariantKey == nil || frozenVariant == nil {
+        let status = assignment?.status
+        if status == "running",
+           resolution.matchedAssignment,
+           (frozenVariantKey == nil || frozenVariant == nil)
+        {
             freezeExperimentVariantKey(experimentKey: experimentKey, variantKey: variant.id)
         }
 
         journey.setContext("_experiment_key", value: experimentKey)
         journey.setContext("_variant_key", value: variant.id)
 
-        let status = assignment?.status
         if status == "running",
            !hasEmittedExperimentExposure(experimentKey: experimentKey) {
             let assignmentSource = frozenVariant != nil ? "journey_context" : "profile"
