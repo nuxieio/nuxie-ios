@@ -269,9 +269,10 @@ public class JourneyEvents {
         experimentKey: String,
         variantKey: String,
         flowId: String?,
-        isHoldout: Bool
+        isHoldout: Bool,
+        assignmentSource: String? = nil
     ) -> [String: Any] {
-        return [
+        var properties: [String: Any] = [
             "journey_id": journey.id,
             "campaign_id": journey.campaignId,
             "flow_id": flowId as Any,
@@ -279,5 +280,9 @@ public class JourneyEvents {
             "variant_key": variantKey,
             "is_holdout": isHoldout
         ]
+        if let assignmentSource {
+            properties["assignment_source"] = assignmentSource
+        }
+        return properties
     }
 }
