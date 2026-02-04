@@ -14,10 +14,12 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             var flowViewController: FlowViewController?
             var runtimeDelegate: CapturingRuntimeDelegate?
+            var requestLog: LockedArray<String>?
 
             beforeEach {
                 flowViewController = nil
                 runtimeDelegate = nil
+                requestLog = LockedArray<String>()
 
                 let env = ProcessInfo.processInfo.environment
                 let envApiKey = env["NUXIE_E2E_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -37,23 +39,26 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 }
 
                 server = try? LocalHTTPServer { request in
+                    requestLog?.append("\(request.method) \(request.path)")
                     if request.method == "GET", request.path.hasPrefix("/flows/") {
                         let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
                         let host = request.headers["host"] ?? "127.0.0.1"
-                        let htmlUrl = "http://\(host)/flow.html"
+                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
+                        // match real bundle shapes (base URL + manifest-relative paths).
+                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
                         let manifest = BuildManifest(
                             totalFiles: 1,
                             totalSize: 0,
-                            contentHash: "e2e-ready",
+                            contentHash: "e2e-ready-\(reqFlowId)",
                             files: [
-                                BuildFile(path: "flow.html", size: 0, contentType: "text/html")
+                                BuildFile(path: "index.html", size: 0, contentType: "text/html")
                             ]
                         )
 
                         let remoteFlow = RemoteFlow(
                             id: reqFlowId,
-                            bundle: FlowBundleRef(url: htmlUrl, manifest: manifest),
+                            bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
                             screens: [
                                 RemoteFlowScreen(
                                     id: "screen-1",
@@ -72,7 +77,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-                    if request.method == "GET", request.path == "/flow.html" {
+                    if request.method == "GET", request.path.hasPrefix("/bundles/") {
                         let html = """
                         <!doctype html>
                         <html>
@@ -85,6 +90,24 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             <div id="status">loading</div>
                             <script>
                               (function(){
+                                // Minimal "real runtime" surface for Phase 0:
+                                // - Provide window.nuxie._handleHostMessage (host -> web)
+                                // - Emit runtime/ready and runtime/screen_changed (web -> host)
+                                window.nuxie = {
+                                  _handleHostMessage: function(envelope) {
+                                    try {
+                                      if (!envelope || !envelope.type) return;
+                                      if (envelope.type === "runtime/navigate") {
+                                        var screenId = (envelope.payload && envelope.payload.screenId) || null;
+                                        window.webkit.messageHandlers.bridge.postMessage({
+                                          type: "runtime/screen_changed",
+                                          payload: { screenId: screenId }
+                                        });
+                                      }
+                                    } catch (e) {}
+                                  }
+                                };
+
                                 function sendReady() {
                                   try {
                                     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge) {
@@ -116,7 +139,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                 apiKey = "pk_test_e2e_local"
                 baseURL = server.baseURL
-                flowId = "flow_e2e_ready"
+                flowId = "flow_e2e_ready_\(UUID().uuidString)"
             }
 
             afterEach {
@@ -124,17 +147,32 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 server = nil
                 flowViewController = nil
                 runtimeDelegate = nil
+                requestLog = nil
             }
 
-            it("fetches /flows/:id and receives runtime/ready from the loaded WebView") {
+            it("fetches /flows/:id, receives runtime/ready, and completes a navigate→screen_changed handshake") {
                 let messages = LockedArray<String>()
+                var screenChangedId: String?
 
-                waitUntil(timeout: .seconds(15)) { done in
+                waitUntil(timeout: .seconds(25)) { done in
                     var finished = false
                     runtimeDelegate = CapturingRuntimeDelegate(onMessage: { type, payload, _ in
                         let payloadKeys = payload.keys.sorted().joined(separator: ",")
                         messages.append("\(type) keys=[\(payloadKeys)]")
+
                         if type == "runtime/ready" {
+                            // Drive the smallest "real runtime" contract: host -> web navigate, web -> host ack.
+                            Task { @MainActor in
+                                flowViewController?.sendRuntimeMessage(
+                                    type: "runtime/navigate",
+                                    payload: ["screenId": "screen-1"]
+                                )
+                            }
+                            return
+                        }
+
+                        if type == "runtime/screen_changed" {
+                            screenChangedId = payload["screenId"] as? String
                             guard !finished else { return }
                             finished = true
                             done()
@@ -164,6 +202,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                 // If the waitUntil timed out, include last observed messages for debugging.
                 expect(messages.values.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
+                expect(screenChangedId).to(equal("screen-1"))
             }
         }
     }
