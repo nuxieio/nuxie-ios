@@ -1,48 +1,107 @@
-name: iOS SDK Tests
+name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
-    paths:
-      - 'packages/nuxie-ios/**'
-      - '.github/workflows/ios-tests.yml'
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
-    paths:
-      - 'packages/nuxie-ios/**'
-      - '.github/workflows/ios-tests.yml'
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: Test iOS SDK
+    name: iOS
     runs-on: macos-latest
-    
+    timeout-minutes: 30
+
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Select Xcode
-      run: sudo xcode-select -s /Applications/Xcode_15.2.app
-      
-    - name: Install XcodeGen
-      run: brew install xcodegen
-      
-    - name: Generate Xcode Project
-      working-directory: packages/nuxie-ios
-      run: xcodegen generate
-      
-    - name: Run Tests on iOS Simulator
-      working-directory: packages/nuxie-ios
-      run: |
-        xcodebuild test \
-          -project NuxieSDK.xcodeproj \
-          -scheme NuxieSDK \
-          -destination 'platform=iOS Simulator,name=iPhone 15,OS=17.2' \
-          -resultBundlePath TestResults \
-          -enableCodeCoverage YES
-          
-    - name: Upload Test Results
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: test-results
-        path: packages/nuxie-ios/TestResults
+      - uses: actions/checkout@v4
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .xcode-spm
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Pick iOS Simulator destination
+        id: sim
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESTINATION="$(python3 - <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+
+          data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+          devices_by_runtime = data.get("devices", {})
+
+          def runtime_version(runtime_id: str):
+            match = re.search(r"iOS-(\d+)-(\d+)", runtime_id)
+            if match:
+              return (int(match.group(1)), int(match.group(2)))
+            match = re.search(r"iOS-(\d+)", runtime_id)
+            if match:
+              return (int(match.group(1)), 0)
+            return (-1, -1)
+
+          runtimes = sorted(
+            (r for r in devices_by_runtime.keys() if "iOS" in r),
+            key=runtime_version,
+            reverse=True,
+          )
+
+          for runtime in runtimes:
+            for device in devices_by_runtime.get(runtime, []):
+              if not device.get("isAvailable"):
+                continue
+              name = device.get("name") or ""
+              if "iPhone" not in name:
+                continue
+              udid = device.get("udid")
+              if udid:
+                print(f"platform=iOS Simulator,id={udid}")
+                sys.exit(0)
+
+          print("No available iPhone simulator found", file=sys.stderr)
+          sys.exit(1)
+          PY
+          )"
+          echo "destination=$DESTINATION" >> "$GITHUB_OUTPUT"
+
+      - name: Run Tests on iOS Simulator
+        run: |
+          xcodebuild test \
+            -project NuxieSDK.xcodeproj \
+            -scheme NuxieSDK \
+            -destination '${{ steps.sim.outputs.destination }}' \
+            -derivedDataPath DerivedData \
+            -clonedSourcePackagesDirPath .xcode-spm \
+            -resultBundlePath TestResults.xcresult \
+            -enableCodeCoverage YES
+
+      - name: Upload Test Results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults.xcresult
