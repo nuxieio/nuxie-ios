@@ -17,6 +17,49 @@ BUILD_DIR="$PROJECT_DIR/.build"
 COVERAGE_DIR="$PROJECT_DIR/coverage"
 XCRESULT_DIR="$BUILD_DIR/xcresult"
 
+# Pick an available iOS Simulator destination (iPhone, newest runtime).
+pick_ios_sim_destination() {
+    python3 - <<'PY'
+import json
+import re
+import subprocess
+import sys
+
+data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+devices_by_runtime = data.get("devices", {})
+
+def runtime_version(runtime_id: str):
+    match = re.search(r"iOS-(\d+)-(\d+)", runtime_id)
+    if match:
+        return (int(match.group(1)), int(match.group(2)))
+    match = re.search(r"iOS-(\d+)", runtime_id)
+    if match:
+        return (int(match.group(1)), 0)
+    return (-1, -1)
+
+runtimes = sorted(
+    (r for r in devices_by_runtime.keys() if "iOS" in r),
+    key=runtime_version,
+    reverse=True,
+)
+
+for runtime in runtimes:
+    for device in devices_by_runtime.get(runtime, []):
+        if not device.get("isAvailable"):
+            continue
+        name = device.get("name") or ""
+        if "iPhone" not in name:
+            continue
+        udid = device.get("udid")
+        if udid:
+            print(f"platform=iOS Simulator,id={udid}")
+            sys.exit(0)
+
+print("No available iPhone simulator found", file=sys.stderr)
+sys.exit(1)
+PY
+}
+
 # Function to print colored output
 print_status() {
     echo -e "${GREEN}✓${NC} $1"
@@ -107,14 +150,21 @@ coverage_xcode() {
     print_status "Running tests with Xcode coverage..."
     
     cd "$PROJECT_DIR"
-    
+
     # Create xcresult directory
     mkdir -p "$XCRESULT_DIR"
-    
+
+    # Ensure Xcode project exists (generated via XcodeGen)
+    make generate
+
     # Run tests with coverage
+    DESTINATION="$(pick_ios_sim_destination)"
     xcodebuild test \
-        -scheme Nuxie \
-        -destination 'platform=iOS Simulator,name=iPhone 15' \
+        -project NuxieSDK.xcodeproj \
+        -scheme NuxieSDKUnitTests \
+        -destination "$DESTINATION" \
+        -derivedDataPath "$BUILD_DIR/DerivedData" \
+        -clonedSourcePackagesDirPath .xcode-spm \
         -enableCodeCoverage YES \
         -resultBundlePath "$XCRESULT_DIR/coverage.xcresult" \
         2>&1 | grep -E "^(Test|Executed|\\*\\*)" || true

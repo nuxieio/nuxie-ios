@@ -96,6 +96,7 @@ iOSInjectionProject/
 *.xcworkspace
 Examples/*/*.xcodeproj
 Examples/*/*.xcworkspace
+.xcodegen.stamp
 
 # Internal
 plans/

@@ -26,27 +26,32 @@ Thank you for your interest in contributing to the Nuxie iOS SDK! We welcome con
 git clone https://github.com/your-fork/nuxie-ios.git
 cd nuxie-ios
 
-# Build the package
-swift build
+# Install dependencies (XcodeGen)
+make install-deps
 
-# Run tests
-swift test
+# Generate Xcode project
+make generate
+
+# Run unit tests
+make test-unit
+
+# Run integration tests (slower)
+make test-integration
+
+# Run end-to-end tests (slowest)
+make test-e2e
 ```
 
 ### Using Xcode
 
-You can also open the package directly in Xcode:
+Generate and open the Xcode project:
 
 ```bash
-open Package.swift
+make generate
+open NuxieSDK.xcodeproj
 ```
 
-Or generate an Xcode project:
-
-```bash
-swift package generate-xcodeproj
-open Nuxie.xcodeproj
-```
+You can also open `Package.swift` directly in Xcode, but the repo’s primary dev workflow uses XcodeGen + the Makefile.
 
 ## Code Style Guidelines
 
@@ -73,7 +78,7 @@ open Nuxie.xcodeproj
 - Maintain or improve code coverage (aim for >80%)
 - Use Quick and Nimble for behavior-driven tests
 - Follow the existing test structure and naming conventions
-- Run tests before submitting PR: `swift test`
+- Run tests before submitting PR: `make test-unit` (and `make test-integration`/`make test-e2e` when applicable)
 
 ### Code Coverage
 

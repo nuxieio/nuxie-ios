@@ -44,6 +44,52 @@ public struct CachedProfile: Codable {
     }
 }
 
+private actor InMemoryCachedProfileStore: CachedProfileStore {
+    private struct Entry {
+        let value: CachedProfile
+        let storedAt: Date
+        let sizeBytes: Int64
+    }
+
+    private var storage: [String: Entry] = [:]
+
+    func store(_ item: CachedProfile, forKey key: String) async throws {
+        let encoded = try JSONEncoder().encode(item)
+        storage[key] = Entry(value: item, storedAt: Date(), sizeBytes: Int64(encoded.count))
+    }
+
+    func retrieve(forKey key: String, allowStale: Bool) async -> CachedProfile? {
+        storage[key]?.value
+    }
+
+    func remove(forKey key: String) async {
+        storage.removeValue(forKey: key)
+    }
+
+    func clearAll() async {
+        storage.removeAll()
+    }
+
+    @discardableResult
+    func cleanupExpired() async -> Int {
+        0
+    }
+
+    func getAllKeys() async -> [String] {
+        Array(storage.keys)
+    }
+
+    func getMetadata(forKey key: String) async -> DiskCacheMetadata? {
+        guard let entry = storage[key] else { return nil }
+        return DiskCacheMetadata(
+            key: key,
+            lastModified: entry.storedAt,
+            size: entry.sizeBytes,
+            age: Date().timeIntervalSince(entry.storedAt)
+        )
+    }
+}
+
 /// Profile manager for user profile data with memory-first caching and disk backup
 internal actor ProfileService: ProfileServiceProtocol {
 
@@ -105,7 +151,7 @@ internal actor ProfileService: ProfileServiceProtocol {
             }
         } catch {
             LogWarning("Failed to initialize DiskCache<CachedProfile>: \(error)")
-            fatalError("ProfileService requires disk cache")
+            self.diskCache = InMemoryCachedProfileStore()
         }
     }
     

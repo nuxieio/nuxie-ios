@@ -1,11 +1,25 @@
-.PHONY: generate test test-ios clean help coverage coverage-html coverage-json coverage-summary
+.PHONY: generate test test-ios test-xcode test-unit test-integration test-e2e test-all clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+
+XCODEGEN_STAMP := .xcodegen.stamp
+XCODEPROJ := NuxieSDK.xcodeproj
+SCHEME_UNIT := NuxieSDKUnitTests
+SCHEME_INTEGRATION := NuxieSDKIntegrationTests
+SCHEME_E2E := NuxieSDKE2ETests
+SCHEME ?= $(SCHEME_UNIT)
+DERIVED_DATA := DerivedData
+TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1
+XCODEBUILD_TEST_FLAGS ?=
 
 # Default target
 help:
 	@echo "Available targets:"
 	@echo "  generate         - Generate Xcode project using XcodeGen"
-	@echo "  test             - Run tests on iOS simulator"
+	@echo "  test             - Run unit tests (default)"
 	@echo "  test-ios         - Run tests on iOS simulator (alias)"
+	@echo "  test-unit        - Run unit tests"
+	@echo "  test-integration - Run integration tests"
+	@echo "  test-e2e         - Run end-to-end tests"
+	@echo "  test-all         - Run unit + integration + e2e tests"
 	@echo "  coverage         - Run tests with code coverage (Swift Package Manager)"
 	@echo "  coverage-html    - Generate HTML coverage report"
 	@echo "  coverage-json    - Export coverage as JSON (Xcode)"
@@ -24,21 +38,39 @@ install-deps:
 
 # Generate Xcode project
 generate: check-xcodegen
-	@echo "Generating Xcode project..."
-	@xcodegen generate
+	@if [ -f "$(XCODEGEN_STAMP)" ] && [ "$(XCODEGEN_STAMP)" -nt project.yml ] && [ -d "$(XCODEPROJ)" ]; then \
+		echo "Xcode project is up to date."; \
+	else \
+		echo "Generating Xcode project..."; \
+		xcodegen generate; \
+		touch "$(XCODEGEN_STAMP)"; \
+	fi
 
 # Run tests on iOS simulator
-test-ios: generate
+test-xcode: generate
 	@echo "Running tests on iOS Simulator..."
 	@xcodebuild test \
-		-project NuxieSDK.xcodeproj \
-		-scheme NuxieSDK \
+		-project "$(XCODEPROJ)" \
+		-scheme "$(SCHEME)" \
 		-configuration Debug \
-		-derivedDataPath DerivedData \
-		-destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1'
+		-derivedDataPath "$(DERIVED_DATA)" \
+		-destination '$(TEST_DESTINATION)' \
+		$(XCODEBUILD_TEST_FLAGS)
+
+test-unit: SCHEME = $(SCHEME_UNIT)
+test-unit: test-xcode
+
+test-integration: SCHEME = $(SCHEME_INTEGRATION)
+test-integration: test-xcode
+
+test-e2e: SCHEME = $(SCHEME_E2E)
+test-e2e: test-xcode
+
+test-all: test-unit test-integration test-e2e
 
 # Alias for test-ios
-test: test-ios
+test: test-unit
+test-ios: test
 
 
 # Run tests with code coverage (Swift Package Manager)
@@ -62,6 +94,7 @@ clean:
 	@echo "Cleaning generated files..."
 	@rm -rf *.xcodeproj
 	@rm -rf *.xcworkspace
+	@rm -f "$(XCODEGEN_STAMP)"
 	@rm -rf DerivedData
 	@rm -rf .build
 	@rm -rf coverage

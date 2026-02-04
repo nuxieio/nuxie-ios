@@ -40,12 +40,14 @@ targets:
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
       
-  NuxieSDKTests:
+  NuxieSDKUnitTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - path: Tests/NuxieTests
-        name: NuxieTests
+      - path: Tests/NuxieUnitTests
+        name: NuxieUnitTests
+      - path: Tests/NuxieTestSupport
+        name: NuxieTestSupport
     dependencies:
       - target: NuxieSDK
       - package: Quick
@@ -53,15 +55,65 @@ targets:
       - package: Factory
         product: FactoryKit
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.tests
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.unittests
       TEST_HOST: ""
       GENERATE_INFOPLIST_FILE: YES
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
     scheme:
       testTargets:
-        - NuxieSDKTests
+        - NuxieSDKUnitTests
       gatherCoverageData: true
+
+  NuxieSDKIntegrationTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/NuxieIntegrationTests
+        name: NuxieIntegrationTests
+      - path: Tests/NuxieTestSupport
+        name: NuxieTestSupport
+    dependencies:
+      - target: NuxieSDK
+      - package: Quick
+      - package: Nimble
+      - package: Factory
+        product: FactoryKit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.integrationtests
+      TEST_HOST: ""
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+    scheme:
+      testTargets:
+        - NuxieSDKIntegrationTests
+      gatherCoverageData: false
+
+  NuxieSDKE2ETests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/NuxieE2ETests
+        name: NuxieE2ETests
+      - path: Tests/NuxieTestSupport
+        name: NuxieTestSupport
+    dependencies:
+      - target: NuxieSDK
+      - package: Quick
+      - package: Nimble
+      - package: Factory
+        product: FactoryKit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.e2etests
+      TEST_HOST: ""
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+    scheme:
+      testTargets:
+        - NuxieSDKE2ETests
+      gatherCoverageData: false
       
 schemes:
   NuxieSDK:
@@ -70,9 +122,36 @@ schemes:
         NuxieSDK: all
     test:
       targets:
-        - NuxieSDKTests
+        - NuxieSDKUnitTests
       gatherCoverageData: true
     run:
       config: Debug
     archive:
       config: Release
+
+  NuxieSDKUnitTests:
+    build:
+      targets:
+        NuxieSDK: all
+    test:
+      targets:
+        - NuxieSDKUnitTests
+      gatherCoverageData: true
+
+  NuxieSDKIntegrationTests:
+    build:
+      targets:
+        NuxieSDK: all
+    test:
+      targets:
+        - NuxieSDKIntegrationTests
+      gatherCoverageData: false
+
+  NuxieSDKE2ETests:
+    build:
+      targets:
+        NuxieSDK: all
+    test:
+      targets:
+        - NuxieSDKE2ETests
+      gatherCoverageData: false

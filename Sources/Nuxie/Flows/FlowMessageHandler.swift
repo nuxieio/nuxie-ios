@@ -13,7 +13,7 @@ final class FlowMessageHandler: NSObject, WKScriptMessageHandler {
     weak var delegate: FlowMessageHandlerDelegate?
     weak var webView: FlowWebView?
     
-    init(delegate: FlowMessageHandlerDelegate, webView: FlowWebView) {
+    init(delegate: FlowMessageHandlerDelegate, webView: FlowWebView? = nil) {
         self.delegate = delegate
         self.webView = webView
         super.init()
@@ -21,7 +21,7 @@ final class FlowMessageHandler: NSObject, WKScriptMessageHandler {
     
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "bridge" else { return }
-        guard let webView = webView else { return }
+        guard let webView = (message.webView as? FlowWebView) ?? webView else { return }
         guard let dict = message.body as? [String: Any] else { return }
         guard let type = dict["type"] as? String else { return }
 

@@ -6,6 +6,14 @@ import FactoryKit
 
 /// Global Quick configuration to centralize test setup/teardown.
 final class GlobalQuickConfiguration: QuickConfiguration {
+  private static let processStoragePath: URL = {
+    let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+    return base.appendingPathComponent(
+      "nuxie-tests-\(ProcessInfo.processInfo.globallyUniqueString)",
+      isDirectory: true
+    )
+  }()
+
   override class func configure(_ configuration: QCKConfiguration) {
     configuration.beforeEach {
       MockFactory.resetUsageFlag()
@@ -17,7 +25,7 @@ final class GlobalQuickConfiguration: QuickConfiguration {
       }
 
       if NuxieSDK.shared.configuration == nil {
-        Container.shared.sdkConfiguration.register { NuxieConfiguration(apiKey: "test-api-key") }
+        Container.shared.sdkConfiguration.register { makeTestConfiguration() }
       }
     }
 
@@ -28,7 +36,7 @@ final class GlobalQuickConfiguration: QuickConfiguration {
       // Ensure a configuration exists so EventService resolution doesn't crash in tests
       // that don't call NuxieSDK.setup.
       if NuxieSDK.shared.configuration == nil {
-        Container.shared.sdkConfiguration.register { NuxieConfiguration(apiKey: "test-api-key") }
+        Container.shared.sdkConfiguration.register { makeTestConfiguration() }
       }
 
       // Drain queued event work to reduce async noise between tests.
@@ -50,8 +58,14 @@ final class GlobalQuickConfiguration: QuickConfiguration {
       }
 
       Container.shared.reset()
-      Container.shared.sdkConfiguration.register { NuxieConfiguration(apiKey: "test-api-key") }
+      Container.shared.sdkConfiguration.register { makeTestConfiguration() }
     }
+  }
+
+  private class func makeTestConfiguration() -> NuxieConfiguration {
+    let config = NuxieConfiguration(apiKey: "test-api-key")
+    config.customStoragePath = processStoragePath
+    return config
   }
 
   private class func runAsyncAndWait(
@@ -59,14 +73,34 @@ final class GlobalQuickConfiguration: QuickConfiguration {
     timeout: TimeInterval = 5.0,
     operation: @escaping @Sendable () async -> Void
   ) {
-    let semaphore = DispatchSemaphore(value: 0)
+    let lock = NSLock()
+    var finished = false
+
     Task.detached {
       await operation()
-      semaphore.signal()
+      lock.lock()
+      finished = true
+      lock.unlock()
     }
-    let result = semaphore.wait(timeout: .now() + timeout)
-    if result == .timedOut {
-      print("WARN: Timed out waiting for \(description)")
+
+    let deadline = Date().addingTimeInterval(timeout)
+    while true {
+      lock.lock()
+      let isFinished = finished
+      lock.unlock()
+
+      if isFinished {
+        return
+      }
+
+      if Date() >= deadline {
+        break
+      }
+
+      // Avoid blocking the main runloop (some tests involve WebKit/UI work).
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
     }
-  }
+
+	    print("WARN: Timed out waiting for \(description)")
+	  }
 }

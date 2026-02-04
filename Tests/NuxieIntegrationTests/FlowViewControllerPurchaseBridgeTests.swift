@@ -53,16 +53,19 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 return result
             }
 
-            beforeEach {
-                mockProductService = MockProductService()
-                Container.shared.productService.register { mockProductService }
-                mockTransactionObserver = MockTransactionObserver()
-                Container.shared.transactionObserver.register { mockTransactionObserver }
-                let config = NuxieConfiguration(apiKey: "test")
-                mockDelegate = MockPurchaseDelegate()
-                mockDelegate.simulatedDelay = 0
-                config.purchaseDelegate = mockDelegate
-                config.enablePlugins = false
+	            beforeEach {
+	                let productService = MockProductService()
+	                mockProductService = productService
+	                Container.shared.productService.register { productService }
+
+	                let transactionObserver = MockTransactionObserver()
+	                mockTransactionObserver = transactionObserver
+	                Container.shared.transactionObserver.register { transactionObserver }
+	                let config = NuxieConfiguration(apiKey: "test")
+	                mockDelegate = MockPurchaseDelegate()
+	                mockDelegate.simulatedDelay = 0
+	                config.purchaseDelegate = mockDelegate
+	                config.enablePlugins = false
                 try? NuxieSDK.shared.setup(with: config)
             }
 
