@@ -59,7 +59,13 @@ actor WebArchiver {
                 group.addTask { [urlSession] in
                     let fileURL = baseURL.appendingPathComponent(file.path)
                     
-                    let (data, _) = try await urlSession.data(from: fileURL)
+                    let (data, response) = try await urlSession.data(from: fileURL)
+                    if let httpResponse = response as? HTTPURLResponse {
+                        guard (200...299).contains(httpResponse.statusCode) else {
+                            LogError("Failed to download \(file.path): HTTP \(httpResponse.statusCode) (\(fileURL))")
+                            throw FlowError.downloadFailed
+                        }
+                    }
                     LogDebug("Downloaded \(file.path) (\(data.count) bytes)")
                     return (file, data)
                 }
@@ -137,4 +143,3 @@ actor WebArchiver {
         return webArchiveData
     }
 }
-
