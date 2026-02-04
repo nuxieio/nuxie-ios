@@ -737,35 +737,55 @@ final class FlowJourneyRunner {
         context: TriggerContext
     ) async -> ActionResult {
         guard !action.variants.isEmpty else { return .continue }
-        let assignment = await getServerAssignment(experimentId: action.experimentId)
-        let resolution = resolveExperimentVariant(action, assignment: assignment)
+
+        let experimentKey = action.experimentId
+        let assignment = await getServerAssignment(experimentId: experimentKey)
+
+        let frozenVariantKey = getFrozenExperimentVariantKey(experimentKey: experimentKey)
+        let frozenVariant =
+            frozenVariantKey.flatMap { key in
+                action.variants.first(where: { $0.id == key })
+            }
+
+        let resolution = frozenVariant != nil
+            ? (variant: frozenVariant, matchedAssignment: assignment?.variantKey == frozenVariantKey)
+            : resolveExperimentVariant(action, assignment: assignment)
+
         guard let variant = resolution.variant else {
             return .continue
         }
 
-        journey.setContext("_experiment_key", value: action.experimentId)
+        if frozenVariantKey == nil || frozenVariant == nil {
+            freezeExperimentVariantKey(experimentKey: experimentKey, variantKey: variant.id)
+        }
+
+        journey.setContext("_experiment_key", value: experimentKey)
         journey.setContext("_variant_key", value: variant.id)
 
         let status = assignment?.status
-        if status == "running" {
+        if status == "running",
+           !hasEmittedExperimentExposure(experimentKey: experimentKey) {
+            let assignmentSource = frozenVariant != nil ? "journey_context" : "profile"
             if resolution.matchedAssignment {
                 eventService.track(
                     JourneyEvents.experimentExposure,
                     properties: JourneyEvents.experimentExposureProperties(
                         journey: journey,
-                        experimentKey: action.experimentId,
+                        experimentKey: experimentKey,
                         variantKey: variant.id,
                         flowId: journey.flowId,
-                        isHoldout: assignment?.isHoldout ?? false
+                        isHoldout: assignment?.isHoldout ?? false,
+                        assignmentSource: assignmentSource
                     ),
                     userProperties: nil,
                     userPropertiesSetOnce: nil
                 )
+                markExperimentExposureEmitted(experimentKey: experimentKey)
             } else {
                 eventService.track(
                     "$experiment_exposure_error",
                     properties: [
-                        "experiment_key": action.experimentId,
+                        "experiment_key": experimentKey,
                         "variant_key": assignment?.variantKey as Any,
                         "reason": "variant_not_found"
                     ],
@@ -1722,6 +1742,54 @@ final class FlowJourneyRunner {
             return nil
         }
         return profile.experiments?[experimentId]
+    }
+
+    // -------------------------------------------------------------------------
+    // Experiment Exposure Dedupe + Freeze
+    // -------------------------------------------------------------------------
+
+    private enum ExperimentContextKeys {
+        static let frozenVariantsByExperiment = "_experiment_variants"
+        static let exposureEmittedByExperiment = "_experiment_exposure_emitted"
+    }
+
+    private func getFrozenExperimentVariantKey(experimentKey: String) -> String? {
+        guard let dict = journey.getContext(ExperimentContextKeys.frozenVariantsByExperiment) as? [String: Any] else {
+            return nil
+        }
+        return dict[experimentKey] as? String
+    }
+
+    private func freezeExperimentVariantKey(experimentKey: String, variantKey: String) {
+        guard !experimentKey.isEmpty, !variantKey.isEmpty else { return }
+        var dict =
+            (journey.getContext(ExperimentContextKeys.frozenVariantsByExperiment) as? [String: Any]) ?? [:]
+        dict[experimentKey] = variantKey
+        journey.setContext(ExperimentContextKeys.frozenVariantsByExperiment, value: dict)
+    }
+
+    private func hasEmittedExperimentExposure(experimentKey: String) -> Bool {
+        guard let dict = journey.getContext(ExperimentContextKeys.exposureEmittedByExperiment) as? [String: Any] else {
+            return false
+        }
+        if let emitted = dict[experimentKey] as? Bool {
+            return emitted
+        }
+        if let emitted = dict[experimentKey] as? Int {
+            return emitted != 0
+        }
+        if let emitted = dict[experimentKey] as? String {
+            return emitted == "true" || emitted == "1"
+        }
+        return false
+    }
+
+    private func markExperimentExposureEmitted(experimentKey: String) {
+        guard !experimentKey.isEmpty else { return }
+        var dict =
+            (journey.getContext(ExperimentContextKeys.exposureEmittedByExperiment) as? [String: Any]) ?? [:]
+        dict[experimentKey] = true
+        journey.setContext(ExperimentContextKeys.exposureEmittedByExperiment, value: dict)
     }
 
     private func parseTime(_ timeString: String) -> DateComponents? {
