@@ -61,12 +61,40 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     return
                 }
 
-                server = try? LocalHTTPServer { request in
-                    requestLog?.append("\(request.method) \(request.path)")
-                    if request.method == "GET", request.path.hasPrefix("/flows/") {
-                        let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
-                        let host = request.headers["host"] ?? "127.0.0.1"
+	                server = try? LocalHTTPServer { request in
+	                    requestLog?.append("\(request.method) \(request.path)")
+	                    if (request.method == "POST" || request.method == "GET"), request.path == "/profile" {
+	                        var requestedDistinctId: String? = request.query["distinct_id"]
+	                        if requestedDistinctId == nil, !request.body.isEmpty {
+	                            if let profileRequest = try? JSONDecoder().decode(ProfileRequest.self, from: request.body) {
+	                                requestedDistinctId = profileRequest.distinctId
+	                            }
+	                        }
+
+	                        let distinctId = requestedDistinctId ?? "unknown"
+	                        let variantKey = distinctId.hasSuffix("-b") ? "b" : "a"
+	                        let assignment = ExperimentAssignment(
+	                            experimentKey: "exp-1",
+	                            variantKey: variantKey,
+	                            status: "running",
+	                            isHoldout: false
+	                        )
+	                        let response = ProfileResponse(
+	                            campaigns: [],
+	                            segments: [],
+	                            flows: [],
+	                            userProperties: nil,
+	                            experiments: ["exp-1": assignment],
+	                            features: nil,
+	                            journeys: nil
+	                        )
+	                        let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
+	                        return LocalHTTPServer.Response.json(json)
+	                    }
+	                    if request.method == "GET", request.path.hasPrefix("/flows/") {
+	                        let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+	                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+	                        let host = request.headers["host"] ?? "127.0.0.1"
                         // Serve a per-flow bundle root to avoid cache collisions and to more closely
                         // match real bundle shapes (base URL + manifest-relative paths).
                         let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
@@ -701,10 +729,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+	                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
 
-                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
-                let distinctId = "e2e-user-1"
+	                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
+	                let distinctId = "e2e-user-1-\(variantKey)"
 
                 let messages = LockedArray<String>()
                 let didReceiveTap = LockedValue(false)
@@ -729,30 +757,17 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             config.enablePlugins = false
                             config.customStoragePath = FileManager.default.temporaryDirectory
                                 .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
-                            Container.shared.sdkConfiguration.register { config }
+	                            Container.shared.sdkConfiguration.register { config }
 
-                            let mockEventService = MockEventService()
-                            let mockProfileService = MockProfileService()
-                            Container.shared.eventService.register { mockEventService }
-                            Container.shared.profileService.register { mockProfileService }
-
-                            let assignment = ExperimentAssignment(
-                                experimentKey: "exp-1",
-                                variantKey: variantKey,
-                                status: "running",
-                                isHoldout: false
-                            )
-                            let profile = ProfileResponse(
-                                campaigns: [],
-                                segments: [],
-                                flows: [],
-                                userProperties: nil,
-                                experiments: ["exp-1": assignment],
-                                features: nil,
-                                journeys: nil
-                            )
-                            mockProfileService.setProfileResponse(profile)
-                            _ = try? await mockProfileService.fetchProfile(distinctId: distinctId)
+	                            let mockEventService = MockEventService()
+	                            Container.shared.eventService.register { mockEventService }
+	                            let profileService = Container.shared.profileService()
+	                            let profile = try await profileService.fetchProfile(distinctId: distinctId)
+	                            guard profile.experiments?["exp-1"]?.variantKey == variantKey else {
+	                                fail("E2E: expected server profile assignment variant '\(variantKey)' but got '\(profile.experiments?["exp-1"]?.variantKey ?? "nil")'")
+	                                finishOnce()
+	                                return
+	                            }
 
                             let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
                             let remoteFlow = try await api.fetchFlow(flowId: phase2FlowId)
@@ -837,10 +852,13 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(props["experiment_key"] as? String).to(equal("exp-1"))
                 expect(props["variant_key"] as? String).to(equal(variantKey))
                 expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
-                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
-                expect(props["journey_id"] as? String).to(equal(expectedJourneyId.get()))
-                expect(props["is_holdout"] as? Bool).to(equal(false))
-            }
+	                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
+	                expect(props["journey_id"] as? String).to(equal(expectedJourneyId.get()))
+	                expect(props["is_holdout"] as? Bool).to(equal(false))
+
+	                let requestSnapshot = requestLog?.snapshot() ?? []
+	                expect(requestSnapshot.contains("POST /profile") || requestSnapshot.contains("GET /profile")).to(beTrue())
+	            }
 
             it("branches to screen-a and tracks exposure (fixture mode)") {
                 runExperimentBranchTest(variantKey: "a", expectedScreenId: "screen-a")
