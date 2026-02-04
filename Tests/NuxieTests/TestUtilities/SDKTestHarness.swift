@@ -36,6 +36,17 @@ struct SDKTestHarness {
     }
 
     func cleanup() {
+        if NuxieSDK.shared.configuration != nil {
+            let semaphore = DispatchSemaphore(value: 0)
+            Task.detached {
+                await NuxieSDK.shared.shutdown()
+                semaphore.signal()
+            }
+            let result = semaphore.wait(timeout: .now() + 15.0)
+            if result == .timedOut {
+                print("WARN: Timed out waiting for NuxieSDK.shutdown (SDKTestHarness.cleanup)")
+            }
+        }
         try? FileManager.default.removeItem(at: storageURL)
     }
 }

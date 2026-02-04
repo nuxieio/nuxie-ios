@@ -222,6 +222,9 @@ public class EventService: EventServiceProtocol {
   private let eventStore: EventStoreProtocol
   private let ready = StoreReadySignal()
 
+  private let closeLock = NSLock()
+  private var isClosing = false
+
   // the pipeline
   private let stream: AsyncStream<Command>
   private let continuation: AsyncStream<Command>.Continuation
@@ -267,7 +270,14 @@ public class EventService: EventServiceProtocol {
     self.journeyService = journeyService
     self.contextBuilder = contextBuilder
     self.configuration = configuration
-    try await eventStore.initialize(path: configuration?.customStoragePath)
+
+    do {
+      try await eventStore.initialize(path: configuration?.customStoragePath)
+    } catch {
+      // Storage should never wedge the SDK (or tests). If storage init fails, we still allow
+      // network delivery and local evaluation to proceed with a best-effort store.
+      LogWarning("EventService storage initialization failed: \(error)")
+    }
 
     LogInfo(
       "EventService configured with network queue: \(networkQueue != nil), journey service: \(journeyService != nil), context builder: \(contextBuilder != nil)"
@@ -299,6 +309,11 @@ public class EventService: EventServiceProtocol {
     userProperties: [String: Any]? = nil,
     userPropertiesSetOnce: [String: Any]? = nil
   ) {
+    closeLock.lock()
+    let closing = isClosing
+    closeLock.unlock()
+    guard !closing else { return }
+
     guard !event.isEmpty else {
       LogWarning("Event name cannot be empty")
       return
@@ -454,7 +469,21 @@ public class EventService: EventServiceProtocol {
 
   /// Close the event service and its underlying storage
   public func close() async {
+    closeLock.lock()
+    if isClosing {
+      closeLock.unlock()
+      return
+    }
+    isClosing = true
+    closeLock.unlock()
+
+    // Unblock any in-flight work waiting on storage init (e.g. tests that never called setup()).
+    await ready.open()
+
+    // Stop accepting new commands and ask the worker to stop.
     continuation.yield(.shutdown)
+    continuation.finish()
+
     await eventStore.close()
     LogInfo("EventService closed")
   }
