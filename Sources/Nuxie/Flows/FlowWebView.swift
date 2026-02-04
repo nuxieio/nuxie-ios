@@ -142,7 +142,7 @@ public class FlowWebView: WKWebView {
     
     /// Load content from a file URL (for cached archives)
     func loadFileURL(_ url: URL) {
-        loadFileURL(url, allowingReadAccessTo: url)
+        loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
     
     /// Inject JavaScript into the web view

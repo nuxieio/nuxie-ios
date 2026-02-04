@@ -77,53 +77,58 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-                    if request.method == "GET", request.path.hasPrefix("/bundles/") {
-                        let html = """
-                        <!doctype html>
-                        <html>
-                          <head>
-                            <meta charset="utf-8" />
-                            <meta name="viewport" content="width=device-width, initial-scale=1" />
-                            <title>Nuxie E2E Ready</title>
-                          </head>
-                          <body>
-                            <div id="status">loading</div>
-                            <script>
-                              (function(){
-                                // Minimal "real runtime" surface for Phase 0:
-                                // - Provide window.nuxie._handleHostMessage (host -> web)
-                                // - Emit runtime/ready and runtime/screen_changed (web -> host)
-                                window.nuxie = {
-                                  _handleHostMessage: function(envelope) {
-                                    try {
-                                      if (!envelope || !envelope.type) return;
-                                      if (envelope.type === "runtime/navigate") {
-                                        var screenId = (envelope.payload && envelope.payload.screenId) || null;
-                                        window.webkit.messageHandlers.bridge.postMessage({
-                                          type: "runtime/screen_changed",
-                                          payload: { screenId: screenId }
-                                        });
+                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
+                            let html = """
+                            <!doctype html>
+                            <html>
+                              <head>
+                                <meta charset="utf-8" />
+                                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                                <title>Nuxie E2E Ready</title>
+                              </head>
+                              <body>
+                                <div id="status">loading</div>
+                                <script>
+                                  (function(){
+                                    // Minimal "real runtime" surface for Phase 0:
+                                    // - Provide window.nuxie._handleHostMessage (host -> web)
+                                    // - Emit runtime/ready and runtime/screen_changed (web -> host)
+                                    window.nuxie = {
+                                      _handleHostMessage: function(envelope) {
+                                        try {
+                                          if (!envelope || !envelope.type) return;
+                                          if (envelope.type === "runtime/navigate") {
+                                            var screenId = (envelope.payload && envelope.payload.screenId) || null;
+                                            window.webkit.messageHandlers.bridge.postMessage({
+                                              type: "runtime/screen_changed",
+                                              payload: { screenId: screenId }
+                                            });
+                                          }
+                                        } catch (e) {}
                                       }
-                                    } catch (e) {}
-                                  }
-                                };
-
-                                function sendReady() {
-                                  try {
-                                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge) {
-                                      window.webkit.messageHandlers.bridge.postMessage({ type: "runtime/ready", payload: { version: "e2e" } });
-                                      document.getElementById("status").textContent = "ready-sent";
+                                    };
+                                    function sendReadyOnce() {
+                                      try {
+                                        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge) {
+                                          window.webkit.messageHandlers.bridge.postMessage({ type: "runtime/ready", payload: { version: "e2e" } });
+                                          document.getElementById("status").textContent = "ready-sent";
+                                          return true;
+                                        }
+                                      } catch (e) {}
+                                      return false;
                                     }
-                                  } catch (e) {}
-                                }
-                                setTimeout(sendReady, 50);
-                              })();
-                            </script>
-                          </body>
-                        </html>
-                        """
-                        return LocalHTTPServer.Response.html(html)
-                    }
+                                    var tries = 0;
+                                    var readyTimer = setInterval(function() {
+                                      tries++;
+                                      if (sendReadyOnce() || tries > 200) clearInterval(readyTimer);
+                                    }, 50);
+                                  })();
+                                </script>
+                              </body>
+                            </html>
+                            """
+                            return LocalHTTPServer.Response.html(html)
+                        }
 
                     if request.method == "GET", request.path == "/favicon.ico" {
                         return LocalHTTPServer.Response(statusCode: 204, headers: [:], body: Data())
@@ -152,27 +157,51 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             it("fetches /flows/:id, receives runtime/ready, and completes a navigate→screen_changed handshake") {
                 let messages = LockedArray<String>()
-                var screenChangedId: String?
+                let expectedScreenId = LockedValue<String?>(nil)
+                let screenChangedId = LockedValue<String?>(nil)
 
                 waitUntil(timeout: .seconds(25)) { done in
                     var finished = false
+                    var didReceiveReady = false
                     runtimeDelegate = CapturingRuntimeDelegate(onMessage: { type, payload, _ in
                         let payloadKeys = payload.keys.sorted().joined(separator: ",")
                         messages.append("\(type) keys=[\(payloadKeys)]")
 
                         if type == "runtime/ready" {
+                            didReceiveReady = true
                             // Drive the smallest "real runtime" contract: host -> web navigate, web -> host ack.
                             Task { @MainActor in
+                                guard let vc = flowViewController else {
+                                    fail("E2E: FlowViewController was not created")
+                                    guard !finished else { return }
+                                    finished = true
+                                    done()
+                                    return
+                                }
+                                guard let screenId = vc.flow.remoteFlow.screens.first?.id else {
+                                    fail("E2E: RemoteFlow has no screens; cannot test runtime/navigate")
+                                    guard !finished else { return }
+                                    finished = true
+                                    done()
+                                    return
+                                }
+
+                                expectedScreenId.set(screenId)
                                 flowViewController?.sendRuntimeMessage(
                                     type: "runtime/navigate",
-                                    payload: ["screenId": "screen-1"]
+                                    payload: ["screenId": screenId]
                                 )
                             }
                             return
                         }
 
                         if type == "runtime/screen_changed" {
-                            screenChangedId = payload["screenId"] as? String
+                            guard didReceiveReady else { return }
+                            guard let expected = expectedScreenId.get() else { return }
+                            let got = payload["screenId"] as? String
+                            guard got == expected else { return }
+
+                            screenChangedId.set(got)
                             guard !finished else { return }
                             finished = true
                             done()
@@ -185,8 +214,13 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             let remoteFlow = try await api.fetchFlow(flowId: flowId)
                             let flow = Flow(remoteFlow: remoteFlow, products: [])
 
+                            let archiveService = FlowArchiver()
+                            // This conformance check should reflect the current backend response, not a cached
+                            // WebArchive from a previous run.
+                            await archiveService.removeArchive(for: flow.id)
+
                             await MainActor.run {
-                                let vc = FlowViewController(flow: flow, archiveService: FlowArchiver())
+                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
                                 vc.runtimeDelegate = runtimeDelegate
                                 flowViewController = vc
                                 _ = vc.view
@@ -200,13 +234,18 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     }
                 }
 
-                // If the waitUntil timed out, include last observed messages for debugging.
-                expect(messages.values.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
-                expect(screenChangedId).to(equal("screen-1"))
+                    // If the waitUntil timed out, include last observed messages for debugging.
+                    let messagesSnapshot = messages.snapshot()
+                    expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
+                    guard let expected = expectedScreenId.get() else {
+                        fail("E2E: did not resolve expected screen id; messages=\(messagesSnapshot)")
+                        return
+                    }
+                    expect(screenChangedId.get()).to(equal(expected))
+                }
             }
         }
     }
-}
 
 // MARK: - Test helpers
 
@@ -235,5 +274,34 @@ private final class LockedArray<T> {
         lock.lock()
         values.append(value)
         lock.unlock()
+    }
+
+    func snapshot() -> [T] {
+        lock.lock()
+        let snapshot = values
+        lock.unlock()
+        return snapshot
+    }
+}
+
+private final class LockedValue<T> {
+    private let lock = NSLock()
+    private var value: T
+
+    init(_ value: T) {
+        self.value = value
+    }
+
+    func set(_ value: T) {
+        lock.lock()
+        self.value = value
+        lock.unlock()
+    }
+
+    func get() -> T {
+        lock.lock()
+        let current = value
+        lock.unlock()
+        return current
     }
 }
