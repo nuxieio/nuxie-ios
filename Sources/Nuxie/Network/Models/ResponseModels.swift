@@ -23,7 +23,7 @@ public struct ProfileResponse: Codable {
     public let segments: [Segment]
     public let flows: [RemoteFlow]
     public let userProperties: [String: AnyCodable]?
-    /// Server-computed experiment variant assignments (experimentId -> assignment)
+    /// Server-computed experiment variant assignments (experimentKey -> assignment)
     public let experiments: [String: ExperimentAssignment]?
     /// Customer's feature access (from active subscriptions)
     public let features: [Feature]?
@@ -104,10 +104,10 @@ public struct Feature: Codable, Sendable {
 
 /// Pre-computed experiment variant assignment from server
 public struct ExperimentAssignment: Codable {
-    public let experimentId: String
-    public let variantId: String? // nil when draft/paused
-    public let flowId: String? // nil = holdout (control group that shows nothing)
+    public let experimentKey: String
+    public let variantKey: String? // nil when draft/paused
     public let status: String
+    public let isHoldout: Bool? // nil when variantKey is nil
 }
 
 // MARK: - Campaign Models

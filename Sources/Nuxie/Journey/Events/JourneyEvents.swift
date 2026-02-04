@@ -23,7 +23,7 @@ public class JourneyEvents {
     public static let customerUpdated = "$customer_updated"
     public static let eventSent = "$event_sent"
     public static let delegateCalled = "$delegate_called"
-    public static let experimentVariantAssigned = "$experiment_variant_assigned"
+    public static let experimentExposure = "$experiment_exposure"
 
     // MARK: - Properties Builders
 
@@ -264,22 +264,20 @@ public class JourneyEvents {
         return properties
     }
 
-    public static func experimentVariantAssignedProperties(
+    public static func experimentExposureProperties(
         journey: Journey,
-        experimentId: String,
-        variantId: String,
-        variantName: String?,
-        variantIndex: Int?,
-        flowId: String?
+        experimentKey: String,
+        variantKey: String,
+        flowId: String?,
+        isHoldout: Bool
     ) -> [String: Any] {
         return [
             "journey_id": journey.id,
             "campaign_id": journey.campaignId,
             "flow_id": flowId as Any,
-            "experiment_id": experimentId,
-            "variant_id": variantId,
-            "variant_name": variantName ?? "",
-            "variant_index": variantIndex ?? 0
+            "experiment_key": experimentKey,
+            "variant_key": variantKey,
+            "is_holdout": isHoldout
         ]
     }
 }
