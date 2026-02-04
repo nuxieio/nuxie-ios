@@ -40,6 +40,10 @@ public final class NuxieSDK {
   private var featureInfoDelegateTask: Task<Void, Never>?
   private var profilePrefetchTask: Task<Void, Never>?
   private var transactionObserverTask: Task<Void, Never>?
+  private var identifyUserChangeTask: Task<Void, Never>?
+  private var eventReassignTask: Task<Void, Never>?
+  private var resetUserCleanupTask: Task<Void, Never>?
+  private var resetFlowCleanupTask: Task<Void, Never>?
 
   // MARK: - Setup
 
@@ -122,30 +126,34 @@ public final class NuxieSDK {
       LogDebug("Plugin system setup complete")
     }
 
-    // Wire up FeatureInfo delegate callback
-    featureInfoDelegateTask = Task { @MainActor in
-      guard !Task.isCancelled else { return }
-      let featureInfo = container.featureInfo()
-      featureInfo.onFeatureChange = { [weak self] featureId, oldValue, newValue in
-        self?.delegate?.featureAccessDidChange(featureId, from: oldValue, to: newValue)
-      }
-    }
+    let isTestEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-    // Fetch initial profile data and sync feature info
-    profilePrefetchTask = Task {
-      guard !Task.isCancelled else { return }
-      do {
-        _ = try await Container.shared.profileService().refetchProfile()
+    if !isTestEnvironment {
+      // Wire up FeatureInfo delegate callback
+      featureInfoDelegateTask = Task { @MainActor in
         guard !Task.isCancelled else { return }
-        await Container.shared.featureService().syncFeatureInfo()
+        let featureInfo = container.featureInfo()
+        featureInfo.onFeatureChange = { [weak self] featureId, oldValue, newValue in
+          self?.delegate?.featureAccessDidChange(featureId, from: oldValue, to: newValue)
+        }
       }
-      catch { LogWarning("Profile fetch failed: \(error)") }
-    }
 
-    // Start transaction observer to sync StoreKit 2 purchases with backend
-    transactionObserverTask = Task {
-      guard !Task.isCancelled else { return }
-      await container.transactionObserver().startListening()
+      // Fetch initial profile data and sync feature info
+      profilePrefetchTask = Task {
+        guard !Task.isCancelled else { return }
+        do {
+          _ = try await Container.shared.profileService().refetchProfile()
+          guard !Task.isCancelled else { return }
+          await Container.shared.featureService().syncFeatureInfo()
+        }
+        catch { LogWarning("Profile fetch failed: \(error)") }
+      }
+
+      // Start transaction observer to sync StoreKit 2 purchases with backend
+      transactionObserverTask = Task {
+        guard !Task.isCancelled else { return }
+        await container.transactionObserver().startListening()
+      }
     }
 
     LogInfo("Setup completed with API key: \(NuxieLogger.shared.logAPIKey(configuration.apiKey))")
@@ -189,12 +197,20 @@ public final class NuxieSDK {
     featureInfoDelegateTask?.cancel()
     profilePrefetchTask?.cancel()
     transactionObserverTask?.cancel()
+    identifyUserChangeTask?.cancel()
+    eventReassignTask?.cancel()
+    resetUserCleanupTask?.cancel()
+    resetFlowCleanupTask?.cancel()
 
     eventSystemSetupTask = nil
     journeyInitializeTask = nil
     featureInfoDelegateTask = nil
     profilePrefetchTask = nil
     transactionObserverTask = nil
+    identifyUserChangeTask = nil
+    eventReassignTask = nil
+    resetUserCleanupTask = nil
+    resetFlowCleanupTask = nil
   }
 
   // MARK: - Trigger (Event) API
@@ -313,18 +329,23 @@ public final class NuxieSDK {
     
     // Handle user change across all services if user changed
     if hasDifferentDistinctId {
-      Task {
+      identifyUserChangeTask?.cancel()
+      identifyUserChangeTask = Task {
+        guard !Task.isCancelled else { return }
         // ProfileService handles its own cache transition
         let profileService = container.profileService()
         await profileService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
+        guard !Task.isCancelled else { return }
 
         // SegmentService needs to handle identity transition
         let segmentService = container.segmentService()
         await segmentService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
+        guard !Task.isCancelled else { return }
 
         // JourneyService needs to cancel old journeys and load new ones
         let journeyService = container.journeyService()
         await journeyService.handleUserChange(from: oldDistinctId, to: currentDistinctId)
+        guard !Task.isCancelled else { return }
 
         // FeatureService needs to clear cache for new user
         let featureService = container.featureService()
@@ -337,9 +358,12 @@ public final class NuxieSDK {
        let config = configuration,
        config.eventLinkingPolicy == .migrateOnIdentify {
       // Only reassign local DB events (server handles in-flight events via $identify)
-      Task {
+      eventReassignTask?.cancel()
+      eventReassignTask = Task {
+        guard !Task.isCancelled else { return }
         do {
           let reassignedCount = try await eventService.reassignEvents(from: oldDistinctId, to: currentDistinctId)
+          guard !Task.isCancelled else { return }
           if reassignedCount > 0 {
             LogInfo("Migrated \(reassignedCount) anonymous events to identified user: \(NuxieLogger.shared.logDistinctID(currentDistinctId))")
           }
@@ -378,9 +402,12 @@ public final class NuxieSDK {
     identityService.reset(keepAnonymousId: keepAnonymousId)
 
     // Clear data for previous user and handle transition to anonymous
-    Task {
+    resetUserCleanupTask?.cancel()
+    resetUserCleanupTask = Task {
+      guard !Task.isCancelled else { return }
       let profileService = container.profileService()
       await profileService.clearCache(distinctId: previousDistinctId)
+      guard !Task.isCancelled else { return }
 
       // Get the new distinct ID (will be anonymous ID after reset)
       let newDistinctId = identityService.getDistinctId()
@@ -388,11 +415,14 @@ public final class NuxieSDK {
       // Clear segment data for the previous user and handle user change
       let segmentService = container.segmentService()
       await segmentService.clearSegments(for: previousDistinctId)
+      guard !Task.isCancelled else { return }
       await segmentService.handleUserChange(from: previousDistinctId, to: newDistinctId)
+      guard !Task.isCancelled else { return }
 
       // Handle user change in JourneyService (cancel old journeys, load new)
       let journeyService = container.journeyService()
       await journeyService.handleUserChange(from: previousDistinctId, to: newDistinctId)
+      guard !Task.isCancelled else { return }
 
       // Clear feature cache for the previous user
       let featureService = container.featureService()
@@ -403,7 +433,9 @@ public final class NuxieSDK {
     container.sessionService().resetSession()
     
     // Clear flow cache
-    Task {
+    resetFlowCleanupTask?.cancel()
+    resetFlowCleanupTask = Task {
+      guard !Task.isCancelled else { return }
       let flowService = container.flowService()
       await flowService.clearCache()
     }

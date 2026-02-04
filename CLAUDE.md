@@ -30,7 +30,10 @@ packages/nuxie-ios/
 │   │   ├── NuxieNetworkError.swift  # Network errors
 │   │   └── Models/        # Request/response models
 │   └── Extensions/        # Swift extensions
-├── Tests/NuxieTests/      # Unit tests (Quick/Nimble)
+├── Tests/NuxieUnitTests/        # Unit tests (Quick/Nimble)
+├── Tests/NuxieIntegrationTests/ # Integration tests
+├── Tests/NuxieE2ETests/         # End-to-end tests (WebKit/UI)
+├── Tests/NuxieTestSupport/      # Shared mocks + utilities
 ├── Examples/DemoApp/      # Example iOS app
 └── Package.swift          # Swift Package Manager config
 ```
@@ -192,7 +195,7 @@ actor MockAPI: APIProtocol {
 - Use custom database paths for EventStoreManager tests
 - Test both success and failure scenarios
 - Verify DI container service resolution
-- Run tests with `make test` (iOS Simulator)
+- Run unit tests with `make test` (or `make test-unit`)
 
 ## Configuration Management
 
@@ -415,9 +418,12 @@ Use the Makefile for all development tasks:
 - `make generate` - Generate Xcode project using XcodeGen
 
 ### Testing
-- `make test` - Run tests on iOS Simulator (default)
-- `make test-ios` - Run tests on iOS Simulator
-- `make test-macos` - Run tests on macOS using swift test
+- `make test` - Run unit tests on iOS Simulator (default)
+- `make test-unit` - Run unit tests
+- `make test-integration` - Run integration tests
+- `make test-e2e` - Run end-to-end tests
+- `make test-all` - Run unit + integration + e2e tests
+- `make test-ios` - Alias for `make test`
 
 ### Cleanup
 - `make clean` - Remove generated Xcode project files and build artifacts
@@ -539,8 +545,10 @@ it("should handle concurrent access") {
 
 ### Running Tests
 
-- `make test` - Run all tests on iOS Simulator
-- `make test-ios` - Explicitly run on iOS Simulator  
+- `make test` - Run unit tests on iOS Simulator (default)
+- `make test-integration` - Run integration tests on iOS Simulator
+- `make test-e2e` - Run end-to-end tests on iOS Simulator
+- `make test-all` - Run unit + integration + e2e tests on iOS Simulator
 - `make coverage` - Run with code coverage
 - `make coverage-html` - Generate HTML coverage report
 

@@ -41,12 +41,13 @@ public class FlowWebView: WKWebView {
         configuration.setURLSchemeHandler(schemeHandler, forURLScheme: "nuxie-font")
         self.fontSchemeHandler = schemeHandler
         
-        // Initialize the web view first
-        super.init(frame: .zero, configuration: configuration)
-        
-        // Now create message handler with self reference and add it
-        self.messageHandler = FlowMessageHandler(delegate: messageHandlerDelegate, webView: self)
+        let messageHandler = FlowMessageHandler(delegate: messageHandlerDelegate)
         configuration.userContentController.add(messageHandler, name: "bridge")
+        self.messageHandler = messageHandler
+
+        super.init(frame: .zero, configuration: configuration)
+
+        self.messageHandler.webView = self
         
         setupWebView()
     }

@@ -173,6 +173,8 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                       el.textContent = String(value);
                                     }
                                   } catch (e) {}
+                                  }
+                                } catch (e) {}
                                 }
 
                                 window.nuxie = {
