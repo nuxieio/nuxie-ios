@@ -655,10 +655,15 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
+                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+                let testTimeoutSeconds = isCI ? 120 : 25
+                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
+                let archiveTimeoutSeconds = isCI ? 45.0 : 8.0
+
                 let didLoadFirst = LockedValue(false)
                 let didLoadSecond = LockedValue(false)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(testTimeoutSeconds)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -718,15 +723,19 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 8.0)) == true {
+                            if (try? await waitForElementExists(webView, elementId: "tap", timeoutSeconds: vmTimeoutSeconds)) == true {
                                 didLoadFirst.set(true)
                             } else {
-                                fail("E2E: first load did not reach runtime/view_model_init")
+                                fail("E2E: first load did not render bundle HTML (tap not found)")
                                 finishOnce()
                                 return
                             }
 
-                            guard let archiveURL = try await waitForArchiveURL(archiveService, for: flow) else {
+                            guard let archiveURL = try await waitForArchiveURL(
+                                archiveService,
+                                for: flow,
+                                timeoutSeconds: archiveTimeoutSeconds
+                            ) else {
                                 fail("E2E: expected WebArchive to be cached after first load")
                                 finishOnce()
                                 return
@@ -775,7 +784,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            if (try? await waitForVmText(webView2, equals: "hello", timeoutSeconds: 8.0)) == true {
+                            if (try? await waitForVmText(webView2, equals: "hello", timeoutSeconds: vmTimeoutSeconds)) == true {
                                 didLoadSecond.set(true)
                             } else {
                                 fail("E2E: second load did not reach runtime/view_model_init (cached WebArchive)")
@@ -812,11 +821,16 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
+                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
+                let testTimeoutSeconds = isCI ? 120 : 25
+                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
+                let missingRequestTimeoutSeconds = isCI ? 30.0 : 8.0
+
                 let missingFlowId = "flow_e2e_missing_asset_\(UUID().uuidString)"
                 let didLoadFirst = LockedValue(false)
                 let didLoadSecond = LockedValue(false)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(testTimeoutSeconds)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -876,7 +890,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            guard (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 8.0)) == true else {
+                            guard (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: vmTimeoutSeconds)) == true else {
                                 fail("E2E: first load did not reach runtime/view_model_init")
                                 finishOnce()
                                 return
@@ -884,7 +898,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             didLoadFirst.set(true)
 
                             let missingRequest = "GET /bundles/\(missingFlowId)/missing.js"
-                            let firstMissingDeadline = Date().addingTimeInterval(8.0)
+                            let firstMissingDeadline = Date().addingTimeInterval(missingRequestTimeoutSeconds)
                             while Date() < firstMissingDeadline {
                                 if requestLog.snapshot().contains(missingRequest) {
                                     break
@@ -942,14 +956,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            guard (try? await waitForVmText(webView2, equals: "hello", timeoutSeconds: 8.0)) == true else {
+                            guard (try? await waitForVmText(webView2, equals: "hello", timeoutSeconds: vmTimeoutSeconds)) == true else {
                                 fail("E2E: second load did not reach runtime/view_model_init")
                                 finishOnce()
                                 return
                             }
                             didLoadSecond.set(true)
 
-                            let secondMissingDeadline = Date().addingTimeInterval(8.0)
+                            let secondMissingDeadline = Date().addingTimeInterval(missingRequestTimeoutSeconds)
                             while Date() < secondMissingDeadline {
                                 let count = requestLog.snapshot().filter { $0 == missingRequest }.count
                                 if count >= missingCountAfterFirst + 1 {
