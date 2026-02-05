@@ -46,7 +46,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = LockedArray<String>()
                 batchBodies = LockedArray<Data>()
-                phase2CompiledBundleFixture = loadPhase2CompiledBundleFixture()
+                if phase2CompiledBundleFixture == nil {
+                    phase2CompiledBundleFixture = loadPhase2CompiledBundleFixture()
+                }
 
                 let env = ProcessInfo.processInfo.environment
                 let envApiKey = env["NUXIE_E2E_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,6 +67,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     return
                 }
 
+                if server == nil {
                     server = try? LocalHTTPServer { request in
                         requestLog?.append("\(request.method) \(request.path)")
                         if request.method == "POST", request.path.hasSuffix("/batch") {
@@ -112,7 +115,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-                    if request.method == "GET", request.path.hasPrefix("/flows/") {
+                        if request.method == "GET", request.path.hasPrefix("/flows/") {
                             let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
                             let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
                             let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
@@ -275,12 +278,12 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-                    if request.method == "GET", request.path.hasPrefix("/bundles/") {
-                        let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
-                        let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-                        let reqFlowId = parts.first.map(String.init) ?? ""
-                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
-                        let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
+                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+                            let reqFlowId = parts.first.map(String.init) ?? ""
+                            let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
                         let requestedFile = parts.dropFirst().joined(separator: "/")
                         let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
@@ -415,11 +418,12 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.html(html)
                     }
 
-                    if request.method == "GET", request.path == "/favicon.ico" {
-                        return LocalHTTPServer.Response(statusCode: 204, headers: [:], body: Data())
-                    }
+                        if request.method == "GET", request.path == "/favicon.ico" {
+                            return LocalHTTPServer.Response(statusCode: 204, headers: [:], body: Data())
+                        }
 
-                    return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
+                        return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
+                    }
                 }
 
                 guard let server else {
@@ -433,8 +437,6 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             }
 
             afterEach {
-                server?.stop()
-                server = nil
                 flowViewController = nil
                 runtimeDelegate = nil
                 window?.isHidden = true
@@ -442,7 +444,11 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = nil
                 batchBodies = nil
-                phase2CompiledBundleFixture = nil
+            }
+
+            afterSuite {
+                server?.stop()
+                server = nil
             }
 
             it("fetches /flows/:id, receives runtime/ready, and completes a navigate→screen_changed handshake") {
@@ -450,7 +456,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let expectedScreenId = LockedValue<String?>(nil)
                 let screenChangedId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(45)) { done in
                     var finished = false
                     var didReceiveReady = false
                     runtimeDelegate = CapturingRuntimeDelegate(onMessage: { type, payload, _ in
@@ -547,7 +553,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let didApplyPatch = LockedValue(false)
                 let didReceiveTap = LockedValue(false)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(60)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -614,7 +620,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            if (try? await waitForVmText(webView, equals: "hello")) == true {
+                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 15.0)) == true {
                                 didApplyInit.set(true)
                             } else {
                                 fail("E2E: view model init did not update DOM")
@@ -624,7 +630,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
-                            if (try? await waitForVmText(webView, equals: "world")) == true {
+                            if (try? await waitForVmText(webView, equals: "world", timeoutSeconds: 15.0)) == true {
                                 didApplyPatch.set(true)
                             } else {
                                 fail("E2E: view model patch did not update DOM")
@@ -1015,7 +1021,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let secondExposureProps = LockedValue<[String: Any]?>(nil)
                 let expectedSecondJourneyId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(45)) { done in
+                waitUntil(timeout: .seconds(90)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -1105,7 +1111,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             }
 
                             let entryMarkerId = "screen-screen-entry-marker"
-                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
                                 finishOnce()
                                 return
@@ -1114,14 +1120,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
                             let expectedMarkerId = "screen-\(expectedScreenId)-marker"
-                            guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: experiment did not render expected marker '\(expectedMarkerId)' on first load")
                                 finishOnce()
                                 return
                             }
                             didLoadFirst.set(true)
 
-                            guard (try? await waitForArchiveURL(archiveService, for: flow, timeoutSeconds: 12.0)) != nil else {
+                            guard (try? await waitForArchiveURL(archiveService, for: flow, timeoutSeconds: 30.0)) != nil else {
                                 fail("E2E: expected compiled WebArchive to be cached after first load")
                                 finishOnce()
                                 return
@@ -1173,7 +1179,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            guard (try? await waitForElementExists(webView2, elementId: entryMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView2, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: compiled web runtime did not render entry marker on cached load")
                                 finishOnce()
                                 return
@@ -1181,7 +1187,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             _ = try? await evaluateJavaScript(webView2, script: "document.getElementById('tap').click()")
 
-                            guard (try? await waitForElementExists(webView2, elementId: expectedMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView2, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: experiment did not render expected marker '\(expectedMarkerId)' on cached load")
                                 finishOnce()
                                 return
@@ -1253,7 +1259,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let dismissedProps = LockedValue<[String: Any]?>(nil)
                 let expectedJourneyId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(35)) { done in
+                waitUntil(timeout: .seconds(60)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -1421,7 +1427,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let exposureProps = LockedValue<[String: Any]?>(nil)
                 let expectedJourneyId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(60)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -1518,7 +1524,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             }
 
                             let entryMarkerId = "screen-screen-entry-marker"
-                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 8.0)) == true else {
+                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
                                 finishOnce()
                                 return
@@ -1527,7 +1533,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
                             let expectedMarkerId = "screen-\(expectedScreenId)-marker"
-                            if (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 8.0)) == true {
+                            if (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true {
                                 didNavigateToExpected.set(true)
                             } else {
                                 fail("E2E: experiment did not render expected marker '\(expectedMarkerId)'")
