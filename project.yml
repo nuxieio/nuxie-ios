@@ -99,7 +99,7 @@ targets:
       - path: Tests/NuxieTestSupport
         name: NuxieTestSupport
     resources:
-      - path: Tests/NuxieE2ETests/Fixtures/phase2-compiled-bundle
+      - path: Tests/NuxieE2ETests/Fixtures/experiment-ab-compiled-bundle
         type: folder
     dependencies:
       - target: NuxieSDK
