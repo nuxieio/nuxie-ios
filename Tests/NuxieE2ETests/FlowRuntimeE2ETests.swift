@@ -178,6 +178,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
 				                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
+				                            let isListOpsFlow = reqFlowId.hasPrefix("flow_e2e_list_ops_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
 				                            let isCompiledBundleFlow = isExperimentAbFlow
 				                                || isCompiledViewModelFlow
@@ -187,6 +188,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                || isRestoreFlow
 				                                || isNavStackFlow
 				                                || isCustomerUpdateEventFlow
+				                                || isListOpsFlow
 				                            let host = request.headers["host"] ?? "127.0.0.1"
 				                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
 				                        // match real bundle shapes (base URL + manifest-relative paths).
@@ -217,6 +219,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                contentHashPrefix = "e2e-nav-stack-compiled"
 			                            } else if isCustomerUpdateEventFlow {
 			                                contentHashPrefix = "e2e-customer-update-event-compiled"
+			                            } else if isListOpsFlow {
+			                                contentHashPrefix = "e2e-list-ops-compiled"
 			                            } else {
 			                                contentHashPrefix = "e2e-compiled"
 			                            }
@@ -612,6 +616,158 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
+			                        } else if isListOpsFlow {
+			                            let itemOne: [String: Any] = [
+			                                "viewModelId": "vm-item",
+			                                "instanceId": "item-1",
+			                                "values": ["label": "one"]
+			                            ]
+			                            let itemTwo: [String: Any] = [
+			                                "viewModelId": "vm-item",
+			                                "instanceId": "item-2",
+			                                "values": ["label": "two"]
+			                            ]
+			                            let itemThree: [String: Any] = [
+			                                "viewModelId": "vm-item",
+			                                "instanceId": "item-3",
+			                                "values": ["label": "three"]
+			                            ]
+
+			                            let listPath = VmPathRef.ids(VmPathIds(pathIds: [0, 3]))
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: "vm-1",
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "list-insert": [
+			                                        Interaction(
+			                                            id: "int-list-insert",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .listInsert(
+			                                                    ListInsertAction(
+			                                                        path: listPath,
+			                                                        index: 1,
+			                                                        value: AnyCodable(
+			                                                            ["literal": itemThree] as [String: Any]
+			                                                        )
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ],
+			                                    "list-move": [
+			                                        Interaction(
+			                                            id: "int-list-move",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .listMove(
+			                                                    ListMoveAction(
+			                                                        path: listPath,
+			                                                        from: 2,
+			                                                        to: 0
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ],
+			                                    "list-remove": [
+			                                        Interaction(
+			                                            id: "int-list-remove",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .listRemove(
+			                                                    ListRemoveAction(
+			                                                        path: listPath,
+			                                                        index: 1
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [
+			                                    ViewModel(
+			                                        id: "vm-1",
+			                                        name: "VM",
+			                                        viewModelPathId: 0,
+			                                        properties: [
+			                                            "title": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 1,
+			                                                defaultValue: AnyCodable("hello"),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            ),
+			                                            "didSetAck": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 2,
+			                                                defaultValue: AnyCodable(""),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            ),
+			                                            "items": ViewModelProperty(
+			                                                type: .list,
+			                                                propertyId: 3,
+			                                                defaultValue: AnyCodable([itemOne, itemTwo] as [Any]),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: ViewModelProperty(
+			                                                    type: .viewModel,
+			                                                    propertyId: nil,
+			                                                    defaultValue: nil,
+			                                                    required: nil,
+			                                                    enumValues: nil,
+			                                                    itemType: nil,
+			                                                    schema: nil,
+			                                                    viewModelId: "vm-item",
+			                                                    validation: nil
+			                                                ),
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            )
+			                                        ]
+			                                    ),
+			                                    ViewModel(
+			                                        id: "vm-item",
+			                                        name: "Item",
+			                                        viewModelPathId: 1,
+			                                        properties: [
+			                                            "label": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 1,
+			                                                defaultValue: AnyCodable(""),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            )
+			                                        ]
+			                                    )
+			                                ],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
 			                        } else {
 			                            remoteFlow = RemoteFlow(
 			                                id: reqFlowId,
@@ -682,6 +838,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
 				                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
+				                            let isListOpsFlow = reqFlowId.hasPrefix("flow_e2e_list_ops_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
 				                            let isCompiledBundleFlow = isExperimentAbFlow
 				                                || isCompiledViewModelFlow
@@ -691,6 +848,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                || isRestoreFlow
 				                                || isNavStackFlow
 				                                || isCustomerUpdateEventFlow
+				                                || isListOpsFlow
 				                        let requestedFile = parts.dropFirst().joined(separator: "/")
 				                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
@@ -1339,6 +1497,158 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/did_set") })).to(beTrue())
 	                expect(didReceiveDidSet.get()).to(beTrue())
 	                expect(didApplyDidSetAck.get()).to(beTrue())
+	            }
+
+	            it("applies list operations (insert/move/remove) in the compiled web runtime (fixture mode)") {
+	                guard server != nil else { return }
+	                guard isEnabled("NUXIE_E2E_ENABLE_VIEWMODELS", legacyKeys: ["NUXIE_E2E_PHASE1"]) else { return }
+	                guard experimentAbCompiledBundleFixture != nil else {
+	                    fail("E2E: missing compiled bundle fixture")
+	                    return
+	                }
+
+	                let flowId = "flow_e2e_list_ops_\(UUID().uuidString)"
+	                let distinctId = "e2e-user-list-ops-1"
+
+	                let messages = LockedArray<String>()
+	                let didReceiveInsertTap = LockedValue(false)
+	                let didReceiveMoveTap = LockedValue(false)
+	                let didReceiveRemoveTap = LockedValue(false)
+
+	                waitUntil(timeout: .seconds(60)) { done in
+	                    var finished = false
+
+	                    func finishOnce() {
+	                        guard !finished else { return }
+	                        finished = true
+	                        done()
+	                    }
+
+	                    Task {
+	                        do {
+	                            Container.shared.reset()
+	                            let config = NuxieConfiguration(apiKey: apiKey)
+	                            config.apiEndpoint = baseURL
+	                            config.enablePlugins = false
+	                            config.customStoragePath = FileManager.default.temporaryDirectory
+	                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                            Container.shared.sdkConfiguration.register { config }
+	                            Container.shared.eventService.register { MockEventService() }
+
+	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                            let remoteFlow = try await api.fetchFlow(flowId: flowId)
+	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                            let archiveService = FlowArchiver()
+	                            await archiveService.removeArchive(for: flow.id)
+
+	                            await MainActor.run {
+	                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                let campaign = makeCampaign(flowId: flowId)
+	                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                runner.attach(viewController: vc)
+
+	                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
+	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
+	                                    messages.append("\(type) keys=[\(payloadKeys)]")
+	                                    if type == "action/tap" {
+	                                        let componentId = (payload["componentId"] as? String) ?? (payload["elementId"] as? String)
+	                                        switch componentId {
+	                                        case "list-insert":
+	                                            didReceiveInsertTap.set(true)
+	                                        case "list-move":
+	                                            didReceiveMoveTap.set(true)
+	                                        case "list-remove":
+	                                            didReceiveRemoveTap.set(true)
+	                                        default:
+	                                            break
+	                                        }
+	                                    }
+	                                }
+	                                runtimeDelegate = delegate
+	                                vc.runtimeDelegate = delegate
+	                                flowViewController = vc
+
+	                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                testWindow.rootViewController = vc
+	                                testWindow.makeKeyAndVisible()
+	                                window = testWindow
+	                                _ = vc.view
+	                            }
+
+	                            guard let vc = flowViewController else {
+	                                fail("E2E: FlowViewController/webView was not created")
+	                                finishOnce()
+	                                return
+	                            }
+	                            let webView = await MainActor.run { vc.flowWebView }
+	                            guard let webView else {
+	                                fail("E2E: FlowViewController/webView was not created")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            let entryMarkerId = "screen-screen-entry-marker"
+	                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            guard (try? await waitForElementExists(webView, elementId: "list-items", timeoutSeconds: 20.0)) == true else {
+	                                fail("E2E: compiled web runtime did not render list-items")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            guard (try? await waitForListItems(webView, containerId: "list-items", equals: ["one", "two"], timeoutSeconds: 30.0)) == true else {
+	                                fail("E2E: initial list items did not render")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('list-insert') && document.getElementById('list-insert').click()")
+	                            guard (try? await waitForListItems(webView, containerId: "list-items", equals: ["one", "three", "two"], timeoutSeconds: 30.0)) == true else {
+	                                fail("E2E: list insert did not update DOM")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('list-move') && document.getElementById('list-move').click()")
+	                            guard (try? await waitForListItems(webView, containerId: "list-items", equals: ["two", "one", "three"], timeoutSeconds: 30.0)) == true else {
+	                                fail("E2E: list move did not update DOM")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('list-remove') && document.getElementById('list-remove').click()")
+	                            guard (try? await waitForListItems(webView, containerId: "list-items", equals: ["two", "three"], timeoutSeconds: 30.0)) == true else {
+	                                fail("E2E: list remove did not update DOM")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            if didReceiveInsertTap.get(), didReceiveMoveTap.get(), didReceiveRemoveTap.get() {
+	                                finishOnce()
+	                            } else {
+	                                fail("E2E: did not observe expected action/tap messages for list ops")
+	                                finishOnce()
+	                            }
+	                        } catch {
+	                            fail("E2E setup failed: \(error)")
+	                            finishOnce()
+	                        }
+	                    }
+	                }
+
+	                let messagesSnapshot = messages.snapshot()
+	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
+	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
+	                expect(didReceiveInsertTap.get()).to(beTrue())
+	                expect(didReceiveMoveTap.get()).to(beTrue())
+	                expect(didReceiveRemoveTap.get()).to(beTrue())
 	            }
 
 	            it("caches and loads a WebArchive on the next load (fixture mode)") {
@@ -2750,7 +3060,12 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                 }
 
                                 await eventService.drain()
-                                let queuedCount = await eventService.getQueuedEventCount()
+                                let queuedDeadline = Date().addingTimeInterval(5.0)
+                                var queuedCount = await eventService.getQueuedEventCount()
+                                while queuedCount == 0, Date() < queuedDeadline {
+                                    try await Task.sleep(nanoseconds: 50_000_000)
+                                    queuedCount = await eventService.getQueuedEventCount()
+                                }
                                 if queuedCount == 0 {
                                     let recentNames = await eventService.getRecentEvents(limit: 20).map(\.name)
                                     let requests = requestLog.snapshot()
@@ -3696,6 +4011,42 @@ private func waitForVmText(_ webView: FlowWebView, equals expected: String, time
                 script: "document.getElementById('vm-text') && document.getElementById('vm-text').textContent"
             ) as? String
             if value == expected {
+                return true
+            }
+        } catch {
+            // Ignore transient WebKit errors while the page is still loading.
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return false
+}
+
+@MainActor
+private func waitForListItems(
+    _ webView: FlowWebView,
+    containerId: String,
+    equals expected: [String],
+    timeoutSeconds: Double = 3.0
+) async throws -> Bool {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    let quoted = jsStringLiteral(containerId)
+    let expectedJoined = expected.joined(separator: "|")
+
+    let script = """
+    (function(){
+      var root = document.getElementById(\(quoted));
+      if (!root) return null;
+      var items = Array.from(root.querySelectorAll('[data-e2e=\"list-item\"]')).map(function(el){
+        return (el && el.textContent ? String(el.textContent).trim() : '').trim();
+      }).filter(function(v){ return v.length > 0; });
+      return items.join('|');
+    })();
+    """
+
+    while Date() < deadline {
+        do {
+            let value = try await evaluateJavaScript(webView, script: script) as? String
+            if value == expectedJoined {
                 return true
             }
         } catch {
