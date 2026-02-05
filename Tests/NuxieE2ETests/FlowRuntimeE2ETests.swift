@@ -144,30 +144,38 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-	                        if request.method == "GET", request.path.hasPrefix("/flows/") {
-	                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-	                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-	                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-	                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-	                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow
-	                            let host = request.headers["host"] ?? "127.0.0.1"
-	                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
-	                        // match real bundle shapes (base URL + manifest-relative paths).
-	                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
+		                        if request.method == "GET", request.path.hasPrefix("/flows/") {
+		                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+		                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+		                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+		                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+		                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+		                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow || isRestoreFlow
+		                            let host = request.headers["host"] ?? "127.0.0.1"
+		                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
+		                        // match real bundle shapes (base URL + manifest-relative paths).
+		                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
 	                        let manifest: BuildManifest
-	                        if isCompiledBundleFlow {
-	                            guard let fixture = experimentAbCompiledBundleFixture else {
-	                                return LocalHTTPServer.Response.text(
-	                                    "Missing compiled bundle fixture",
-	                                    statusCode: 500
-	                                )
-	                            }
-	                            let contentHashPrefix = isExperimentAbFlow ? "e2e-experiment-ab-compiled" : "e2e-purchase-compiled"
-	                            manifest = BuildManifest(
-	                                totalFiles: fixture.buildFiles.count,
-	                                totalSize: fixture.totalSize,
-	                                contentHash: "\(contentHashPrefix)-\(reqFlowId)",
+		                        if isCompiledBundleFlow {
+		                            guard let fixture = experimentAbCompiledBundleFixture else {
+		                                return LocalHTTPServer.Response.text(
+		                                    "Missing compiled bundle fixture",
+		                                    statusCode: 500
+		                                )
+		                            }
+		                            let contentHashPrefix: String
+		                            if isExperimentAbFlow {
+		                                contentHashPrefix = "e2e-experiment-ab-compiled"
+		                            } else if isPurchaseFlow {
+		                                contentHashPrefix = "e2e-purchase-compiled"
+		                            } else {
+		                                contentHashPrefix = "e2e-restore-compiled"
+		                            }
+		                            manifest = BuildManifest(
+		                                totalFiles: fixture.buildFiles.count,
+		                                totalSize: fixture.totalSize,
+		                                contentHash: "\(contentHashPrefix)-\(reqFlowId)",
 	                                files: fixture.buildFiles
 	                            )
 	                        } else {
@@ -248,11 +256,11 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                         )
                                     ]
                                 ],
-	                                viewModels: [],
-	                                viewModelInstances: nil,
-	                                converters: nil
-	                            )
-	                        } else if isPurchaseFlow {
+		                                viewModels: [],
+		                                viewModelInstances: nil,
+		                                converters: nil
+		                            )
+		                        } else if isPurchaseFlow {
 	                            remoteFlow = RemoteFlow(
 	                                id: reqFlowId,
 	                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
@@ -280,14 +288,41 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                        )
 	                                    ]
 	                                ],
-	                                viewModels: [],
-	                                viewModelInstances: nil,
-	                                converters: nil
-	                            )
-	                        } else {
-	                            remoteFlow = RemoteFlow(
-	                                id: reqFlowId,
-	                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+		                                viewModels: [],
+		                                viewModelInstances: nil,
+		                                converters: nil
+		                            )
+		                        } else if isRestoreFlow {
+		                            remoteFlow = RemoteFlow(
+		                                id: reqFlowId,
+		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+		                                screens: [
+		                                    RemoteFlowScreen(
+		                                        id: "screen-entry",
+		                                        defaultViewModelId: nil,
+		                                        defaultInstanceId: nil
+		                                    )
+		                                ],
+		                                interactions: [
+		                                    "tap": [
+		                                        Interaction(
+		                                            id: "int-tap",
+		                                            trigger: .tap,
+		                                            actions: [
+		                                                .restore(RestoreAction())
+		                                            ],
+		                                            enabled: true
+		                                        )
+		                                    ]
+		                                ],
+		                                viewModels: [],
+		                                viewModelInstances: nil,
+		                                converters: nil
+		                            )
+		                        } else {
+		                            remoteFlow = RemoteFlow(
+		                                id: reqFlowId,
+		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
 	                                screens: [
                                     RemoteFlowScreen(
                                         id: "screen-1",
@@ -342,18 +377,19 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
-	                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
-	                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-	                            let reqFlowId = parts.first.map(String.init) ?? ""
-	                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-	                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-	                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-	                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow
-	                        let requestedFile = parts.dropFirst().joined(separator: "/")
-	                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
+		                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
+		                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+		                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+		                            let reqFlowId = parts.first.map(String.init) ?? ""
+		                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+		                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+		                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+		                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+		                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow || isRestoreFlow
+		                        let requestedFile = parts.dropFirst().joined(separator: "/")
+		                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
-	                        if isCompiledBundleFlow {
+		                        if isCompiledBundleFlow {
 	                            guard let fixture = experimentAbCompiledBundleFixture else {
 	                                return LocalHTTPServer.Response.text(
 	                                    "Missing compiled bundle fixture",
@@ -1956,6 +1992,215 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                expect(didPostPurchase.get()).to(beTrue())
 	                expect(didPostPurchaseCompletedEvent.get()).to(beTrue())
 	                expect(didPostPurchaseSyncedEvent.get()).to(beTrue())
+	            }
+
+	            it("executes restore (tap→restore) and confirms host/web + analytics (fixture mode)") {
+	                guard let eventBodies else { return }
+	                guard server != nil else { return }
+	                guard isEnabled("NUXIE_E2E_ENABLE_PURCHASES") else { return }
+	                guard experimentAbCompiledBundleFixture != nil else {
+	                    fail("E2E: missing compiled bundle fixture")
+	                    return
+	                }
+
+	                let restoreFlowId = "flow_e2e_restore_\(UUID().uuidString)"
+	                let distinctId = "e2e-user-restore-1"
+
+	                let messages = LockedArray<String>()
+	                let didReceiveTap = LockedValue(false)
+	                let didSeeRestoreSuccess = LockedValue(false)
+	                let didPostRestoreCompletedEvent = LockedValue(false)
+
+	                waitUntil(timeout: .seconds(90)) { done in
+	                    var finished = false
+
+	                    func finishOnce() {
+	                        guard !finished else { return }
+	                        finished = true
+	                        done()
+	                    }
+
+	                    func shutdownAndFinish(_ message: String? = nil) async {
+	                        await NuxieSDK.shared.shutdown()
+	                        if let message {
+	                            fail(message)
+	                        }
+	                        finishOnce()
+	                    }
+
+	                    Task {
+	                        do {
+	                            await NuxieSDK.shared.shutdown()
+	                            Container.shared.reset()
+
+	                            let storagePath = FileManager.default.temporaryDirectory
+	                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+
+	                            let config = NuxieConfiguration(apiKey: apiKey)
+	                            config.apiEndpoint = baseURL
+	                            config.enablePlugins = false
+	                            config.customStoragePath = storagePath
+
+	                            let purchaseDelegate = MockPurchaseDelegate()
+	                            purchaseDelegate.simulatedDelay = 0
+	                            purchaseDelegate.restoreResult = .success(restoredCount: 1)
+	                            config.purchaseDelegate = purchaseDelegate
+
+	                            try NuxieSDK.shared.setup(with: config)
+
+	                            let identityService = Container.shared.identityService()
+	                            identityService.setDistinctId(distinctId)
+
+	                            _ = await Container.shared.eventService().getRecentEvents(limit: 1)
+
+	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                            let remoteFlow = try await api.fetchFlow(flowId: restoreFlowId)
+	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                            let archiveService = FlowArchiver()
+	                            await archiveService.removeArchive(for: flow.id)
+
+	                            await MainActor.run {
+	                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                let campaign = makeCampaign(flowId: restoreFlowId)
+	                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+
+	                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                runner.attach(viewController: vc)
+
+	                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
+	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
+	                                    messages.append("\(type) keys=[\(payloadKeys)]")
+	                                    if type == "action/tap" {
+	                                        didReceiveTap.set(true)
+	                                    }
+	                                }
+	                                runtimeDelegate = delegate
+	                                vc.runtimeDelegate = delegate
+	                                flowViewController = vc
+
+	                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                testWindow.rootViewController = vc
+	                                testWindow.makeKeyAndVisible()
+	                                window = testWindow
+	                                _ = vc.view
+	                            }
+
+	                            guard let vc = flowViewController else {
+	                                await shutdownAndFinish("E2E: FlowViewController/webView was not created")
+	                                return
+	                            }
+	                            let webView = await MainActor.run { vc.flowWebView }
+	                            guard let webView else {
+	                                await shutdownAndFinish("E2E: FlowViewController/webView was not created")
+	                                return
+	                            }
+
+	                            let entryMarkerId = "screen-screen-entry-marker"
+	                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                await shutdownAndFinish(
+	                                    "E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'"
+	                                )
+	                                return
+	                            }
+
+	                            let installHostMessageLogger = """
+	                            (function(){
+	                              try {
+	                                window.__hostMessages = window.__hostMessages || [];
+	                                function wrap(){
+	                                  if (!window.nuxie || typeof window.nuxie._handleHostMessage !== 'function') return false;
+	                                  if (window.nuxie._handleHostMessage && window.nuxie._handleHostMessage.__e2eWrapped) return true;
+	                                  var original = window.nuxie._handleHostMessage;
+	                                  function wrapped(envelope){
+	                                    try { window.__hostMessages.push(envelope); } catch (e) {}
+	                                    return original.apply(this, arguments);
+	                                  }
+	                                  wrapped.__e2eWrapped = true;
+	                                  window.nuxie._handleHostMessage = wrapped;
+	                                  return true;
+	                                }
+	                                if (wrap()) return true;
+	                                if (!window.__e2eHostWrapTimer) {
+	                                  window.__e2eHostWrapTimer = setInterval(function(){
+	                                    if (wrap()) { clearInterval(window.__e2eHostWrapTimer); window.__e2eHostWrapTimer = null; }
+	                                  }, 50);
+	                                }
+	                              } catch (e) {}
+	                              return false;
+	                            })();
+	                            """
+	                            _ = try? await evaluateJavaScript(webView, script: installHostMessageLogger)
+
+	                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+	                            let deadline = Date().addingTimeInterval(20.0)
+	                            while Date() < deadline {
+	                                let checkHostMessages = """
+	                                (function(){
+	                                  try {
+	                                    var msgs = window.__hostMessages || [];
+	                                    var hasRestore = msgs.some(function(m){
+	                                      return m && m.type === "restore_success";
+	                                    });
+	                                    return { restoreSuccess: hasRestore, count: msgs.length };
+	                                  } catch (e) { return { restoreSuccess: false, count: -1 }; }
+	                                })();
+	                                """
+	                                if let dict = (try? await evaluateJavaScript(webView, script: checkHostMessages)) as? [String: Any] {
+	                                    if (dict["restoreSuccess"] as? Bool) == true { didSeeRestoreSuccess.set(true) }
+	                                }
+
+	                                let bodies = eventBodies.snapshot()
+	                                for body in bodies {
+	                                    guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { continue }
+	                                    guard (root["event"] as? String) == SystemEventNames.restoreCompleted else { continue }
+	                                    guard (root["distinct_id"] as? String) == distinctId else { continue }
+	                                    if let props = root["properties"] as? [String: Any] {
+	                                        let value = props["restored_count"]
+	                                        if (value as? Int) == 1 || (value as? Double) == 1 {
+	                                            didPostRestoreCompletedEvent.set(true)
+	                                        }
+	                                    }
+	                                }
+
+	                                if didSeeRestoreSuccess.get(), didPostRestoreCompletedEvent.get() {
+	                                    break
+	                                }
+
+	                                try await Task.sleep(nanoseconds: 50_000_000)
+	                            }
+
+	                            if !didSeeRestoreSuccess.get() || !didPostRestoreCompletedEvent.get() {
+	                                let hostTypesScript = """
+	                                (function(){
+	                                  try {
+	                                    return (window.__hostMessages || []).map(function(m){ return m && m.type; }).join(",");
+	                                  } catch (e) { return ""; }
+	                                })();
+	                                """
+	                                let hostTypes = (try? await evaluateJavaScript(webView, script: hostTypesScript)) as? String ?? ""
+	                                let eventNames = eventBodies.snapshot().compactMap { body -> String? in
+	                                    guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { return nil }
+	                                    return root["event"] as? String
+	                                }
+	                                await shutdownAndFinish(
+	                                    "E2E: restore did not complete; host=[\(hostTypes)] events=\(eventNames) messages=\(messages.snapshot())"
+	                                )
+	                                return
+	                            }
+
+	                            await shutdownAndFinish()
+	                        } catch {
+	                            await shutdownAndFinish("E2E setup failed: \(error)")
+	                        }
+	                    }
+	                }
+
+	                expect(didReceiveTap.get()).to(beTrue())
+	                expect(didSeeRestoreSuccess.get()).to(beTrue())
+	                expect(didPostRestoreCompletedEvent.get()).to(beTrue())
 	            }
 	            }
 	        }
