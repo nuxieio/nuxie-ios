@@ -92,6 +92,30 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                        if request.method == "POST", request.path == "/event" {
 	                            eventBodies?.append(request.body)
 
+	                            var execution: EventResponse.ExecutionResult?
+	                            if
+	                                let root = decodeMaybeGzippedJSON(request.body) as? [String: Any],
+	                                let eventName = root["event"] as? String,
+	                                eventName == "$journey_node_executed"
+	                            {
+	                                var updates: [String: AnyCodable]?
+	                                if
+	                                    let props = root["properties"] as? [String: Any],
+	                                    let nodeData = props["node_data"] as? [String: Any],
+	                                    let nodePayload = nodeData["data"] as? [String: Any],
+	                                    let action = nodePayload["action"] as? String,
+	                                    action == "set_context"
+	                                {
+	                                    updates = ["remote_key": AnyCodable("remote_value")]
+	                                }
+	                                execution = EventResponse.ExecutionResult(
+	                                    success: true,
+	                                    statusCode: 200,
+	                                    error: nil,
+	                                    contextUpdates: updates
+	                                )
+	                            }
+
 	                            let response = EventResponse(
 	                                status: "ok",
 	                                payload: nil,
@@ -101,7 +125,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                featuresMatched: nil,
 	                                usage: nil,
 	                                journey: nil,
-	                                execution: nil
+	                                execution: execution
 	                            )
 	                            let json = (try? JSONEncoder().encode(response)) ?? Data("{\"status\":\"ok\"}".utf8)
 	                            return LocalHTTPServer.Response.json(json)
@@ -149,11 +173,12 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
 				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
 				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+				                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
 				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isRemoteActionFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
 				                            let host = request.headers["host"] ?? "127.0.0.1"
 				                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
 				                        // match real bundle shapes (base URL + manifest-relative paths).
@@ -174,6 +199,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                contentHashPrefix = "e2e-compiled-view-model-compiled"
 				                            } else if isDidSetFlow {
 				                                contentHashPrefix = "e2e-did-set-compiled"
+				                            } else if isRemoteActionFlow {
+				                                contentHashPrefix = "e2e-remote-action-compiled"
 				                            } else if isPurchaseFlow {
 				                                contentHashPrefix = "e2e-purchase-compiled"
 				                            } else if isRestoreFlow {
@@ -399,6 +426,44 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
+			                        } else if isRemoteActionFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "tap": [
+			                                        Interaction(
+			                                            id: "int-tap",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .remote(
+			                                                    RemoteAction(
+			                                                        action: "set_context",
+			                                                        payload: AnyCodable(["value": "hello"] as [String: Any])
+			                                                    )
+			                                                ),
+			                                                .remote(
+			                                                    RemoteAction(
+			                                                        action: "read_context",
+			                                                        payload: AnyCodable(["value": "world"] as [String: Any])
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
 			                        } else if isPurchaseFlow {
 		                            remoteFlow = RemoteFlow(
 		                                id: reqFlowId,
@@ -565,11 +630,12 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
 				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
 				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+				                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
 				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isRemoteActionFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
 				                        let requestedFile = parts.dropFirst().joined(separator: "/")
 				                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
@@ -2316,6 +2382,172 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
                     expect(didNavigateTo2.get()).to(beTrue())
                     expect(didNavigateBack.get()).to(beTrue())
+                }
+
+                it("executes remote nodes and applies server context updates (fixture mode)") {
+                    guard let eventBodies else { return }
+                    guard let requestLog else { return }
+                    guard server != nil else { return }
+                    guard isEnabled("NUXIE_E2E_ENABLE_REMOTE") else { return }
+                    guard experimentAbCompiledBundleFixture != nil else {
+                        fail("E2E: missing compiled bundle fixture")
+                        return
+                    }
+
+                    let remoteFlowId = "flow_e2e_remote_action_\(UUID().uuidString)"
+                    let distinctId = "e2e-user-remote-action-1"
+
+                    let didReceiveTap = LockedValue(false)
+                    let didPostTwoNodeEvents = LockedValue(false)
+                    let didApplyContextUpdate = LockedValue(false)
+
+                    waitUntil(timeout: .seconds(60)) { done in
+                        var finished = false
+
+                        func finishOnce() {
+                            guard !finished else { return }
+                            finished = true
+                            done()
+                        }
+
+                        Task {
+                            do {
+                                Container.shared.reset()
+                                let config = NuxieConfiguration(apiKey: apiKey)
+                                config.apiEndpoint = baseURL
+                                config.enablePlugins = false
+                                config.customStoragePath = FileManager.default.temporaryDirectory
+                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                                Container.shared.sdkConfiguration.register { config }
+
+                                let identityService = Container.shared.identityService()
+                                identityService.setDistinctId(distinctId)
+
+                                let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
+                                let networkQueue = NuxieNetworkQueue(
+                                    flushAt: 1_000_000,
+                                    flushIntervalSeconds: config.flushInterval,
+                                    maxQueueSize: config.maxQueueSize,
+                                    maxBatchSize: config.eventBatchSize,
+                                    maxRetries: config.retryCount,
+                                    baseRetryDelay: config.retryDelay,
+                                    apiClient: Container.shared.nuxieApi()
+                                )
+                                let eventService = Container.shared.eventService()
+                                try await withTimeout(seconds: 15, operationName: "eventService.configure") {
+                                    try await eventService.configure(
+                                        networkQueue: networkQueue,
+                                        journeyService: nil,
+                                        contextBuilder: contextBuilder,
+                                        configuration: config
+                                    )
+                                }
+
+                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                                let remoteFlow = try await api.fetchFlow(flowId: remoteFlowId)
+                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                                let archiveService = FlowArchiver()
+                                await archiveService.removeArchive(for: flow.id)
+
+                                await MainActor.run {
+                                    let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                    let campaign = makeCampaign(flowId: remoteFlowId)
+                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+
+                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                    runner.attach(viewController: vc)
+
+                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
+                                        if type == "action/tap" {
+                                            didReceiveTap.set(true)
+                                        }
+                                    }
+                                    runtimeDelegate = delegate
+                                    vc.runtimeDelegate = delegate
+                                    flowViewController = vc
+
+                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                    testWindow.rootViewController = vc
+                                    testWindow.makeKeyAndVisible()
+                                    window = testWindow
+                                    _ = vc.view
+                                }
+
+                                guard let vc = flowViewController else {
+                                    fail("E2E: FlowViewController/webView was not created")
+                                    finishOnce()
+                                    return
+                                }
+                                let webView = await MainActor.run { vc.flowWebView }
+                                guard let webView else {
+                                    fail("E2E: FlowViewController/webView was not created")
+                                    finishOnce()
+                                    return
+                                }
+
+                                let entryMarkerId = "screen-screen-entry-marker"
+                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+                                    finishOnce()
+                                    return
+                                }
+
+                                _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+                                let deadline = Date().addingTimeInterval(20.0)
+                                while Date() < deadline {
+                                    let nodeEvents = eventBodies.snapshot().compactMap { body -> [String: Any]? in
+                                        guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { return nil }
+                                        guard (root["event"] as? String) == "$journey_node_executed" else { return nil }
+                                        return root
+                                    }
+
+                                    if nodeEvents.count >= 2 {
+                                        didPostTwoNodeEvents.set(true)
+
+                                        let firstProps = nodeEvents[0]["properties"] as? [String: Any]
+                                        let secondProps = nodeEvents[1]["properties"] as? [String: Any]
+                                        let firstContext = firstProps?["context"] as? [String: Any] ?? [:]
+                                        let secondContext = secondProps?["context"] as? [String: Any] ?? [:]
+
+                                        let firstHasKey = firstContext["remote_key"] != nil
+                                        let secondHasKey = (secondContext["remote_key"] as? String) == "remote_value"
+                                        if !firstHasKey, secondHasKey {
+                                            didApplyContextUpdate.set(true)
+                                        }
+                                    }
+
+                                    if didPostTwoNodeEvents.get(), didApplyContextUpdate.get() {
+                                        break
+                                    }
+
+                                    try await Task.sleep(nanoseconds: 50_000_000)
+                                }
+
+                                if !didPostTwoNodeEvents.get() || !didApplyContextUpdate.get() {
+                                    let eventNames = eventBodies.snapshot().compactMap { body -> String? in
+                                        guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { return nil }
+                                        return root["event"] as? String
+                                    }
+                                    let requestSnapshot = requestLog.snapshot()
+                                    fail(
+                                        "E2E: remote context update did not apply; events=\(eventNames) requests=\(requestSnapshot)"
+                                    )
+                                }
+
+                                finishOnce()
+                            } catch {
+                                fail("E2E setup failed: \(error)")
+                                finishOnce()
+                            }
+                        }
+                    }
+
+                    expect(didReceiveTap.get()).to(beTrue())
+                    expect(didPostTwoNodeEvents.get()).to(beTrue())
+                    expect(didApplyContextUpdate.get()).to(beTrue())
                 }
 
 		            it("executes purchase (tap→purchase) and confirms host/web + backend sync (fixture mode)") {
