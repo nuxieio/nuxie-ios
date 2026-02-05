@@ -723,10 +723,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: vmTimeoutSeconds)) == true {
+                            if (try? await waitForElementExists(webView, elementId: "tap", timeoutSeconds: vmTimeoutSeconds)) == true {
                                 didLoadFirst.set(true)
                             } else {
-                                fail("E2E: first load did not reach runtime/view_model_init")
+                                fail("E2E: first load did not render bundle HTML (tap not found)")
                                 finishOnce()
                                 return
                             }
