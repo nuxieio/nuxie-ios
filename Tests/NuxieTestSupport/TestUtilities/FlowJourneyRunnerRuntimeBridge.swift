@@ -12,6 +12,18 @@ actor FlowJourneyRunnerRuntimeBridge {
         self.runner = runner
     }
 
+    private func parsePathRef(_ payload: [String: Any]) -> VmPathRef? {
+        let isRelative = payload["isRelative"] as? Bool
+        let nameBased = payload["nameBased"] as? Bool
+        if let pathIds = payload["pathIds"] as? [Int] {
+            return .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
+        }
+        if let pathIds = payload["pathIds"] as? [NSNumber] {
+            return .ids(VmPathIds(pathIds: pathIds.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+        }
+        return nil
+    }
+
     func handle(type: String, payload: [String: Any], id: String?) async {
         switch type {
         case "runtime/ready":
@@ -34,6 +46,20 @@ actor FlowJourneyRunnerRuntimeBridge {
                 componentId: componentId,
                 instanceId: instanceId,
                 event: nil
+            )
+
+        case "action/did_set":
+            guard let path = parsePathRef(payload) else { return }
+            let value = payload["value"] ?? NSNull()
+            let source = payload["source"] as? String
+            let screenId = payload["screenId"] as? String ?? currentScreenId
+            let instanceId = payload["instanceId"] as? String
+            _ = await runner.handleDidSet(
+                path: path,
+                value: value,
+                source: source,
+                screenId: screenId,
+                instanceId: instanceId
             )
 
         default:
@@ -64,4 +90,3 @@ final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
         // Not used in these E2E tests.
     }
 }
-

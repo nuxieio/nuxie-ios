@@ -1,0 +1,7 @@
+{
+  "builtAt": "2026-02-05T20:17:24.685Z",
+  "gitSha": "f4a74220ee5eacbd9e8a98302665f9a2246dccf5",
+  "bunVersion": "1.3.2",
+  "fixturePath": "tests/flow-runtime-e2e/fixtures/experiment-ab-flow-build-input.json",
+  "fixtureSource": "default"
+}
