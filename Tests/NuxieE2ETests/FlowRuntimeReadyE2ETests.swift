@@ -540,7 +540,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             it("applies view model init/patch and emits action/tap (fixture mode)") {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE1"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE1"] != "0" else { return }
 
                 let messages = LockedArray<String>()
                 let didApplyInit = LockedValue(false)
@@ -655,10 +655,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
-                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-                let testTimeoutSeconds = isCI ? 120 : 25
-                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
-                let archiveTimeoutSeconds = isCI ? 45.0 : 8.0
+                let testTimeoutSeconds = 120
+                let vmTimeoutSeconds = 30.0
+                let archiveTimeoutSeconds = 45.0
 
                 let didLoadFirst = LockedValue(false)
                 let didLoadSecond = LockedValue(false)
@@ -821,10 +820,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
-                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-                let testTimeoutSeconds = isCI ? 120 : 25
-                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
-                let missingRequestTimeoutSeconds = isCI ? 30.0 : 8.0
+                let testTimeoutSeconds = 120
+                let vmTimeoutSeconds = 30.0
+                let missingRequestTimeoutSeconds = 30.0
 
                 let missingFlowId = "flow_e2e_missing_asset_\(UUID().uuidString)"
                 let didLoadFirst = LockedValue(false)
@@ -1000,7 +998,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard let batchBodies else { return }
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
                 guard phase2CompiledBundleFixture != nil else {
                     fail("E2E: missing phase2 compiled bundle fixture")
                     return
@@ -1246,7 +1244,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             it("tracks $flow_shown and $flow_dismissed when dismissed via action/dismiss (fixture mode)") {
                 guard let batchBodies else { return }
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
 
                 let distinctId = "e2e-user-dismiss-1"
                 let didPresent = LockedValue(false)
@@ -1412,7 +1410,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
 
                 let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
                 let distinctId = "e2e-user-1-\(variantKey)"
