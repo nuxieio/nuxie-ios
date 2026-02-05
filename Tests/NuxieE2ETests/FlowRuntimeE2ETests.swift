@@ -2046,6 +2046,13 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                     return
                                 }
 
+                                let to2ButtonId = "to-2"
+                                guard (try? await waitForElementExists(webView, elementId: to2ButtonId, timeoutSeconds: 10.0)) == true else {
+                                    fail("E2E: compiled web runtime is missing button '\(to2ButtonId)'")
+                                    finishOnce()
+                                    return
+                                }
+
                                 _ = try? await evaluateJavaScript(webView, script: "document.getElementById('to-2').click()")
 
                                 let screen2MarkerId = "screen-screen-2-marker"
@@ -2055,6 +2062,13 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                     return
                                 }
                                 didNavigateTo2.set(true)
+
+                                let backButtonId = "back"
+                                guard (try? await waitForElementExists(webView, elementId: backButtonId, timeoutSeconds: 10.0)) == true else {
+                                    fail("E2E: compiled web runtime is missing button '\(backButtonId)'")
+                                    finishOnce()
+                                    return
+                                }
 
                                 _ = try? await evaluateJavaScript(webView, script: "document.getElementById('back').click()")
 
