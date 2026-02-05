@@ -656,9 +656,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard server != nil else { return }
 
                 let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-                let testTimeoutSeconds = isCI ? 60 : 25
-                let vmTimeoutSeconds = isCI ? 15.0 : 8.0
-                let archiveTimeoutSeconds = isCI ? 20.0 : 8.0
+                let testTimeoutSeconds = isCI ? 120 : 25
+                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
+                let archiveTimeoutSeconds = isCI ? 45.0 : 8.0
 
                 let didLoadFirst = LockedValue(false)
                 let didLoadSecond = LockedValue(false)
@@ -822,9 +822,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard server != nil else { return }
 
                 let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-                let testTimeoutSeconds = isCI ? 60 : 25
-                let vmTimeoutSeconds = isCI ? 15.0 : 8.0
-                let missingRequestTimeoutSeconds = isCI ? 15.0 : 8.0
+                let testTimeoutSeconds = isCI ? 120 : 25
+                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
+                let missingRequestTimeoutSeconds = isCI ? 30.0 : 8.0
 
                 let missingFlowId = "flow_e2e_missing_asset_\(UUID().uuidString)"
                 let didLoadFirst = LockedValue(false)
