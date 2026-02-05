@@ -6,9 +6,9 @@ import WebKit
 import FactoryKit
 @testable import Nuxie
 
-final class FlowRuntimeReadyE2ESpec: QuickSpec {
+final class FlowRuntimeE2ESpec: QuickSpec {
     override class func spec() {
-        describe("E2E flow runtime ready") {
+        describe("Flow Runtime E2E") {
             var server: LocalHTTPServer?
 
             var apiKey: String = "pk_test_e2e_local"
@@ -20,7 +20,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             var window: UIWindow?
             var requestLog: LockedArray<String>?
             var batchBodies: LockedArray<Data>?
-            var phase2CompiledBundleFixture: Phase2CompiledBundleFixture?
+            var experimentAbCompiledBundleFixture: ExperimentAbCompiledBundleFixture?
 
             func makeCampaign(flowId: String) -> Campaign {
                 let publishedAt = ISO8601DateFormatter().string(from: Date())
@@ -46,8 +46,8 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = LockedArray<String>()
                 batchBodies = LockedArray<Data>()
-                if phase2CompiledBundleFixture == nil {
-                    phase2CompiledBundleFixture = loadPhase2CompiledBundleFixture()
+                if experimentAbCompiledBundleFixture == nil {
+                    experimentAbCompiledBundleFixture = loadExperimentAbCompiledBundleFixture()
                 }
 
                 let env = ProcessInfo.processInfo.environment
@@ -117,7 +117,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         }
                         if request.method == "GET", request.path.hasPrefix("/flows/") {
                             let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-                            let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
                             let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
                             let host = request.headers["host"] ?? "127.0.0.1"
                         // Serve a per-flow bundle root to avoid cache collisions and to more closely
@@ -125,17 +125,17 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
                         let manifest: BuildManifest
-                        if isExperimentFlow {
-                            guard let fixture = phase2CompiledBundleFixture else {
+                        if isExperimentAbFlow {
+                            guard let fixture = experimentAbCompiledBundleFixture else {
                                 return LocalHTTPServer.Response.text(
-                                    "Missing phase2 compiled bundle fixture",
+                                    "Missing experiment-ab compiled bundle fixture",
                                     statusCode: 500
                                 )
                             }
                             manifest = BuildManifest(
                                 totalFiles: fixture.buildFiles.count,
                                 totalSize: fixture.totalSize,
-                                contentHash: "e2e-phase2-compiled-\(reqFlowId)",
+                                contentHash: "e2e-experiment-ab-compiled-\(reqFlowId)",
                                 files: fixture.buildFiles
                             )
                         } else {
@@ -162,7 +162,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         }
 
                         let remoteFlow: RemoteFlow
-                        if isExperimentFlow {
+                        if isExperimentAbFlow {
                             let variantA = ExperimentVariant(
                                 id: "a",
                                 name: "A",
@@ -282,15 +282,15 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
                             let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
                             let reqFlowId = parts.first.map(String.init) ?? ""
-                            let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
                             let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
                         let requestedFile = parts.dropFirst().joined(separator: "/")
                         let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
-                        if isExperimentFlow {
-                            guard let fixture = phase2CompiledBundleFixture else {
+                        if isExperimentAbFlow {
+                            guard let fixture = experimentAbCompiledBundleFixture else {
                                 return LocalHTTPServer.Response.text(
-                                    "Missing phase2 compiled bundle fixture",
+                                    "Missing experiment-ab compiled bundle fixture",
                                     statusCode: 500
                                 )
                             }
@@ -314,16 +314,16 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                           <head>
                             <meta charset="utf-8" />
                             <meta name="viewport" content="width=device-width, initial-scale=1" />
-                            <title>Nuxie E2E Ready</title>
+                            <title>Nuxie Flow Runtime E2E</title>
                           </head>
                           <body>
                             <div id="status">loading</div>
                             <div id="screen-id">(unset)</div>
                             <div id="vm-text">(unset)</div>
                             <button id="tap" type="button">Tap</button>
-                            <script>
+                              <script>
                               (function(){
-                                // Minimal runtime surface for Phase 0 + 1 + 2:
+                                // Minimal runtime surface for Flow Runtime E2E fixtures:
                                 // - Provide window.nuxie._handleHostMessage (host -> web)
                                 // - Emit runtime/ready and runtime/screen_changed (web -> host)
                                 // - Reflect runtime/navigate into the DOM
@@ -544,7 +544,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             it("applies view model init/patch and emits action/tap (fixture mode)") {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE1"] != "0" else { return }
+                guard isEnabled("NUXIE_E2E_ENABLE_VIEWMODELS", legacyKeys: ["NUXIE_E2E_PHASE1"]) else { return }
 
                 let messages = LockedArray<String>()
                 let didApplyInit = LockedValue(false)
@@ -1008,13 +1008,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard let batchBodies else { return }
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
-                guard phase2CompiledBundleFixture != nil else {
-                    fail("E2E: missing phase2 compiled bundle fixture")
+                guard isEnabled("NUXIE_E2E_ENABLE_EXPERIMENTS", legacyKeys: ["NUXIE_E2E_PHASE2"]) else { return }
+                guard isEnabled("NUXIE_E2E_ENABLE_ANALYTICS", legacyKeys: ["NUXIE_E2E_PHASE2"]) else { return }
+                guard experimentAbCompiledBundleFixture != nil else {
+                    fail("E2E: missing experiment-ab compiled bundle fixture")
                     return
                 }
 
-                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
+                let experimentAbFlowId = "flow_e2e_experiment_ab_\(UUID().uuidString)"
                 let distinctId = "e2e-user-archive-a"
                 let variantKey = "a"
                 let expectedScreenId = "screen-a"
@@ -1077,7 +1078,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             }
 
                             let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
-                            let remoteFlow = try await api.fetchFlow(flowId: phase2FlowId)
+                            let remoteFlow = try await api.fetchFlow(flowId: experimentAbFlowId)
                             let flow = Flow(remoteFlow: remoteFlow, products: [])
 
                             let archiveService = FlowArchiver()
@@ -1086,7 +1087,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             // First presentation (remote URL; caches compiled WebArchive in background).
                             await MainActor.run {
                                 let vc = FlowViewController(flow: flow, archiveService: archiveService)
-                                let campaign = makeCampaign(flowId: phase2FlowId)
+                                let campaign = makeCampaign(flowId: experimentAbFlowId)
                                 let journey = Journey(campaign: campaign, distinctId: distinctId)
                                 let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
                                 runner.attach(viewController: vc)
@@ -1155,7 +1156,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 runtimeDelegate = nil
 
                                 let vc2 = FlowViewController(flow: flow, archiveService: archiveService)
-                                let campaign = makeCampaign(flowId: phase2FlowId)
+                                let campaign = makeCampaign(flowId: experimentAbFlowId)
                                 let journey2 = Journey(campaign: campaign, distinctId: distinctId)
                                 expectedSecondJourneyId.set(journey2.id)
 
@@ -1248,7 +1249,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(props["experiment_key"] as? String).to(equal("exp-1"))
                 expect(props["variant_key"] as? String).to(equal(variantKey))
                 expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
-                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
+                expect(props["flow_id"] as? String).to(equal(experimentAbFlowId))
                 expect(props["journey_id"] as? String).to(equal(expectedSecondJourneyId.get()))
                 expect(props["is_holdout"] as? Bool).to(equal(false))
             }
@@ -1257,7 +1258,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let batchBodies else { return }
                 guard let requestLog else { return }
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
+                guard isEnabled("NUXIE_E2E_ENABLE_ANALYTICS", legacyKeys: ["NUXIE_E2E_PHASE2"]) else { return }
 
                 let distinctId = "e2e-user-dismiss-1"
                 let step = LockedValue("start")
@@ -1457,9 +1458,10 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
+                guard isEnabled("NUXIE_E2E_ENABLE_EXPERIMENTS", legacyKeys: ["NUXIE_E2E_PHASE2"]) else { return }
+                guard isEnabled("NUXIE_E2E_ENABLE_ANALYTICS", legacyKeys: ["NUXIE_E2E_PHASE2"]) else { return }
 
-                let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
+                let experimentAbFlowId = "flow_e2e_experiment_ab_\(UUID().uuidString)"
                 let distinctId = "e2e-user-1-\(variantKey)"
 
                 let messages = LockedArray<String>()
@@ -1518,7 +1520,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             }
 
                             let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
-                            let remoteFlow = try await api.fetchFlow(flowId: phase2FlowId)
+                            let remoteFlow = try await api.fetchFlow(flowId: experimentAbFlowId)
                             let flow = Flow(remoteFlow: remoteFlow, products: [])
 
                             let archiveService = FlowArchiver()
@@ -1526,7 +1528,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             await MainActor.run {
                                 let vc = FlowViewController(flow: flow, archiveService: archiveService)
-                                let campaign = makeCampaign(flowId: phase2FlowId)
+                                let campaign = makeCampaign(flowId: experimentAbFlowId)
                                 let journey = Journey(campaign: campaign, distinctId: distinctId)
                                 expectedJourneyId.set(journey.id)
 
@@ -1615,7 +1617,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 expect(props["experiment_key"] as? String).to(equal("exp-1"))
                 expect(props["variant_key"] as? String).to(equal(variantKey))
                 expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
-                expect(props["flow_id"] as? String).to(equal(phase2FlowId))
+                expect(props["flow_id"] as? String).to(equal(experimentAbFlowId))
                 expect(props["journey_id"] as? String).to(equal(expectedJourneyId.get()))
                 expect(props["is_holdout"] as? Bool).to(equal(false))
 
@@ -1695,6 +1697,15 @@ private final class LockedValue<T> {
         lock.unlock()
         return current
     }
+}
+
+private func isEnabled(_ key: String, legacyKeys: [String] = []) -> Bool {
+    let env = ProcessInfo.processInfo.environment
+    if env[key] == "0" { return false }
+    for legacyKey in legacyKeys {
+        if env[legacyKey] == "0" { return false }
+    }
+    return true
 }
 
 private func decodeMaybeGzippedJSON(_ data: Data) -> Any? {
@@ -1809,7 +1820,7 @@ private final class E2ETestPresentationWindow: PresentationWindowProtocol {
     }
 }
 
-private struct Phase2CompiledBundleFixture {
+private struct ExperimentAbCompiledBundleFixture {
     struct FileEntry {
         let data: Data
         let contentType: String
@@ -1829,12 +1840,12 @@ private func contentTypeForFixtureFile(path: String) -> String {
     return "application/octet-stream"
 }
 
-private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
-    let bundle = Bundle(for: FlowRuntimeReadyE2ESpec.self)
+private func loadExperimentAbCompiledBundleFixture() -> ExperimentAbCompiledBundleFixture? {
+    let bundle = Bundle(for: FlowRuntimeE2ESpec.self)
     guard let resourceURL = bundle.resourceURL else { return nil }
     let fm = FileManager.default
 
-    let folderRoot = resourceURL.appendingPathComponent("phase2-compiled-bundle", isDirectory: true)
+    let folderRoot = resourceURL.appendingPathComponent("experiment-ab-compiled-bundle", isDirectory: true)
     let root: URL
     if fm.fileExists(atPath: folderRoot.path) {
         root = folderRoot
@@ -1859,7 +1870,7 @@ private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
 
     let executableName = bundle.executableURL?.lastPathComponent
 
-    var filesByPath: [String: Phase2CompiledBundleFixture.FileEntry] = [:]
+    var filesByPath: [String: ExperimentAbCompiledBundleFixture.FileEntry] = [:]
     var buildFiles: [BuildFile] = []
     var totalSize = 0
 
@@ -1887,7 +1898,7 @@ private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
     guard filesByPath["index.html"] != nil else { return nil }
 
     buildFiles.sort { $0.path < $1.path }
-    return Phase2CompiledBundleFixture(
+    return ExperimentAbCompiledBundleFixture(
         filesByPath: filesByPath,
         buildFiles: buildFiles,
         totalSize: totalSize
