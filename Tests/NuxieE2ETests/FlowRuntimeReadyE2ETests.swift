@@ -655,7 +655,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
-                let isCI = ProcessInfo.processInfo.environment["CI"] == "true"
+                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
                 let testTimeoutSeconds = isCI ? 60 : 25
                 let vmTimeoutSeconds = isCI ? 15.0 : 8.0
                 let archiveTimeoutSeconds = isCI ? 20.0 : 8.0
@@ -821,7 +821,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
-                let isCI = ProcessInfo.processInfo.environment["CI"] == "true"
+                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
                 let testTimeoutSeconds = isCI ? 60 : 25
                 let vmTimeoutSeconds = isCI ? 15.0 : 8.0
                 let missingRequestTimeoutSeconds = isCI ? 15.0 : 8.0
