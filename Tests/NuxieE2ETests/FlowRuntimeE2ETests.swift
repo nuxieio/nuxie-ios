@@ -144,17 +144,18 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-		                        if request.method == "GET", request.path.hasPrefix("/flows/") {
-		                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-		                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-		                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-		                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
-		                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-		                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow || isRestoreFlow
-		                            let host = request.headers["host"] ?? "127.0.0.1"
-		                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
-		                        // match real bundle shapes (base URL + manifest-relative paths).
-		                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
+			                        if request.method == "GET", request.path.hasPrefix("/flows/") {
+			                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+			                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+			                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+			                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+			                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+			                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+			                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+			                            let host = request.headers["host"] ?? "127.0.0.1"
+			                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
+			                        // match real bundle shapes (base URL + manifest-relative paths).
+			                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
 	                        let manifest: BuildManifest
 		                        if isCompiledBundleFlow {
@@ -164,18 +165,22 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                                    statusCode: 500
 		                                )
 		                            }
-		                            let contentHashPrefix: String
-		                            if isExperimentAbFlow {
-		                                contentHashPrefix = "e2e-experiment-ab-compiled"
-		                            } else if isPurchaseFlow {
-		                                contentHashPrefix = "e2e-purchase-compiled"
-		                            } else {
-		                                contentHashPrefix = "e2e-restore-compiled"
-		                            }
-		                            manifest = BuildManifest(
-		                                totalFiles: fixture.buildFiles.count,
-		                                totalSize: fixture.totalSize,
-		                                contentHash: "\(contentHashPrefix)-\(reqFlowId)",
+			                            let contentHashPrefix: String
+			                            if isExperimentAbFlow {
+			                                contentHashPrefix = "e2e-experiment-ab-compiled"
+			                            } else if isPurchaseFlow {
+			                                contentHashPrefix = "e2e-purchase-compiled"
+			                            } else if isRestoreFlow {
+			                                contentHashPrefix = "e2e-restore-compiled"
+			                            } else if isNavStackFlow {
+			                                contentHashPrefix = "e2e-nav-stack-compiled"
+			                            } else {
+			                                contentHashPrefix = "e2e-compiled"
+			                            }
+			                            manifest = BuildManifest(
+			                                totalFiles: fixture.buildFiles.count,
+			                                totalSize: fixture.totalSize,
+			                                contentHash: "\(contentHashPrefix)-\(reqFlowId)",
 	                                files: fixture.buildFiles
 	                            )
 	                        } else {
@@ -290,12 +295,12 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                ],
 		                                viewModels: [],
 		                                viewModelInstances: nil,
-		                                converters: nil
-		                            )
-		                        } else if isRestoreFlow {
-		                            remoteFlow = RemoteFlow(
-		                                id: reqFlowId,
-		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                converters: nil
+			                            )
+			                        } else if isRestoreFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
 		                                screens: [
 		                                    RemoteFlowScreen(
 		                                        id: "screen-entry",
@@ -317,12 +322,54 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                                ],
 		                                viewModels: [],
 		                                viewModelInstances: nil,
-		                                converters: nil
-		                            )
-		                        } else {
-		                            remoteFlow = RemoteFlow(
-		                                id: reqFlowId,
-		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                converters: nil
+			                            )
+			                        } else if isNavStackFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    ),
+			                                    RemoteFlowScreen(
+			                                        id: "screen-2",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "to-2": [
+			                                        Interaction(
+			                                            id: "int-to-2",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .navigate(NavigateAction(screenId: "screen-2"))
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ],
+			                                    "back": [
+			                                        Interaction(
+			                                            id: "int-back",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .back(BackAction(steps: 1))
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
+			                        } else {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
 	                                screens: [
                                     RemoteFlowScreen(
                                         id: "screen-1",
@@ -377,17 +424,18 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-		                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
-		                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
-		                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-		                            let reqFlowId = parts.first.map(String.init) ?? ""
-		                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-		                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-		                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
-		                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-		                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow || isRestoreFlow
-		                        let requestedFile = parts.dropFirst().joined(separator: "/")
-		                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
+			                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
+			                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+			                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+			                            let reqFlowId = parts.first.map(String.init) ?? ""
+			                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+			                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+			                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+			                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+			                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+			                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+			                        let requestedFile = parts.dropFirst().joined(separator: "/")
+			                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
 		                        if isCompiledBundleFlow {
 	                            guard let fixture = experimentAbCompiledBundleFixture else {
@@ -1729,19 +1777,130 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 expect(requestSnapshot.contains("POST /batch")).to(beTrue())
             }
 
-            it("branches to screen-a and tracks exposure (fixture mode)") {
-                runExperimentBranchTest(variantKey: "a", expectedScreenId: "screen-a")
-            }
-
-	            it("branches to screen-b and tracks exposure (fixture mode)") {
-	                runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
+	            it("branches to screen-a and tracks exposure (fixture mode)") {
+	                runExperimentBranchTest(variantKey: "a", expectedScreenId: "screen-a")
 	            }
 
-	            it("executes purchase (tap→purchase) and confirms host/web + backend sync (fixture mode)") {
-	                guard let requestLog else { return }
-	                guard let eventBodies else { return }
-	                guard server != nil else { return }
-	                guard isEnabled("NUXIE_E2E_ENABLE_PURCHASES") else { return }
+		            it("branches to screen-b and tracks exposure (fixture mode)") {
+		                runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
+		            }
+
+                it("navigates to screen-2 then back (fixture mode)") {
+                    guard server != nil else { return }
+                    guard isEnabled("NUXIE_E2E_ENABLE_NAVIGATION") else { return }
+                    guard experimentAbCompiledBundleFixture != nil else {
+                        fail("E2E: missing compiled bundle fixture")
+                        return
+                    }
+
+                    let navFlowId = "flow_e2e_nav_stack_\(UUID().uuidString)"
+                    let distinctId = "e2e-user-nav-stack-1"
+
+                    let didNavigateTo2 = LockedValue(false)
+                    let didNavigateBack = LockedValue(false)
+
+                    waitUntil(timeout: .seconds(60)) { done in
+                        var finished = false
+
+                        func finishOnce() {
+                            guard !finished else { return }
+                            finished = true
+                            done()
+                        }
+
+                        Task {
+                            do {
+                                Container.shared.reset()
+                                let config = NuxieConfiguration(apiKey: apiKey)
+                                config.apiEndpoint = baseURL
+                                config.enablePlugins = false
+                                config.customStoragePath = FileManager.default.temporaryDirectory
+                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                                Container.shared.sdkConfiguration.register { config }
+                                Container.shared.eventService.register { MockEventService() }
+
+                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                                let remoteFlow = try await api.fetchFlow(flowId: navFlowId)
+                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                                let archiveService = FlowArchiver()
+                                await archiveService.removeArchive(for: flow.id)
+
+                                await MainActor.run {
+                                    let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                    let campaign = makeCampaign(flowId: navFlowId)
+                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                    runner.attach(viewController: vc)
+
+                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge, onMessage: nil)
+                                    runtimeDelegate = delegate
+                                    vc.runtimeDelegate = delegate
+                                    flowViewController = vc
+
+                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                    testWindow.rootViewController = vc
+                                    testWindow.makeKeyAndVisible()
+                                    window = testWindow
+                                    _ = vc.view
+                                }
+
+                                guard let vc = flowViewController else {
+                                    fail("E2E: FlowViewController/webView was not created")
+                                    finishOnce()
+                                    return
+                                }
+                                let webView = await MainActor.run { vc.flowWebView }
+                                guard let webView else {
+                                    fail("E2E: FlowViewController/webView was not created")
+                                    finishOnce()
+                                    return
+                                }
+
+                                let entryMarkerId = "screen-screen-entry-marker"
+                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+                                    finishOnce()
+                                    return
+                                }
+
+                                _ = try? await evaluateJavaScript(webView, script: "document.getElementById('to-2').click()")
+
+                                let screen2MarkerId = "screen-screen-2-marker"
+                                guard (try? await waitForElementExists(webView, elementId: screen2MarkerId, timeoutSeconds: 20.0)) == true else {
+                                    fail("E2E: expected navigation to render marker '\(screen2MarkerId)'")
+                                    finishOnce()
+                                    return
+                                }
+                                didNavigateTo2.set(true)
+
+                                _ = try? await evaluateJavaScript(webView, script: "document.getElementById('back').click()")
+
+                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+                                    fail("E2E: expected back to render entry marker '\(entryMarkerId)'")
+                                    finishOnce()
+                                    return
+                                }
+                                didNavigateBack.set(true)
+
+                                finishOnce()
+                            } catch {
+                                fail("E2E setup failed: \(error)")
+                                finishOnce()
+                            }
+                        }
+                    }
+
+                    expect(didNavigateTo2.get()).to(beTrue())
+                    expect(didNavigateBack.get()).to(beTrue())
+                }
+
+		            it("executes purchase (tap→purchase) and confirms host/web + backend sync (fixture mode)") {
+		                guard let requestLog else { return }
+		                guard let eventBodies else { return }
+		                guard server != nil else { return }
+		                guard isEnabled("NUXIE_E2E_ENABLE_PURCHASES") else { return }
 	                guard experimentAbCompiledBundleFixture != nil else {
 	                    fail("E2E: missing compiled bundle fixture")
 	                    return
