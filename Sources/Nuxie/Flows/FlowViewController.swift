@@ -35,6 +35,7 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     // Runtime readiness + message buffering
     private var runtimeReady = false
     private var pendingRuntimeMessages: [(type: String, payload: [String: Any], replyTo: String?)] = []
+    private var didInvokeClose = false
     
     // MARK: - Computed Properties
     
@@ -105,7 +106,14 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     func performDismiss(reason: CloseReason = .userDismissed) {
         runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: reason)
         dismiss(animated: true) { [weak self] in
-            self?.onClose?(reason)
+            self?.invokeOnCloseOnce(reason)
+        }
+        // Fallback: ensure onClose is invoked even if UIKit never calls the dismissal completion
+        // (can happen in unit-test windows / synthetic presentations).
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            self.invokeOnCloseOnce(reason)
         }
     }
 
@@ -373,11 +381,9 @@ extension FlowViewController {
                 LogDebug("FlowViewController: Unhandled runtime back action")
             }
         case "action/dismiss":
-            runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
-            dismiss(animated: true) { self.onClose?(.userDismissed) }
+            performDismiss(reason: .userDismissed)
         case "dismiss", "closeFlow":
-            runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
-            dismiss(animated: true) { self.onClose?(.userDismissed) }
+            performDismiss(reason: .userDismissed)
         case "openURL":
             if let urlString = payload["url"] as? String, let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
                 UIApplication.shared.open(url)
@@ -389,6 +395,14 @@ extension FlowViewController {
                 LogDebug("FlowViewController: Unhandled bridge message: \(type)")
             }
         }
+    }
+}
+
+private extension FlowViewController {
+    func invokeOnCloseOnce(_ reason: CloseReason) {
+        guard !didInvokeClose else { return }
+        didInvokeClose = true
+        onClose?(reason)
     }
 }
 

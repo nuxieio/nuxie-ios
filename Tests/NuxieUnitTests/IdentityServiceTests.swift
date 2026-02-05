@@ -4,6 +4,12 @@ import Quick
 
 @testable import Nuxie
 
+private struct IdentityServiceDiskModel: Codable {
+  let distinctId: String?
+  let anonymousId: String?
+  let userPropertiesById: [String: [String: AnyCodable]]
+}
+
 final class IdentityServiceTests: QuickSpec {
   override class func spec() {
     describe("IdentityService") {
@@ -282,11 +288,26 @@ final class IdentityServiceTests: QuickSpec {
 
         describe("properties persistence") {
           it("should persist properties across instances") {
+            let userId = identityService.getDistinctId()
+            let identityFileURL = testStoragePath
+              .appendingPathComponent("nuxie", isDirectory: true)
+              .appendingPathComponent("identity.json")
+
             // Set properties
             identityService.setUserProperties(["name": "John", "age": 30])
 
-            // Wait for async persistence
-            Thread.sleep(forTimeInterval: 0.1)
+            // Wait for async persistence (disk write) to complete.
+            expect {
+              guard let data = try? Data(contentsOf: identityFileURL) else { return nil }
+              let model = try? JSONDecoder().decode(IdentityServiceDiskModel.self, from: data)
+              return model?.userPropertiesById[userId]?["name"]?.value as? String
+            }.toEventually(equal("John"), timeout: .seconds(2))
+
+            expect {
+              guard let data = try? Data(contentsOf: identityFileURL) else { return nil }
+              let model = try? JSONDecoder().decode(IdentityServiceDiskModel.self, from: data)
+              return model?.userPropertiesById[userId]?["age"]?.value as? Int
+            }.toEventually(equal(30), timeout: .seconds(2))
 
             // Create new instance with same storage path and check properties are loaded
             let newIdentityService = IdentityService(customStoragePath: testStoragePath)
@@ -297,18 +318,31 @@ final class IdentityServiceTests: QuickSpec {
           }
 
           it("should handle property updates across instances") {
+            let userId = identityService.getDistinctId()
+            let identityFileURL = testStoragePath
+              .appendingPathComponent("nuxie", isDirectory: true)
+              .appendingPathComponent("identity.json")
+
             // Set initial properties
             identityService.setUserProperties(["name": "John"])
 
-            // Wait for async persistence
-            Thread.sleep(forTimeInterval: 0.1)
+            // Wait for async persistence (disk write) to complete.
+            expect {
+              guard let data = try? Data(contentsOf: identityFileURL) else { return nil }
+              let model = try? JSONDecoder().decode(IdentityServiceDiskModel.self, from: data)
+              return model?.userPropertiesById[userId]?["name"]?.value as? String
+            }.toEventually(equal("John"), timeout: .seconds(2))
 
             // Update in new instance
             let instance2 = IdentityService(customStoragePath: testStoragePath)
             instance2.setUserProperties(["age": 30])
 
-            // Wait for async persistence
-            Thread.sleep(forTimeInterval: 0.1)
+            // Wait for async persistence (disk write) to complete.
+            expect {
+              guard let data = try? Data(contentsOf: identityFileURL) else { return nil }
+              let model = try? JSONDecoder().decode(IdentityServiceDiskModel.self, from: data)
+              return model?.userPropertiesById[userId]?["age"]?.value as? Int
+            }.toEventually(equal(30), timeout: .seconds(2))
 
             // Check in third instance
             let instance3 = IdentityService(customStoragePath: testStoragePath)

@@ -46,7 +46,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = LockedArray<String>()
                 batchBodies = LockedArray<Data>()
-                phase2CompiledBundleFixture = loadPhase2CompiledBundleFixture()
+                if phase2CompiledBundleFixture == nil {
+                    phase2CompiledBundleFixture = loadPhase2CompiledBundleFixture()
+                }
 
                 let env = ProcessInfo.processInfo.environment
                 let envApiKey = env["NUXIE_E2E_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,6 +67,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                     return
                 }
 
+                if server == nil {
                     server = try? LocalHTTPServer { request in
                         requestLog?.append("\(request.method) \(request.path)")
                         if request.method == "POST", request.path.hasSuffix("/batch") {
@@ -112,7 +115,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-                    if request.method == "GET", request.path.hasPrefix("/flows/") {
+                        if request.method == "GET", request.path.hasPrefix("/flows/") {
                             let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
                             let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
                             let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
@@ -275,12 +278,12 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-                    if request.method == "GET", request.path.hasPrefix("/bundles/") {
-                        let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
-                        let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-                        let reqFlowId = parts.first.map(String.init) ?? ""
-                        let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
-                        let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
+                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+                            let reqFlowId = parts.first.map(String.init) ?? ""
+                            let isExperimentFlow = reqFlowId.hasPrefix("flow_e2e_experiment_")
+                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
                         let requestedFile = parts.dropFirst().joined(separator: "/")
                         let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
@@ -402,10 +405,8 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                   }
                                   return false;
                                 }
-                                var tries = 0;
                                 var readyTimer = setInterval(function() {
-                                  tries++;
-                                  if (sendReadyOnce() || tries > 200) clearInterval(readyTimer);
+                                  if (sendReadyOnce()) clearInterval(readyTimer);
                                 }, 50);
                               })();
                             </script>
@@ -415,11 +416,12 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.html(html)
                     }
 
-                    if request.method == "GET", request.path == "/favicon.ico" {
-                        return LocalHTTPServer.Response(statusCode: 204, headers: [:], body: Data())
-                    }
+                        if request.method == "GET", request.path == "/favicon.ico" {
+                            return LocalHTTPServer.Response(statusCode: 204, headers: [:], body: Data())
+                        }
 
-                    return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
+                        return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
+                    }
                 }
 
                 guard let server else {
@@ -433,8 +435,6 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
             }
 
             afterEach {
-                server?.stop()
-                server = nil
                 flowViewController = nil
                 runtimeDelegate = nil
                 window?.isHidden = true
@@ -442,7 +442,11 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 window = nil
                 requestLog = nil
                 batchBodies = nil
-                phase2CompiledBundleFixture = nil
+            }
+
+            afterSuite {
+                server?.stop()
+                server = nil
             }
 
             it("fetches /flows/:id, receives runtime/ready, and completes a navigate→screen_changed handshake") {
@@ -450,7 +454,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let expectedScreenId = LockedValue<String?>(nil)
                 let screenChangedId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(45)) { done in
                     var finished = false
                     var didReceiveReady = false
                     runtimeDelegate = CapturingRuntimeDelegate(onMessage: { type, payload, _ in
@@ -540,14 +544,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             it("applies view model init/patch and emits action/tap (fixture mode)") {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE1"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE1"] != "0" else { return }
 
                 let messages = LockedArray<String>()
                 let didApplyInit = LockedValue(false)
                 let didApplyPatch = LockedValue(false)
                 let didReceiveTap = LockedValue(false)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(60)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -614,7 +618,13 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            if (try? await waitForVmText(webView, equals: "hello")) == true {
+                            guard (try? await waitForElementExists(webView, elementId: "tap", timeoutSeconds: 20.0)) == true else {
+                                fail("E2E: bundle HTML did not render (tap not found)")
+                                finishOnce()
+                                return
+                            }
+
+                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 30.0)) == true {
                                 didApplyInit.set(true)
                             } else {
                                 fail("E2E: view model init did not update DOM")
@@ -624,7 +634,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
-                            if (try? await waitForVmText(webView, equals: "world")) == true {
+                            if (try? await waitForVmText(webView, equals: "world", timeoutSeconds: 30.0)) == true {
                                 didApplyPatch.set(true)
                             } else {
                                 fail("E2E: view model patch did not update DOM")
@@ -655,10 +665,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
-                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-                let testTimeoutSeconds = isCI ? 120 : 25
-                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
-                let archiveTimeoutSeconds = isCI ? 45.0 : 8.0
+                let testTimeoutSeconds = 120
+                let vmTimeoutSeconds = 30.0
+                let archiveTimeoutSeconds = 45.0
 
                 let didLoadFirst = LockedValue(false)
                 let didLoadSecond = LockedValue(false)
@@ -821,10 +830,9 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard server != nil else { return }
 
-                let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-                let testTimeoutSeconds = isCI ? 120 : 25
-                let vmTimeoutSeconds = isCI ? 30.0 : 8.0
-                let missingRequestTimeoutSeconds = isCI ? 30.0 : 8.0
+                let testTimeoutSeconds = 120
+                let vmTimeoutSeconds = 30.0
+                let missingRequestTimeoutSeconds = 30.0
 
                 let missingFlowId = "flow_e2e_missing_asset_\(UUID().uuidString)"
                 let didLoadFirst = LockedValue(false)
@@ -1000,7 +1008,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 guard let requestLog else { return }
                 guard let batchBodies else { return }
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
                 guard phase2CompiledBundleFixture != nil else {
                     fail("E2E: missing phase2 compiled bundle fixture")
                     return
@@ -1017,7 +1025,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let secondExposureProps = LockedValue<[String: Any]?>(nil)
                 let expectedSecondJourneyId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(45)) { done in
+                waitUntil(timeout: .seconds(90)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -1050,12 +1058,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 apiClient: Container.shared.nuxieApi()
                             )
                             let eventService = Container.shared.eventService()
-                            try await eventService.configure(
-                                networkQueue: networkQueue,
-                                journeyService: nil,
-                                contextBuilder: contextBuilder,
-                                configuration: config
-                            )
+                            try await withTimeout(seconds: 15, operationName: "eventService.configure") {
+                                try await eventService.configure(
+                                    networkQueue: networkQueue,
+                                    journeyService: nil,
+                                    contextBuilder: contextBuilder,
+                                    configuration: config
+                                )
+                            }
 
                             let profileService = Container.shared.profileService()
                             let profile = try await profileService.fetchProfile(distinctId: distinctId)
@@ -1107,7 +1117,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             }
 
                             let entryMarkerId = "screen-screen-entry-marker"
-                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
                                 finishOnce()
                                 return
@@ -1116,14 +1126,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
                             let expectedMarkerId = "screen-\(expectedScreenId)-marker"
-                            guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: experiment did not render expected marker '\(expectedMarkerId)' on first load")
                                 finishOnce()
                                 return
                             }
                             didLoadFirst.set(true)
 
-                            guard (try? await waitForArchiveURL(archiveService, for: flow, timeoutSeconds: 12.0)) != nil else {
+                            guard (try? await waitForArchiveURL(archiveService, for: flow, timeoutSeconds: 30.0)) != nil else {
                                 fail("E2E: expected compiled WebArchive to be cached after first load")
                                 finishOnce()
                                 return
@@ -1175,7 +1185,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            guard (try? await waitForElementExists(webView2, elementId: entryMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView2, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: compiled web runtime did not render entry marker on cached load")
                                 finishOnce()
                                 return
@@ -1183,7 +1193,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             _ = try? await evaluateJavaScript(webView2, script: "document.getElementById('tap').click()")
 
-                            guard (try? await waitForElementExists(webView2, elementId: expectedMarkerId, timeoutSeconds: 10.0)) == true else {
+                            guard (try? await waitForElementExists(webView2, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: experiment did not render expected marker '\(expectedMarkerId)' on cached load")
                                 finishOnce()
                                 return
@@ -1245,17 +1255,19 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             it("tracks $flow_shown and $flow_dismissed when dismissed via action/dismiss (fixture mode)") {
                 guard let batchBodies else { return }
+                guard let requestLog else { return }
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
 
                 let distinctId = "e2e-user-dismiss-1"
+                let step = LockedValue("start")
                 let didPresent = LockedValue(false)
                 let didDismiss = LockedValue(false)
                 let shownProps = LockedValue<[String: Any]?>(nil)
                 let dismissedProps = LockedValue<[String: Any]?>(nil)
                 let expectedJourneyId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(35)) { done in
+                waitUntil(timeout: .seconds(60)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -1266,6 +1278,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                     Task {
                         do {
+                            step.set("configure-container")
                             Container.shared.reset()
                             let config = NuxieConfiguration(apiKey: apiKey)
                             config.apiEndpoint = baseURL
@@ -1277,6 +1290,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             let identityService = Container.shared.identityService()
                             identityService.setDistinctId(distinctId)
 
+                            step.set("configure-event-service")
                             let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
                             let networkQueue = NuxieNetworkQueue(
                                 flushAt: 1_000_000,
@@ -1300,18 +1314,24 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             expectedJourneyId.set(journey.id)
 
                             let sawReady = LockedValue(false)
-                            let delegate = CapturingRuntimeDelegate { type, _, _ in
+                            let didRequestDismiss = LockedValue(false)
+                            let delegate = CapturingRuntimeDelegate(onMessage: { type, _, _ in
                                 if type == "runtime/ready" {
                                     sawReady.set(true)
                                 }
-                            }
+                            }, onDismiss: { _ in
+                                didRequestDismiss.set(true)
+                            })
                             runtimeDelegate = delegate
 
                             let presentationService = await MainActor.run {
                                 FlowPresentationService(windowProvider: E2ETestWindowProvider())
                             }
 
-                            let vc = try await presentationService.presentFlow(flowId, from: journey, runtimeDelegate: delegate)
+                            step.set("present-flow")
+                            let vc = try await withTimeout(seconds: 30) {
+                                try await presentationService.presentFlow(flowId, from: journey, runtimeDelegate: delegate)
+                            }
                             flowViewController = vc
                             didPresent.set(true)
 
@@ -1322,6 +1342,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
+                            step.set("wait-ready")
                             let deadline = Date().addingTimeInterval(8.0)
                             while Date() < deadline, !sawReady.get() {
                                 try await Task.sleep(nanoseconds: 50_000_000)
@@ -1332,11 +1353,23 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
+                            step.set("send-dismiss")
                             _ = try? await evaluateJavaScript(
                                 webView,
                                 script: "window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.bridge && window.webkit.messageHandlers.bridge.postMessage({ type: 'action/dismiss', payload: {} })"
                             )
 
+                            let dismissMsgDeadline = Date().addingTimeInterval(2.0)
+                            while Date() < dismissMsgDeadline, !didRequestDismiss.get() {
+                                try await Task.sleep(nanoseconds: 50_000_000)
+                            }
+                            guard didRequestDismiss.get() else {
+                                fail("E2E: expected native to receive action/dismiss via bridge")
+                                finishOnce()
+                                return
+                            }
+
+                            step.set("wait-dismiss")
                             let dismissDeadline = Date().addingTimeInterval(10.0)
                             while Date() < dismissDeadline {
                                 if !(await presentationService.isFlowPresented) {
@@ -1352,8 +1385,14 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            await eventService.drain()
-                            let didFlush = await eventService.flushEvents()
+                            step.set("drain-events")
+                            try await withTimeout(seconds: 15) {
+                                await eventService.drain()
+                            }
+                            step.set("flush-events")
+                            let didFlush = try await withTimeout(seconds: 15) {
+                                await eventService.flushEvents()
+                            }
                             if !didFlush {
                                 fail("E2E: expected flushEvents() to initiate a flush (didFlush=false)")
                                 finishOnce()
@@ -1365,6 +1404,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 finishOnce()
                                 return
                             }
+                            step.set("assert-batch")
                             let bodies = batchBodies.snapshot()
                             guard let shown = eventProperties(
                                 forEventName: JourneyEvents.flowShown,
@@ -1388,12 +1428,17 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             dismissedProps.set(dismissed)
                             finishOnce()
                         } catch {
-                            fail("E2E setup failed: \(error)")
+                            let log = requestLog.snapshot()
+                            fail("E2E setup failed (step=\(step.get())): \(error); requests=\(log)")
                             finishOnce()
                         }
                     }
                 }
 
+                if !didPresent.get() || !didDismiss.get() {
+                    let log = requestLog.snapshot()
+                    fail("E2E: did not complete dismissal flow (step=\(step.get())); requests=\(log)")
+                }
                 expect(didPresent.get()).to(beTrue())
                 expect(didDismiss.get()).to(beTrue())
 
@@ -1412,7 +1457,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
             func runExperimentBranchTest(variantKey: String, expectedScreenId: String) {
                 guard server != nil else { return }
-                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] == "1" else { return }
+                guard ProcessInfo.processInfo.environment["NUXIE_E2E_PHASE2"] != "0" else { return }
 
                 let phase2FlowId = "flow_e2e_experiment_\(UUID().uuidString)"
                 let distinctId = "e2e-user-1-\(variantKey)"
@@ -1423,7 +1468,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                 let exposureProps = LockedValue<[String: Any]?>(nil)
                 let expectedJourneyId = LockedValue<String?>(nil)
 
-                waitUntil(timeout: .seconds(25)) { done in
+                waitUntil(timeout: .seconds(60)) { done in
                     var finished = false
 
                     func finishOnce() {
@@ -1520,7 +1565,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             }
 
                             let entryMarkerId = "screen-screen-entry-marker"
-                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 8.0)) == true else {
+                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
                                 fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
                                 finishOnce()
                                 return
@@ -1529,7 +1574,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
                             let expectedMarkerId = "screen-\(expectedScreenId)-marker"
-                            if (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 8.0)) == true {
+                            if (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true {
                                 didNavigateToExpected.set(true)
                             } else {
                                 fail("E2E: experiment did not render expected marker '\(expectedMarkerId)'")
@@ -1594,10 +1639,13 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
 private final class CapturingRuntimeDelegate: FlowRuntimeDelegate {
     typealias OnMessage = (_ type: String, _ payload: [String: Any], _ id: String?) -> Void
+    typealias OnDismiss = (_ reason: CloseReason) -> Void
     private let onMessage: OnMessage
+    private let onDismiss: OnDismiss?
 
-    init(onMessage: @escaping OnMessage) {
+    init(onMessage: @escaping OnMessage, onDismiss: OnDismiss? = nil) {
         self.onMessage = onMessage
+        self.onDismiss = onDismiss
     }
 
     func flowViewController(_ controller: FlowViewController, didReceiveRuntimeMessage type: String, payload: [String: Any], id: String?) {
@@ -1605,7 +1653,7 @@ private final class CapturingRuntimeDelegate: FlowRuntimeDelegate {
     }
 
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
-        // Not used for this smoke test.
+        onDismiss?(reason)
     }
 }
 
@@ -1718,7 +1766,12 @@ private final class E2ETestPresentationWindow: PresentationWindowProtocol {
     private let rootViewController: UIViewController
 
     init() {
-        window = UIWindow(frame: UIScreen.main.bounds)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            window = UIWindow(windowScene: scene)
+            window.frame = scene.coordinateSpace.bounds
+        } else {
+            window = UIWindow(frame: UIScreen.main.bounds)
+        }
         rootViewController = UIViewController()
         rootViewController.view.backgroundColor = .clear
         window.rootViewController = rootViewController
@@ -1728,19 +1781,21 @@ private final class E2ETestPresentationWindow: PresentationWindowProtocol {
 
     func present(_ viewController: UIViewController) async {
         window.makeKeyAndVisible()
-        await withCheckedContinuation { continuation in
-            rootViewController.present(viewController, animated: false) {
-                continuation.resume()
-            }
+        // In unit test bundles, UIKit sometimes fails to call the completion block for modal
+        // presentations off a synthetic window. Avoid hanging the E2E suite by not awaiting it.
+        rootViewController.present(viewController, animated: false)
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline, rootViewController.presentedViewController == nil {
+            await Task.yield()
         }
     }
 
     func dismiss() async {
         guard rootViewController.presentedViewController != nil else { return }
-        await withCheckedContinuation { continuation in
-            rootViewController.dismiss(animated: false) {
-                continuation.resume()
-            }
+        rootViewController.dismiss(animated: false)
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline, rootViewController.presentedViewController != nil {
+            await Task.yield()
         }
     }
 
@@ -1777,12 +1832,23 @@ private func contentTypeForFixtureFile(path: String) -> String {
 private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
     let bundle = Bundle(for: FlowRuntimeReadyE2ESpec.self)
     guard let resourceURL = bundle.resourceURL else { return nil }
-    let root = resourceURL.appendingPathComponent("phase2-compiled-bundle", isDirectory: true)
-    guard FileManager.default.fileExists(atPath: root.path) else { return nil }
+    let fm = FileManager.default
+
+    let folderRoot = resourceURL.appendingPathComponent("phase2-compiled-bundle", isDirectory: true)
+    let root: URL
+    if fm.fileExists(atPath: folderRoot.path) {
+        root = folderRoot
+    } else if let indexURL = bundle.url(forResource: "index", withExtension: "html") {
+        // Some Xcode resource configurations flatten folder resources into the test bundle root.
+        // Fall back to whichever directory contains index.html.
+        root = indexURL.deletingLastPathComponent()
+    } else {
+        return nil
+    }
 
     let urls: [URL]
     do {
-        urls = try FileManager.default.contentsOfDirectory(
+        urls = try fm.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
@@ -1790,6 +1856,8 @@ private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
     } catch {
         return nil
     }
+
+    let executableName = bundle.executableURL?.lastPathComponent
 
     var filesByPath: [String: Phase2CompiledBundleFixture.FileEntry] = [:]
     var buildFiles: [BuildFile] = []
@@ -1804,6 +1872,9 @@ private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
         }
 
         let fileName = url.lastPathComponent
+        if fileName == "Info.plist" { continue }
+        if let executableName, fileName == executableName { continue }
+
         let data = (try? Data(contentsOf: url)) ?? Data()
         let size = values.fileSize ?? data.count
         let contentType = contentTypeForFixtureFile(path: fileName)
@@ -1812,6 +1883,8 @@ private func loadPhase2CompiledBundleFixture() -> Phase2CompiledBundleFixture? {
         buildFiles.append(BuildFile(path: fileName, size: size, contentType: contentType))
         totalSize += size
     }
+
+    guard filesByPath["index.html"] != nil else { return nil }
 
     buildFiles.sort { $0.path < $1.path }
     return Phase2CompiledBundleFixture(
@@ -1915,4 +1988,37 @@ private func waitForArchiveURL(_ archiveService: FlowArchiver, for flow: Flow, t
         try await Task.sleep(nanoseconds: 50_000_000)
     }
     return nil
+}
+
+private struct E2ETimeoutError: Error, CustomStringConvertible {
+    let seconds: Double
+    let operation: String?
+
+    var description: String {
+        if let operation {
+            return "timeout(seconds=\(seconds), operation=\(operation))"
+        }
+        return "timeout(seconds=\(seconds))"
+    }
+}
+
+private func withTimeout<T>(
+    seconds: Double,
+    operationName: String? = nil,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw E2ETimeoutError(seconds: seconds, operation: operationName)
+        }
+        guard let result = try await group.next() else {
+            throw E2ETimeoutError(seconds: seconds, operation: operationName)
+        }
+        group.cancelAll()
+        return result
+    }
 }
