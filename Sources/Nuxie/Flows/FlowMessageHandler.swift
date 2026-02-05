@@ -34,6 +34,12 @@ final class FlowMessageHandler: NSObject, WKScriptMessageHandler {
         }
 
         let payload = dict["payload"] as? [String: Any] ?? [:]
-        delegate?.messageHandler(self, didReceiveBridgeMessage: type, payload: payload, id: id, from: webView)
+        // Ensure UI-affecting bridge messages are handled on the main thread.
+        // WebKit *usually* delivers these on main, but XCTest/WKWebView can surface
+        // non-main delivery which breaks UIKit calls like `dismiss(...)`.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.messageHandler(self, didReceiveBridgeMessage: type, payload: payload, id: id, from: webView)
+        }
     }
 }
