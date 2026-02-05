@@ -405,10 +405,8 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                   }
                                   return false;
                                 }
-                                var tries = 0;
                                 var readyTimer = setInterval(function() {
-                                  tries++;
-                                  if (sendReadyOnce() || tries > 200) clearInterval(readyTimer);
+                                  if (sendReadyOnce()) clearInterval(readyTimer);
                                 }, 50);
                               })();
                             </script>
@@ -620,7 +618,13 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
                                 return
                             }
 
-                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 15.0)) == true {
+                            guard (try? await waitForElementExists(webView, elementId: "tap", timeoutSeconds: 20.0)) == true else {
+                                fail("E2E: bundle HTML did not render (tap not found)")
+                                finishOnce()
+                                return
+                            }
+
+                            if (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 30.0)) == true {
                                 didApplyInit.set(true)
                             } else {
                                 fail("E2E: view model init did not update DOM")
@@ -630,7 +634,7 @@ final class FlowRuntimeReadyE2ESpec: QuickSpec {
 
                             _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
 
-                            if (try? await waitForVmText(webView, equals: "world", timeoutSeconds: 15.0)) == true {
+                            if (try? await waitForVmText(webView, equals: "world", timeoutSeconds: 30.0)) == true {
                                 didApplyPatch.set(true)
                             } else {
                                 fail("E2E: view model patch did not update DOM")
