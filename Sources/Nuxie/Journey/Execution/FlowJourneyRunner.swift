@@ -225,6 +225,13 @@ final class FlowJourneyRunner {
     ) async -> RunOutcome? {
         if isPaused { return nil }
 
+        // The web runtime includes screenId in action payloads. If the runtime/ready → navigate
+        // handshake is still in flight, we may not have received a runtime/screen_changed yet.
+        // Seed currentScreenId so navigation stack behavior (navigate/back) can work reliably.
+        if journey.flowState.currentScreenId == nil, let screenId, !screenId.isEmpty {
+            journey.flowState.currentScreenId = screenId
+        }
+
         var interactions: [Interaction] = []
         if let componentId {
             interactions.append(contentsOf: interactionsById[componentId] ?? [])
