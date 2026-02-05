@@ -177,8 +177,16 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+				                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isRemoteActionFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+				                            let isCompiledBundleFlow = isExperimentAbFlow
+				                                || isCompiledViewModelFlow
+				                                || isDidSetFlow
+				                                || isRemoteActionFlow
+				                                || isPurchaseFlow
+				                                || isRestoreFlow
+				                                || isNavStackFlow
+				                                || isCustomerUpdateEventFlow
 				                            let host = request.headers["host"] ?? "127.0.0.1"
 				                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
 				                        // match real bundle shapes (base URL + manifest-relative paths).
@@ -207,6 +215,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                contentHashPrefix = "e2e-restore-compiled"
 				                            } else if isNavStackFlow {
 			                                contentHashPrefix = "e2e-nav-stack-compiled"
+			                            } else if isCustomerUpdateEventFlow {
+			                                contentHashPrefix = "e2e-customer-update-event-compiled"
 			                            } else {
 			                                contentHashPrefix = "e2e-compiled"
 			                            }
@@ -565,6 +575,43 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
+			                        } else if isCustomerUpdateEventFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "tap": [
+			                                        Interaction(
+			                                            id: "int-tap",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .updateCustomer(
+			                                                    UpdateCustomerAction(
+			                                                        attributes: ["plan": AnyCodable("pro")]
+			                                                    )
+			                                                ),
+			                                                .sendEvent(
+			                                                    SendEventAction(
+			                                                        eventName: "custom_event",
+			                                                        properties: ["k": AnyCodable("v")]
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
 			                        } else {
 			                            remoteFlow = RemoteFlow(
 			                                id: reqFlowId,
@@ -634,8 +681,16 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+				                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isRemoteActionFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+				                            let isCompiledBundleFlow = isExperimentAbFlow
+				                                || isCompiledViewModelFlow
+				                                || isDidSetFlow
+				                                || isRemoteActionFlow
+				                                || isPurchaseFlow
+				                                || isRestoreFlow
+				                                || isNavStackFlow
+				                                || isCustomerUpdateEventFlow
 				                        let requestedFile = parts.dropFirst().joined(separator: "/")
 				                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
@@ -2550,6 +2605,287 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                     expect(didApplyContextUpdate.get()).to(beTrue())
                 }
 
+                it("updates customer properties and sends a custom event (fixture mode)") {
+                    guard let batchBodies else { return }
+                    guard let requestLog else { return }
+                    guard server != nil else { return }
+                    guard isEnabled("NUXIE_E2E_ENABLE_CUSTOMER") else { return }
+                    guard isEnabled("NUXIE_E2E_ENABLE_ANALYTICS", legacyKeys: ["NUXIE_E2E_PHASE2"]) else { return }
+                    guard experimentAbCompiledBundleFixture != nil else {
+                        fail("E2E: missing compiled bundle fixture")
+                        return
+                    }
+
+                    let customerFlowId = "flow_e2e_customer_update_event_\(UUID().uuidString)"
+                    let distinctId = "e2e-user-customer-update-1"
+                    let expectedPlan = "pro"
+                    let expectedEventName = "custom_event"
+
+                    let didReceiveTap = LockedValue(false)
+                    let didUpdateProperties = LockedValue(false)
+                    let failureReason = LockedValue<String?>(nil)
+                    let customerUpdatedProps = LockedValue<[String: Any]?>(nil)
+                    let eventSentProps = LockedValue<[String: Any]?>(nil)
+                    let customEventProps = LockedValue<[String: Any]?>(nil)
+                    let expectedJourneyId = LockedValue<String?>(nil)
+
+                    waitUntil(timeout: .seconds(60)) { done in
+                        var finished = false
+
+                        func finishOnce() {
+                            guard !finished else { return }
+                            finished = true
+                            done()
+                        }
+
+                        Task {
+                            do {
+                                Container.shared.reset()
+                                let config = NuxieConfiguration(apiKey: apiKey)
+                                config.apiEndpoint = baseURL
+                                config.enablePlugins = false
+                                config.customStoragePath = FileManager.default.temporaryDirectory
+                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+                                Container.shared.sdkConfiguration.register { config }
+
+                                let identityService = Container.shared.identityService()
+                                identityService.setDistinctId(distinctId)
+
+                                let beforeProps = identityService.getUserProperties()
+                                if beforeProps["plan"] != nil {
+                                    let message = "E2E: expected plan not set before click; props=\(beforeProps)"
+                                    failureReason.set(message)
+                                    fail(message)
+                                    finishOnce()
+                                    return
+                                }
+
+                                let contextBuilder = NuxieContextBuilder(identityService: identityService, configuration: config)
+                                let networkQueue = NuxieNetworkQueue(
+                                    flushAt: 1_000_000,
+                                    flushIntervalSeconds: config.flushInterval,
+                                    maxQueueSize: config.maxQueueSize,
+                                    maxBatchSize: config.eventBatchSize,
+                                    maxRetries: config.retryCount,
+                                    baseRetryDelay: config.retryDelay,
+                                    apiClient: Container.shared.nuxieApi()
+                                )
+                                let eventService = Container.shared.eventService()
+                                try await withTimeout(seconds: 15, operationName: "eventService.configure") {
+                                    try await eventService.configure(
+                                        networkQueue: networkQueue,
+                                        journeyService: nil,
+                                        contextBuilder: contextBuilder,
+                                        configuration: config
+                                    )
+                                }
+
+                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+                                let remoteFlow = try await api.fetchFlow(flowId: customerFlowId)
+                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+                                let archiveService = FlowArchiver()
+                                await archiveService.removeArchive(for: flow.id)
+
+                                await MainActor.run {
+                                    let vc = FlowViewController(flow: flow, archiveService: archiveService)
+                                    let campaign = makeCampaign(flowId: customerFlowId)
+                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+                                    expectedJourneyId.set(journey.id)
+
+                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                                    runner.attach(viewController: vc)
+
+                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
+                                        if type == "action/tap" {
+                                            didReceiveTap.set(true)
+                                        }
+                                    }
+                                    runtimeDelegate = delegate
+                                    vc.runtimeDelegate = delegate
+                                    flowViewController = vc
+
+                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+                                    testWindow.rootViewController = vc
+                                    testWindow.makeKeyAndVisible()
+                                    window = testWindow
+                                    _ = vc.view
+                                }
+
+                                guard let vc = flowViewController else {
+                                    fail("E2E: FlowViewController/webView was not created")
+                                    finishOnce()
+                                    return
+                                }
+                                let webView = await MainActor.run { vc.flowWebView }
+                                guard let webView else {
+                                    fail("E2E: FlowViewController/webView was not created")
+                                    finishOnce()
+                                    return
+                                }
+
+                                let entryMarkerId = "screen-screen-entry-marker"
+                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+                                    finishOnce()
+                                    return
+                                }
+
+                                _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+                                let propertiesDeadline = Date().addingTimeInterval(5.0)
+                                while Date() < propertiesDeadline {
+                                    let props = identityService.getUserProperties()
+                                    if (props["plan"] as? String) == expectedPlan {
+                                        didUpdateProperties.set(true)
+                                        break
+                                    }
+                                    try await Task.sleep(nanoseconds: 50_000_000)
+                                }
+                                if !didUpdateProperties.get() {
+                                    fail("E2E: expected update_customer to write plan='\(expectedPlan)' into identity properties")
+                                    finishOnce()
+                                    return
+                                }
+
+                                await eventService.drain()
+                                let queuedCount = await eventService.getQueuedEventCount()
+                                if queuedCount == 0 {
+                                    let recentNames = await eventService.getRecentEvents(limit: 20).map(\.name)
+                                    let requests = requestLog.snapshot()
+                                    let message = "E2E: expected update_customer/send_event to enqueue events; queued=0 recent=\(recentNames) requests=\(requests)"
+                                    failureReason.set(message)
+                                    fail(message)
+                                    finishOnce()
+                                    return
+                                }
+
+                                _ = await eventService.flushEvents()
+
+                                let batchDeadline = Date().addingTimeInterval(10.0)
+                                while Date() < batchDeadline {
+                                    if !batchBodies.snapshot().isEmpty { break }
+                                    try await Task.sleep(nanoseconds: 50_000_000)
+                                }
+                                let bodies = batchBodies.snapshot()
+                                if bodies.isEmpty {
+                                    let recentNames = await eventService.getRecentEvents(limit: 20).map(\.name)
+                                    let queued = await eventService.getQueuedEventCount()
+                                    let requests = requestLog.snapshot()
+                                    let message = "E2E: expected POST /batch after flush; queued=\(queued) recent=\(recentNames) requests=\(requests)"
+                                    failureReason.set(message)
+                                    fail(message)
+                                    finishOnce()
+                                    return
+                                }
+
+                                guard let journeyId = expectedJourneyId.get() else {
+                                    fail("E2E: expected journey id")
+                                    finishOnce()
+                                    return
+                                }
+
+                                guard let customerProps = eventProperties(
+                                    forEventName: JourneyEvents.customerUpdated,
+                                    forJourneyId: journeyId,
+                                    fromBatchBodies: bodies
+                                ) else {
+                                    let message = "E2E: expected \(JourneyEvents.customerUpdated) event in POST /batch payload; requests=\(bodies.count)"
+                                    failureReason.set(message)
+                                    fail(message)
+                                    finishOnce()
+                                    return
+                                }
+                                customerUpdatedProps.set(customerProps)
+
+                                guard let sentProps = eventProperties(
+                                    forEventName: JourneyEvents.eventSent,
+                                    forJourneyId: journeyId,
+                                    fromBatchBodies: bodies
+                                ) else {
+                                    let message = "E2E: expected \(JourneyEvents.eventSent) event in POST /batch payload; requests=\(bodies.count)"
+                                    failureReason.set(message)
+                                    fail(message)
+                                    finishOnce()
+                                    return
+                                }
+                                eventSentProps.set(sentProps)
+
+                                guard let customProps = customEventProperties(
+                                    forEventName: expectedEventName,
+                                    forJourneyId: journeyId,
+                                    fromBatchBodies: bodies
+                                ) else {
+                                    let message = "E2E: expected '\(expectedEventName)' event in POST /batch payload; requests=\(bodies.count)"
+                                    failureReason.set(message)
+                                    fail(message)
+                                    finishOnce()
+                                    return
+                                }
+                                customEventProps.set(customProps)
+
+                                finishOnce()
+                            } catch {
+                                let requests = requestLog.snapshot()
+                                fail("E2E setup failed: \(error); requests=\(requests)")
+                                finishOnce()
+                            }
+                        }
+                    }
+
+                    if failureReason.get() != nil {
+                        return
+                    }
+
+                    expect(didReceiveTap.get()).to(beTrue())
+                    expect(didUpdateProperties.get()).to(beTrue())
+
+                    guard let journeyId = expectedJourneyId.get() else {
+                        fail("E2E: expected journey id")
+                        return
+                    }
+                    guard let customerProps = customerUpdatedProps.get() else {
+                        fail("E2E: missing \(JourneyEvents.customerUpdated) properties")
+                        return
+                    }
+                    if let updated = customerProps["attributes_updated"] as? [String] {
+                        expect(updated).to(contain("plan"))
+                    } else if let updatedAny = customerProps["attributes_updated"] as? [Any] {
+                        let updated = updatedAny.compactMap { $0 as? String }
+                        expect(updated).to(contain("plan"))
+                    } else {
+                        fail("E2E: expected attributes_updated list in \(JourneyEvents.customerUpdated) properties; props=\(customerProps)")
+                    }
+                    expect(customerProps["journey_id"] as? String).to(equal(journeyId))
+                    expect(customerProps["campaign_id"] as? String).to(equal("camp-e2e-1"))
+
+                    guard let sentProps = eventSentProps.get() else {
+                        fail("E2E: missing \(JourneyEvents.eventSent) properties")
+                        return
+                    }
+                    expect(sentProps["journey_id"] as? String).to(equal(journeyId))
+                    expect(sentProps["campaign_id"] as? String).to(equal("camp-e2e-1"))
+                    expect(sentProps["event_name"] as? String).to(equal(expectedEventName))
+                    if let evProps = sentProps["event_properties"] as? [String: Any] {
+                        expect(evProps["k"] as? String).to(equal("v"))
+                    } else {
+                        fail("E2E: expected event_properties dict in \(JourneyEvents.eventSent) properties; props=\(sentProps)")
+                    }
+
+                    guard let customProps = customEventProps.get() else {
+                        fail("E2E: missing \(expectedEventName) properties")
+                        return
+                    }
+                    expect(customProps["journeyId"] as? String).to(equal(journeyId))
+                    expect(customProps["campaignId"] as? String).to(equal("camp-e2e-1"))
+                    expect(customProps["screenId"] as? String).to(equal("screen-entry"))
+                    expect(customProps["k"] as? String).to(equal("v"))
+
+                    let requestSnapshot = requestLog.snapshot()
+                    expect(requestSnapshot.contains("POST /batch")).to(beTrue())
+                }
+
 		            it("executes purchase (tap→purchase) and confirms host/web + backend sync (fixture mode)") {
 		                guard let requestLog else { return }
 		                guard let eventBodies else { return }
@@ -3138,6 +3474,24 @@ private func eventProperties(
             guard (item["event"] as? String) == eventName else { continue }
             guard let props = item["properties"] as? [String: Any] else { continue }
             guard (props["journey_id"] as? String) == journeyId else { continue }
+            return props
+        }
+    }
+    return nil
+}
+
+private func customEventProperties(
+    forEventName eventName: String,
+    forJourneyId journeyId: String,
+    fromBatchBodies bodies: [Data]
+) -> [String: Any]? {
+    for body in bodies {
+        guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { continue }
+        guard let batch = root["batch"] as? [[String: Any]] else { continue }
+        for item in batch {
+            guard (item["event"] as? String) == eventName else { continue }
+            guard let props = item["properties"] as? [String: Any] else { continue }
+            guard (props["journeyId"] as? String) == journeyId else { continue }
             return props
         }
     }
