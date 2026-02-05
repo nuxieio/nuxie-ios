@@ -144,19 +144,20 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-			                        if request.method == "GET", request.path.hasPrefix("/flows/") {
-			                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-			                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-			                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
-			                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-			                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
-			                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
-			                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-			                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
-			                            let host = request.headers["host"] ?? "127.0.0.1"
-			                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
-			                        // match real bundle shapes (base URL + manifest-relative paths).
-			                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
+				                        if request.method == "GET", request.path.hasPrefix("/flows/") {
+				                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+				                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
+				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+				                            let host = request.headers["host"] ?? "127.0.0.1"
+				                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
+				                        // match real bundle shapes (base URL + manifest-relative paths).
+				                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
 	                        let manifest: BuildManifest
 		                        if isCompiledBundleFlow {
@@ -167,15 +168,17 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                                )
 		                            }
 			                            let contentHashPrefix: String
-			                            if isExperimentAbFlow {
-			                                contentHashPrefix = "e2e-experiment-ab-compiled"
-			                            } else if isCompiledViewModelFlow {
-			                                contentHashPrefix = "e2e-compiled-view-model-compiled"
-			                            } else if isPurchaseFlow {
-			                                contentHashPrefix = "e2e-purchase-compiled"
-			                            } else if isRestoreFlow {
-			                                contentHashPrefix = "e2e-restore-compiled"
-			                            } else if isNavStackFlow {
+				                            if isExperimentAbFlow {
+				                                contentHashPrefix = "e2e-experiment-ab-compiled"
+				                            } else if isCompiledViewModelFlow {
+				                                contentHashPrefix = "e2e-compiled-view-model-compiled"
+				                            } else if isDidSetFlow {
+				                                contentHashPrefix = "e2e-did-set-compiled"
+				                            } else if isPurchaseFlow {
+				                                contentHashPrefix = "e2e-purchase-compiled"
+				                            } else if isRestoreFlow {
+				                                contentHashPrefix = "e2e-restore-compiled"
+				                            } else if isNavStackFlow {
 			                                contentHashPrefix = "e2e-nav-stack-compiled"
 			                            } else {
 			                                contentHashPrefix = "e2e-compiled"
@@ -316,14 +319,91 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                                        ]
 		                                    )
 		                                ],
-		                                viewModelInstances: nil,
-		                                converters: nil
-		                            )
-		                        } else if isPurchaseFlow {
-	                            remoteFlow = RemoteFlow(
-	                                id: reqFlowId,
-	                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
-	                                screens: [
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
+			                        } else if isDidSetFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: "vm-1",
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "tap": [
+			                                        Interaction(
+			                                            id: "int-tap",
+			                                            trigger: .tap,
+			                                            actions: [
+			                                                .setViewModel(
+			                                                    SetViewModelAction(
+			                                                        path: .ids(VmPathIds(pathIds: [0, 1])),
+			                                                        value: AnyCodable(["literal": "world"] as [String: Any])
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ],
+			                                    "screen-entry": [
+			                                        Interaction(
+			                                            id: "int-title-did-set",
+			                                            trigger: .didSet(path: .ids(VmPathIds(pathIds: [0, 1])), debounceMs: nil),
+			                                            actions: [
+			                                                .setViewModel(
+			                                                    SetViewModelAction(
+			                                                        path: .ids(VmPathIds(pathIds: [0, 2])),
+			                                                        value: AnyCodable(["literal": "ack"] as [String: Any])
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [
+			                                    ViewModel(
+			                                        id: "vm-1",
+			                                        name: "VM",
+			                                        viewModelPathId: 0,
+			                                        properties: [
+			                                            "title": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 1,
+			                                                defaultValue: AnyCodable("hello"),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            ),
+			                                            "didSetAck": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 2,
+			                                                defaultValue: AnyCodable(""),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            )
+			                                        ]
+			                                    )
+			                                ],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
+			                        } else if isPurchaseFlow {
+		                            remoteFlow = RemoteFlow(
+		                                id: reqFlowId,
+		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+		                                screens: [
 	                                    RemoteFlowScreen(
 	                                        id: "screen-entry",
 	                                        defaultViewModelId: nil,
@@ -481,16 +561,17 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
 			                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
 			                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-			                            let reqFlowId = parts.first.map(String.init) ?? ""
-			                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-			                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
-			                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-			                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
-			                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
-			                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-			                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
-			                        let requestedFile = parts.dropFirst().joined(separator: "/")
-			                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
+				                            let reqFlowId = parts.first.map(String.init) ?? ""
+				                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
+				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+				                            let isCompiledBundleFlow = isExperimentAbFlow || isCompiledViewModelFlow || isDidSetFlow || isPurchaseFlow || isRestoreFlow || isNavStackFlow
+				                        let requestedFile = parts.dropFirst().joined(separator: "/")
+				                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
 		                        if isCompiledBundleFlow {
 	                            guard let fixture = experimentAbCompiledBundleFixture else {
@@ -989,15 +1070,161 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
                 expect(didApplyInit.get()).to(beTrue())
-                expect(didApplyPatch.get()).to(beTrue())
-                expect(didReceiveTap.get()).to(beTrue())
-            }
+	                expect(didApplyPatch.get()).to(beTrue())
+	                expect(didReceiveTap.get()).to(beTrue())
+	            }
 
-            it("caches and loads a WebArchive on the next load (fixture mode)") {
-                guard let requestLog else { return }
-                guard server != nil else { return }
+	            it("dispatches action/did_set from the compiled web runtime and runs did_set triggers (fixture mode)") {
+	                guard server != nil else { return }
+	                guard isEnabled("NUXIE_E2E_ENABLE_VIEWMODELS", legacyKeys: ["NUXIE_E2E_PHASE1"]) else { return }
+	                guard experimentAbCompiledBundleFixture != nil else {
+	                    fail("E2E: missing compiled bundle fixture")
+	                    return
+	                }
 
-                let testTimeoutSeconds = 120
+	                let didSetFlowId = "flow_e2e_did_set_\(UUID().uuidString)"
+	                let distinctId = "e2e-user-did-set-1"
+
+	                let messages = LockedArray<String>()
+	                let didReceiveDidSet = LockedValue(false)
+	                let didApplyDidSetAck = LockedValue(false)
+
+	                waitUntil(timeout: .seconds(60)) { done in
+	                    var finished = false
+
+	                    func finishOnce() {
+	                        guard !finished else { return }
+	                        finished = true
+	                        done()
+	                    }
+
+	                    Task {
+	                        do {
+	                            Container.shared.reset()
+	                            let config = NuxieConfiguration(apiKey: apiKey)
+	                            config.apiEndpoint = baseURL
+	                            config.enablePlugins = false
+	                            config.customStoragePath = FileManager.default.temporaryDirectory
+	                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                            Container.shared.sdkConfiguration.register { config }
+	                            Container.shared.eventService.register { MockEventService() }
+
+	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                            let remoteFlow = try await api.fetchFlow(flowId: didSetFlowId)
+	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                            let archiveService = FlowArchiver()
+	                            await archiveService.removeArchive(for: flow.id)
+
+	                            await MainActor.run {
+	                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                let campaign = makeCampaign(flowId: didSetFlowId)
+	                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                runner.attach(viewController: vc)
+
+	                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
+	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
+	                                    messages.append("\(type) keys=[\(payloadKeys)]")
+	                                    if type == "action/did_set" {
+	                                        let ids = payload["pathIds"] as? [Int]
+	                                        let nums = payload["pathIds"] as? [NSNumber]
+	                                        let normalized = ids ?? nums?.map { $0.intValue }
+	                                        if normalized == [0, 1] {
+	                                            didReceiveDidSet.set(true)
+	                                        }
+	                                    }
+	                                }
+	                                runtimeDelegate = delegate
+	                                vc.runtimeDelegate = delegate
+	                                flowViewController = vc
+
+	                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                testWindow.rootViewController = vc
+	                                testWindow.makeKeyAndVisible()
+	                                window = testWindow
+	                                _ = vc.view
+	                            }
+
+	                            guard let vc = flowViewController else {
+	                                fail("E2E: FlowViewController/webView was not created")
+	                                finishOnce()
+	                                return
+	                            }
+	                            let webView = await MainActor.run { vc.flowWebView }
+	                            guard let webView else {
+	                                fail("E2E: FlowViewController/webView was not created")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            let entryMarkerId = "screen-screen-entry-marker"
+	                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            guard (try? await waitForElementExists(webView, elementId: "title-input", timeoutSeconds: 20.0)) == true else {
+	                                fail("E2E: compiled web runtime did not render title-input")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            guard (try? await waitForVmText(webView, equals: "hello", timeoutSeconds: 30.0)) == true else {
+	                                fail("E2E: compiled runtime view model init did not update DOM")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            let nextValue = "Next"
+	                            let didDispatch = try? await evaluateJavaScript(webView, script: """
+	                            (function(){
+	                              var el = document.getElementById('title-input');
+	                              if (!el) return false;
+	                              el.value = \(jsStringLiteral(nextValue));
+	                              el.dispatchEvent(new Event('input', { bubbles: true }));
+	                              return true;
+	                            })();
+	                            """) as? Bool
+	                            if didDispatch != true {
+	                                fail("E2E: failed to dispatch input event on title-input")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            if (try? await waitForElementText(webView, elementId: "did-set-ack", equals: "ack", timeoutSeconds: 30.0)) == true {
+	                                didApplyDidSetAck.set(true)
+	                            } else {
+	                                fail("E2E: did_set trigger did not produce host patch (did-set-ack)")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            if didReceiveDidSet.get(), didApplyDidSetAck.get() {
+	                                finishOnce()
+	                            }
+	                        } catch {
+	                            fail("E2E setup failed: \(error)")
+	                            finishOnce()
+	                        }
+	                    }
+	                }
+
+	                let messagesSnapshot = messages.snapshot()
+	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
+	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/screen_changed") })).to(beTrue())
+	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/did_set") })).to(beTrue())
+	                expect(didReceiveDidSet.get()).to(beTrue())
+	                expect(didApplyDidSetAck.get()).to(beTrue())
+	            }
+
+	            it("caches and loads a WebArchive on the next load (fixture mode)") {
+	                guard let requestLog else { return }
+	                guard server != nil else { return }
+
+	                let testTimeoutSeconds = 120
                 let vmTimeoutSeconds = 30.0
                 let archiveTimeoutSeconds = 45.0
 
@@ -2881,6 +3108,32 @@ private func waitForVmText(_ webView: FlowWebView, equals expected: String, time
             let value = try await evaluateJavaScript(
                 webView,
                 script: "document.getElementById('vm-text') && document.getElementById('vm-text').textContent"
+            ) as? String
+            if value == expected {
+                return true
+            }
+        } catch {
+            // Ignore transient WebKit errors while the page is still loading.
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return false
+}
+
+@MainActor
+private func waitForElementText(
+    _ webView: FlowWebView,
+    elementId: String,
+    equals expected: String,
+    timeoutSeconds: Double = 3.0
+) async throws -> Bool {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    let quoted = jsStringLiteral(elementId)
+    while Date() < deadline {
+        do {
+            let value = try await evaluateJavaScript(
+                webView,
+                script: "document.getElementById(\(quoted)) && document.getElementById(\(quoted)).textContent"
             ) as? String
             if value == expected {
                 return true
