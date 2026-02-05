@@ -17,10 +17,11 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
             var flowViewController: FlowViewController?
             var runtimeDelegate: FlowRuntimeDelegate?
-            var window: UIWindow?
-            var requestLog: LockedArray<String>?
-            var batchBodies: LockedArray<Data>?
-            var experimentAbCompiledBundleFixture: ExperimentAbCompiledBundleFixture?
+	            var window: UIWindow?
+	            var requestLog: LockedArray<String>?
+	            var batchBodies: LockedArray<Data>?
+	            var eventBodies: LockedArray<Data>?
+	            var experimentAbCompiledBundleFixture: ExperimentAbCompiledBundleFixture?
 
             func makeCampaign(flowId: String) -> Campaign {
                 let publishedAt = ISO8601DateFormatter().string(from: Date())
@@ -43,12 +44,13 @@ final class FlowRuntimeE2ESpec: QuickSpec {
             beforeEach {
                 flowViewController = nil
                 runtimeDelegate = nil
-                window = nil
-                requestLog = LockedArray<String>()
-                batchBodies = LockedArray<Data>()
-                if experimentAbCompiledBundleFixture == nil {
-                    experimentAbCompiledBundleFixture = loadExperimentAbCompiledBundleFixture()
-                }
+	                window = nil
+	                requestLog = LockedArray<String>()
+	                batchBodies = LockedArray<Data>()
+	                eventBodies = LockedArray<Data>()
+	                if experimentAbCompiledBundleFixture == nil {
+	                    experimentAbCompiledBundleFixture = loadExperimentAbCompiledBundleFixture()
+	                }
 
                 let env = ProcessInfo.processInfo.environment
                 let envApiKey = env["NUXIE_E2E_API_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -70,11 +72,11 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 if server == nil {
                     server = try? LocalHTTPServer { request in
                         requestLog?.append("\(request.method) \(request.path)")
-                        if request.method == "POST", request.path.hasSuffix("/batch") {
-                            batchBodies?.append(request.body)
+	                        if request.method == "POST", request.path.hasSuffix("/batch") {
+	                            batchBodies?.append(request.body)
 
-                            // Best-effort count for nicer logs/debugging.
-                            let decoded = decodeMaybeGzippedJSON(request.body)
+	                            // Best-effort count for nicer logs/debugging.
+	                            let decoded = decodeMaybeGzippedJSON(request.body)
                             let batchCount = ((decoded as? [String: Any])?["batch"] as? [Any])?.count ?? 0
                             let response = BatchResponse(
                                 status: "ok",
@@ -83,15 +85,42 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                 total: batchCount,
                                 errors: nil
                             )
-                            let json = (try? JSONEncoder().encode(response))
-                                ?? Data("{\"status\":\"ok\",\"processed\":0,\"failed\":0,\"total\":0}".utf8)
-                            return LocalHTTPServer.Response.json(json)
-                        }
-                        if (request.method == "POST" || request.method == "GET"), request.path == "/profile" {
-                            var requestedDistinctId: String? = request.query["distinct_id"]
-                            if requestedDistinctId == nil, !request.body.isEmpty {
-                                if let profileRequest = try? JSONDecoder().decode(ProfileRequest.self, from: request.body) {
-                                    requestedDistinctId = profileRequest.distinctId
+	                            let json = (try? JSONEncoder().encode(response))
+	                                ?? Data("{\"status\":\"ok\",\"processed\":0,\"failed\":0,\"total\":0}".utf8)
+	                            return LocalHTTPServer.Response.json(json)
+	                        }
+	                        if request.method == "POST", request.path == "/event" {
+	                            eventBodies?.append(request.body)
+
+	                            let response = EventResponse(
+	                                status: "ok",
+	                                payload: nil,
+	                                customer: nil,
+	                                event: EventResponse.EventInfo(id: "evt-1", processed: true),
+	                                message: nil,
+	                                featuresMatched: nil,
+	                                usage: nil,
+	                                journey: nil,
+	                                execution: nil
+	                            )
+	                            let json = (try? JSONEncoder().encode(response)) ?? Data("{\"status\":\"ok\"}".utf8)
+	                            return LocalHTTPServer.Response.json(json)
+	                        }
+	                        if request.method == "POST", request.path == "/purchase" {
+	                            let response = PurchaseResponse(
+	                                success: true,
+	                                customerId: "cust-1",
+	                                features: nil,
+	                                error: nil
+	                            )
+	                            let json = (try? JSONEncoder().encode(response)) ?? Data("{\"success\":true}".utf8)
+	                            return LocalHTTPServer.Response.json(json)
+	                        }
+	                        if (request.method == "POST" || request.method == "GET"), request.path == "/profile" {
+	                            var requestedDistinctId: String? = request.query["distinct_id"]
+	                            if requestedDistinctId == nil, !request.body.isEmpty {
+	                                if let profileRequest = try? JSONDecoder().decode(ProfileRequest.self, from: request.body) {
+	                                    requestedDistinctId = profileRequest.distinctId
                                 }
                             }
 
@@ -115,32 +144,35 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                             let json = (try? JSONEncoder().encode(response)) ?? Data("{}".utf8)
                             return LocalHTTPServer.Response.json(json)
                         }
-                        if request.method == "GET", request.path.hasPrefix("/flows/") {
-                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
-                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-                            let host = request.headers["host"] ?? "127.0.0.1"
-                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
-                        // match real bundle shapes (base URL + manifest-relative paths).
-                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
+	                        if request.method == "GET", request.path.hasPrefix("/flows/") {
+	                            let reqFlowId = request.path.replacingOccurrences(of: "/flows/", with: "")
+	                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+	                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+	                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+	                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow
+	                            let host = request.headers["host"] ?? "127.0.0.1"
+	                        // Serve a per-flow bundle root to avoid cache collisions and to more closely
+	                        // match real bundle shapes (base URL + manifest-relative paths).
+	                        let bundleBaseUrl = "http://\(host)/bundles/\(reqFlowId)/"
 
-                        let manifest: BuildManifest
-                        if isExperimentAbFlow {
-                            guard let fixture = experimentAbCompiledBundleFixture else {
-                                return LocalHTTPServer.Response.text(
-                                    "Missing experiment-ab compiled bundle fixture",
-                                    statusCode: 500
-                                )
-                            }
-                            manifest = BuildManifest(
-                                totalFiles: fixture.buildFiles.count,
-                                totalSize: fixture.totalSize,
-                                contentHash: "e2e-experiment-ab-compiled-\(reqFlowId)",
-                                files: fixture.buildFiles
-                            )
-                        } else {
-                            if isMissingAssetFlow {
-                                manifest = BuildManifest(
+	                        let manifest: BuildManifest
+	                        if isCompiledBundleFlow {
+	                            guard let fixture = experimentAbCompiledBundleFixture else {
+	                                return LocalHTTPServer.Response.text(
+	                                    "Missing compiled bundle fixture",
+	                                    statusCode: 500
+	                                )
+	                            }
+	                            let contentHashPrefix = isExperimentAbFlow ? "e2e-experiment-ab-compiled" : "e2e-purchase-compiled"
+	                            manifest = BuildManifest(
+	                                totalFiles: fixture.buildFiles.count,
+	                                totalSize: fixture.totalSize,
+	                                contentHash: "\(contentHashPrefix)-\(reqFlowId)",
+	                                files: fixture.buildFiles
+	                            )
+	                        } else {
+	                            if isMissingAssetFlow {
+	                                manifest = BuildManifest(
                                     totalFiles: 2,
                                     totalSize: 0,
                                     contentHash: "e2e-missing-asset-\(reqFlowId)",
@@ -216,15 +248,47 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                         )
                                     ]
                                 ],
-                                viewModels: [],
-                                viewModelInstances: nil,
-                                converters: nil
-                            )
-                        } else {
-                            remoteFlow = RemoteFlow(
-                                id: reqFlowId,
-                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
-                                screens: [
+	                                viewModels: [],
+	                                viewModelInstances: nil,
+	                                converters: nil
+	                            )
+	                        } else if isPurchaseFlow {
+	                            remoteFlow = RemoteFlow(
+	                                id: reqFlowId,
+	                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+	                                screens: [
+	                                    RemoteFlowScreen(
+	                                        id: "screen-entry",
+	                                        defaultViewModelId: nil,
+	                                        defaultInstanceId: nil
+	                                    )
+	                                ],
+	                                interactions: [
+	                                    "tap": [
+	                                        Interaction(
+	                                            id: "int-tap",
+	                                            trigger: .tap,
+	                                            actions: [
+	                                                .purchase(
+	                                                    PurchaseAction(
+	                                                        placementIndex: AnyCodable(0),
+	                                                        productId: AnyCodable("pro")
+	                                                    )
+	                                                )
+	                                            ],
+	                                            enabled: true
+	                                        )
+	                                    ]
+	                                ],
+	                                viewModels: [],
+	                                viewModelInstances: nil,
+	                                converters: nil
+	                            )
+	                        } else {
+	                            remoteFlow = RemoteFlow(
+	                                id: reqFlowId,
+	                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+	                                screens: [
                                     RemoteFlowScreen(
                                         id: "screen-1",
                                         defaultViewModelId: "vm-1",
@@ -279,21 +343,23 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                     }
 
                         if request.method == "GET", request.path.hasPrefix("/bundles/") {
-                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
-                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-                            let reqFlowId = parts.first.map(String.init) ?? ""
-                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-                        let requestedFile = parts.dropFirst().joined(separator: "/")
-                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
+	                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+	                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+	                            let reqFlowId = parts.first.map(String.init) ?? ""
+	                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+	                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+	                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+	                            let isCompiledBundleFlow = isExperimentAbFlow || isPurchaseFlow
+	                        let requestedFile = parts.dropFirst().joined(separator: "/")
+	                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
-                        if isExperimentAbFlow {
-                            guard let fixture = experimentAbCompiledBundleFixture else {
-                                return LocalHTTPServer.Response.text(
-                                    "Missing experiment-ab compiled bundle fixture",
-                                    statusCode: 500
-                                )
-                            }
+	                        if isCompiledBundleFlow {
+	                            guard let fixture = experimentAbCompiledBundleFixture else {
+	                                return LocalHTTPServer.Response.text(
+	                                    "Missing compiled bundle fixture",
+	                                    statusCode: 500
+	                                )
+	                            }
                             guard let file = fixture.filesByPath[fileName] else {
                                 return LocalHTTPServer.Response.text("Not Found", statusCode: 404)
                             }
@@ -439,10 +505,11 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 runtimeDelegate = nil
                 window?.isHidden = true
                 window?.rootViewController = nil
-                window = nil
-                requestLog = nil
-                batchBodies = nil
-            }
+	                window = nil
+	                requestLog = nil
+	                batchBodies = nil
+	                eventBodies = nil
+	            }
 
             afterSuite {
                 server?.stop()
@@ -1630,12 +1697,269 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 runExperimentBranchTest(variantKey: "a", expectedScreenId: "screen-a")
             }
 
-            it("branches to screen-b and tracks exposure (fixture mode)") {
-                runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
-            }
-            }
-        }
-    }
+	            it("branches to screen-b and tracks exposure (fixture mode)") {
+	                runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
+	            }
+
+	            it("executes purchase (tap→purchase) and confirms host/web + backend sync (fixture mode)") {
+	                guard let requestLog else { return }
+	                guard let eventBodies else { return }
+	                guard server != nil else { return }
+	                guard isEnabled("NUXIE_E2E_ENABLE_PURCHASES") else { return }
+	                guard experimentAbCompiledBundleFixture != nil else {
+	                    fail("E2E: missing compiled bundle fixture")
+	                    return
+	                }
+
+	                let purchaseFlowId = "flow_e2e_purchase_\(UUID().uuidString)"
+	                let distinctId = "e2e-user-purchase-1"
+	                let productId = "pro"
+
+	                let messages = LockedArray<String>()
+	                let didReceiveTap = LockedValue(false)
+	                let didSeeUiSuccess = LockedValue(false)
+	                let didSeeConfirmed = LockedValue(false)
+	                let didPostPurchase = LockedValue(false)
+	                let didPostPurchaseCompletedEvent = LockedValue(false)
+	                let didPostPurchaseSyncedEvent = LockedValue(false)
+
+	                waitUntil(timeout: .seconds(90)) { done in
+	                    var finished = false
+
+	                    func finishOnce() {
+	                        guard !finished else { return }
+	                        finished = true
+	                        done()
+	                    }
+
+	                    func shutdownAndFinish(_ message: String? = nil) async {
+	                        await NuxieSDK.shared.shutdown()
+	                        if let message {
+	                            fail(message)
+	                        }
+	                        finishOnce()
+	                    }
+
+	                    Task {
+	                        do {
+	                            // Ensure we can setup the singleton SDK even if another test previously configured it.
+	                            await NuxieSDK.shared.shutdown()
+	                            Container.shared.reset()
+
+	                            let storagePath = FileManager.default.temporaryDirectory
+	                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+
+	                            let config = NuxieConfiguration(apiKey: apiKey)
+	                            config.apiEndpoint = baseURL
+	                            config.enablePlugins = false
+	                            config.customStoragePath = storagePath
+
+	                            let purchaseDelegate = MockPurchaseDelegate()
+	                            purchaseDelegate.simulatedDelay = 0
+	                            purchaseDelegate.purchaseOutcomeOverride = PurchaseOutcome(
+	                                result: .success,
+	                                transactionJws: "test-jws",
+	                                transactionId: "tx-1",
+	                                originalTransactionId: "otx-1",
+	                                productId: productId
+	                            )
+	                            config.purchaseDelegate = purchaseDelegate
+
+	                            try NuxieSDK.shared.setup(with: config)
+
+	                            let identityService = Container.shared.identityService()
+	                            identityService.setDistinctId(distinctId)
+
+	                            let productService = MockProductService()
+	                            productService.mockProducts = [
+	                                MockStoreProduct(
+	                                    id: productId,
+	                                    displayName: "Pro",
+	                                    price: 9.99,
+	                                    displayPrice: "$9.99"
+	                                )
+	                            ]
+	                            Container.shared.productService.register { productService }
+
+	                            // Wait for the SDK-configured event pipeline to be ready; purchase lifecycle events use /event.
+	                            _ = await Container.shared.eventService().getRecentEvents(limit: 1)
+
+	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                            let remoteFlow = try await api.fetchFlow(flowId: purchaseFlowId)
+	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                            let archiveService = FlowArchiver()
+	                            await archiveService.removeArchive(for: flow.id)
+
+	                            await MainActor.run {
+	                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                let campaign = makeCampaign(flowId: purchaseFlowId)
+	                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+
+	                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                runner.attach(viewController: vc)
+
+	                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
+	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
+	                                    messages.append("\(type) keys=[\(payloadKeys)]")
+	                                    if type == "action/tap" {
+	                                        didReceiveTap.set(true)
+	                                    }
+	                                }
+	                                runtimeDelegate = delegate
+	                                vc.runtimeDelegate = delegate
+	                                flowViewController = vc
+
+	                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                testWindow.rootViewController = vc
+	                                testWindow.makeKeyAndVisible()
+	                                window = testWindow
+	                                _ = vc.view
+	                            }
+
+	                            guard let vc = flowViewController else {
+	                                await shutdownAndFinish("E2E: FlowViewController/webView was not created")
+	                                return
+	                            }
+	                            let webView = await MainActor.run { vc.flowWebView }
+	                            guard let webView else {
+	                                await shutdownAndFinish("E2E: FlowViewController/webView was not created")
+	                                return
+	                            }
+
+	                            let entryMarkerId = "screen-screen-entry-marker"
+	                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                await shutdownAndFinish(
+	                                    "E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'"
+	                                )
+	                                return
+	                            }
+
+	                            let quotedProductId = jsStringLiteral(productId)
+	                            let installHostMessageLogger = """
+	                            (function(){
+	                              try {
+	                                window.__hostMessages = window.__hostMessages || [];
+	                                function wrap(){
+	                                  if (!window.nuxie || typeof window.nuxie._handleHostMessage !== 'function') return false;
+	                                  if (window.nuxie._handleHostMessage && window.nuxie._handleHostMessage.__e2eWrapped) return true;
+	                                  var original = window.nuxie._handleHostMessage;
+	                                  function wrapped(envelope){
+	                                    try { window.__hostMessages.push(envelope); } catch (e) {}
+	                                    return original.apply(this, arguments);
+	                                  }
+	                                  wrapped.__e2eWrapped = true;
+	                                  window.nuxie._handleHostMessage = wrapped;
+	                                  return true;
+	                                }
+	                                if (wrap()) return true;
+	                                if (!window.__e2eHostWrapTimer) {
+	                                  window.__e2eHostWrapTimer = setInterval(function(){
+	                                    if (wrap()) { clearInterval(window.__e2eHostWrapTimer); window.__e2eHostWrapTimer = null; }
+	                                  }, 50);
+	                                }
+	                              } catch (e) {}
+	                              return false;
+	                            })();
+	                            """
+	                            _ = try? await evaluateJavaScript(webView, script: installHostMessageLogger)
+
+	                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+	                            let deadline = Date().addingTimeInterval(30.0)
+	                            while Date() < deadline {
+	                                let checkHostMessages = """
+	                                (function(){
+	                                  try {
+	                                    var msgs = window.__hostMessages || [];
+	                                    var hasUi = msgs.some(function(m){
+	                                      return m && m.type === "purchase_ui_success" && m.payload && m.payload.productId === \(quotedProductId);
+	                                    });
+	                                    var hasConfirmed = msgs.some(function(m){
+	                                      return m && m.type === "purchase_confirmed" && m.payload && m.payload.productId === \(quotedProductId);
+	                                    });
+	                                    return { uiSuccess: hasUi, confirmed: hasConfirmed, count: msgs.length };
+	                                  } catch (e) { return { uiSuccess: false, confirmed: false, count: -1 }; }
+	                                })();
+	                                """
+	                                if let dict = (try? await evaluateJavaScript(webView, script: checkHostMessages)) as? [String: Any] {
+	                                    if (dict["uiSuccess"] as? Bool) == true { didSeeUiSuccess.set(true) }
+	                                    if (dict["confirmed"] as? Bool) == true { didSeeConfirmed.set(true) }
+	                                }
+
+	                                let requests = requestLog.snapshot()
+	                                if requests.contains("POST /purchase") {
+	                                    didPostPurchase.set(true)
+	                                }
+
+	                                let names = eventBodies.snapshot().compactMap { body -> String? in
+	                                    guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { return nil }
+	                                    return root["event"] as? String
+	                                }
+	                                if names.contains(SystemEventNames.purchaseCompleted) {
+	                                    didPostPurchaseCompletedEvent.set(true)
+	                                }
+	                                if names.contains("$purchase_synced") {
+	                                    didPostPurchaseSyncedEvent.set(true)
+	                                }
+
+	                                if
+	                                    didSeeUiSuccess.get(),
+	                                    didSeeConfirmed.get(),
+	                                    didPostPurchase.get(),
+	                                    didPostPurchaseCompletedEvent.get(),
+	                                    didPostPurchaseSyncedEvent.get()
+	                                {
+	                                    break
+	                                }
+
+	                                try await Task.sleep(nanoseconds: 50_000_000)
+	                            }
+
+	                            if
+	                                !didSeeUiSuccess.get()
+	                                || !didSeeConfirmed.get()
+	                                || !didPostPurchase.get()
+	                                || !didPostPurchaseCompletedEvent.get()
+	                                || !didPostPurchaseSyncedEvent.get()
+	                            {
+	                                let hostTypesScript = """
+	                                (function(){
+	                                  try {
+	                                    return (window.__hostMessages || []).map(function(m){ return m && m.type; }).join(",");
+	                                  } catch (e) { return ""; }
+	                                })();
+	                                """
+	                                let hostTypes = (try? await evaluateJavaScript(webView, script: hostTypesScript)) as? String ?? ""
+	                                let eventNames = eventBodies.snapshot().compactMap { body -> String? in
+	                                    guard let root = decodeMaybeGzippedJSON(body) as? [String: Any] else { return nil }
+	                                    return root["event"] as? String
+	                                }
+	                                let requestSnapshot = requestLog.snapshot()
+	                                await shutdownAndFinish(
+	                                    "E2E: purchase did not complete; host=[\(hostTypes)] events=\(eventNames) requests=\(requestSnapshot) messages=\(messages.snapshot())"
+	                                )
+	                                return
+	                            }
+
+	                            await shutdownAndFinish()
+	                        } catch {
+	                            await shutdownAndFinish("E2E setup failed: \(error)")
+	                        }
+	                    }
+	                }
+
+	                expect(didReceiveTap.get()).to(beTrue())
+	                expect(didSeeUiSuccess.get()).to(beTrue())
+	                expect(didSeeConfirmed.get()).to(beTrue())
+	                expect(didPostPurchase.get()).to(beTrue())
+	                expect(didPostPurchaseCompletedEvent.get()).to(beTrue())
+	                expect(didPostPurchaseSyncedEvent.get()).to(beTrue())
+	            }
+	            }
+	        }
+	    }
 
 // MARK: - Test helpers
 
