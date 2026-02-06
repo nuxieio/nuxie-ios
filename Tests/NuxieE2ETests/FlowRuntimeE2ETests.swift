@@ -179,6 +179,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+				                            let isLongPressFlow = reqFlowId.hasPrefix("flow_e2e_long_press_")
+				                            let isDragFlow = reqFlowId.hasPrefix("flow_e2e_drag_")
 				                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
 				                            let isListOpsFlow = reqFlowId.hasPrefix("flow_e2e_list_ops_")
 				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
@@ -191,6 +193,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                || isPurchaseFlow
 				                                || isRestoreFlow
 				                                || isNavStackFlow
+				                                || isLongPressFlow
+				                                || isDragFlow
 				                                || isCustomerUpdateEventFlow
 				                                || isListOpsFlow
 				                            let host = request.headers["host"] ?? "127.0.0.1"
@@ -225,6 +229,10 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 					                                contentHashPrefix = "e2e-restore-compiled"
 					                            } else if isNavStackFlow {
 			                                contentHashPrefix = "e2e-nav-stack-compiled"
+			                            } else if isLongPressFlow {
+			                                contentHashPrefix = "e2e-long-press-compiled"
+			                            } else if isDragFlow {
+			                                contentHashPrefix = "e2e-drag-compiled"
 			                            } else if isCustomerUpdateEventFlow {
 			                                contentHashPrefix = "e2e-customer-update-event-compiled"
 			                            } else if isListOpsFlow {
@@ -651,6 +659,70 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
+			                        } else if isLongPressFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    ),
+			                                    RemoteFlowScreen(
+			                                        id: "screen-a",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "tap": [
+			                                        Interaction(
+			                                            id: "int-long-press",
+			                                            trigger: .longPress(minMs: nil),
+			                                            actions: [
+			                                                .navigate(NavigateAction(screenId: "screen-a"))
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
+			                        } else if isDragFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    ),
+			                                    RemoteFlowScreen(
+			                                        id: "screen-b",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "tap": [
+			                                        Interaction(
+			                                            id: "int-drag",
+			                                            trigger: .drag(direction: nil, threshold: nil),
+			                                            actions: [
+			                                                .navigate(NavigateAction(screenId: "screen-b"))
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
 			                        } else if isCustomerUpdateEventFlow {
 			                            remoteFlow = RemoteFlow(
 			                                id: reqFlowId,
@@ -911,6 +983,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 					                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 					                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 					                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+					                            let isLongPressFlow = reqFlowId.hasPrefix("flow_e2e_long_press_")
+					                            let isDragFlow = reqFlowId.hasPrefix("flow_e2e_drag_")
 					                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
 					                            let isListOpsFlow = reqFlowId.hasPrefix("flow_e2e_list_ops_")
 					                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
@@ -923,6 +997,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 					                                || isPurchaseFlow
 					                                || isRestoreFlow
 					                                || isNavStackFlow
+					                                || isLongPressFlow
+					                                || isDragFlow
 					                                || isCustomerUpdateEventFlow
 					                                || isListOpsFlow
 				                        let requestedFile = parts.dropFirst().joined(separator: "/")
@@ -2823,6 +2899,224 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                    expect(didNavigateTo2.get()).to(beTrue())
 	                    expect(didNavigateBack.get()).to(beTrue())
+	                }
+
+	                it("executes long_press trigger (fixture mode)") {
+	                    guard server != nil else { return }
+	                    guard isEnabled("NUXIE_E2E_ENABLE_GESTURES") else { return }
+	                    guard experimentAbCompiledBundleFixture != nil else {
+	                        fail("E2E: missing compiled bundle fixture")
+	                        return
+	                    }
+
+	                    let flowId = "flow_e2e_long_press_\(UUID().uuidString)"
+	                    let distinctId = "e2e-user-long-press-1"
+
+	                    let didReceiveLongPress = LockedValue(false)
+	                    let didNavigate = LockedValue(false)
+
+	                    waitUntil(timeout: .seconds(60)) { done in
+	                        var finished = false
+
+	                        func finishOnce() {
+	                            guard !finished else { return }
+	                            finished = true
+	                            done()
+	                        }
+
+	                        Task {
+	                            do {
+	                                Container.shared.reset()
+	                                let config = NuxieConfiguration(apiKey: apiKey)
+	                                config.apiEndpoint = baseURL
+	                                config.enablePlugins = false
+	                                config.customStoragePath = FileManager.default.temporaryDirectory
+	                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                                Container.shared.sdkConfiguration.register { config }
+	                                Container.shared.eventService.register { MockEventService() }
+
+	                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                                let remoteFlow = try await api.fetchFlow(flowId: flowId)
+	                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                                let archiveService = FlowArchiver()
+	                                await archiveService.removeArchive(for: flow.id)
+
+	                                await MainActor.run {
+	                                    let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                    let campaign = makeCampaign(flowId: flowId)
+	                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                    runner.attach(viewController: vc)
+
+	                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
+	                                        if type == "action/long_press" || type == "action/longpress" {
+	                                            didReceiveLongPress.set(true)
+	                                        }
+	                                    }
+	                                    runtimeDelegate = delegate
+	                                    vc.runtimeDelegate = delegate
+	                                    flowViewController = vc
+
+	                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                    testWindow.rootViewController = vc
+	                                    testWindow.makeKeyAndVisible()
+	                                    window = testWindow
+	                                    _ = vc.view
+	                                }
+
+	                                guard let vc = flowViewController else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                let webView = await MainActor.run { vc.flowWebView }
+	                                guard let webView else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                let entryMarkerId = "screen-screen-entry-marker"
+	                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                _ = try? await evaluateJavaScript(
+	                                    webView,
+	                                    script: "window.webkit.messageHandlers.bridge.postMessage({type:'action/long_press',payload:{componentId:'tap',screenId:'screen-entry'}})"
+	                                )
+
+	                                let expectedMarkerId = "screen-screen-a-marker"
+	                                guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                    fail("E2E: expected long_press to navigate and render marker '\(expectedMarkerId)'")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                didNavigate.set(true)
+
+	                                finishOnce()
+	                            } catch {
+	                                fail("E2E setup failed: \(error)")
+	                                finishOnce()
+	                            }
+	                        }
+	                    }
+
+	                    expect(didReceiveLongPress.get()).to(beTrue())
+	                    expect(didNavigate.get()).to(beTrue())
+	                }
+
+	                it("executes drag trigger (fixture mode)") {
+	                    guard server != nil else { return }
+	                    guard isEnabled("NUXIE_E2E_ENABLE_GESTURES") else { return }
+	                    guard experimentAbCompiledBundleFixture != nil else {
+	                        fail("E2E: missing compiled bundle fixture")
+	                        return
+	                    }
+
+	                    let flowId = "flow_e2e_drag_\(UUID().uuidString)"
+	                    let distinctId = "e2e-user-drag-1"
+
+	                    let didReceiveDrag = LockedValue(false)
+	                    let didNavigate = LockedValue(false)
+
+	                    waitUntil(timeout: .seconds(60)) { done in
+	                        var finished = false
+
+	                        func finishOnce() {
+	                            guard !finished else { return }
+	                            finished = true
+	                            done()
+	                        }
+
+	                        Task {
+	                            do {
+	                                Container.shared.reset()
+	                                let config = NuxieConfiguration(apiKey: apiKey)
+	                                config.apiEndpoint = baseURL
+	                                config.enablePlugins = false
+	                                config.customStoragePath = FileManager.default.temporaryDirectory
+	                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                                Container.shared.sdkConfiguration.register { config }
+	                                Container.shared.eventService.register { MockEventService() }
+
+	                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                                let remoteFlow = try await api.fetchFlow(flowId: flowId)
+	                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                                let archiveService = FlowArchiver()
+	                                await archiveService.removeArchive(for: flow.id)
+
+	                                await MainActor.run {
+	                                    let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                    let campaign = makeCampaign(flowId: flowId)
+	                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                    runner.attach(viewController: vc)
+
+	                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
+	                                        if type == "action/drag" {
+	                                            didReceiveDrag.set(true)
+	                                        }
+	                                    }
+	                                    runtimeDelegate = delegate
+	                                    vc.runtimeDelegate = delegate
+	                                    flowViewController = vc
+
+	                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                    testWindow.rootViewController = vc
+	                                    testWindow.makeKeyAndVisible()
+	                                    window = testWindow
+	                                    _ = vc.view
+	                                }
+
+	                                guard let vc = flowViewController else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                let webView = await MainActor.run { vc.flowWebView }
+	                                guard let webView else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                let entryMarkerId = "screen-screen-entry-marker"
+	                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                _ = try? await evaluateJavaScript(
+	                                    webView,
+	                                    script: "window.webkit.messageHandlers.bridge.postMessage({type:'action/drag',payload:{componentId:'tap',screenId:'screen-entry'}})"
+	                                )
+
+	                                let expectedMarkerId = "screen-screen-b-marker"
+	                                guard (try? await waitForElementExists(webView, elementId: expectedMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                    fail("E2E: expected drag to navigate and render marker '\(expectedMarkerId)'")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                didNavigate.set(true)
+
+	                                finishOnce()
+	                            } catch {
+	                                fail("E2E setup failed: \(error)")
+	                                finishOnce()
+	                            }
+	                        }
+	                    }
+
+	                    expect(didReceiveDrag.get()).to(beTrue())
+	                    expect(didNavigate.get()).to(beTrue())
 	                }
 
 	                it("executes call_delegate and tracks $delegate_called (fixture mode)") {
