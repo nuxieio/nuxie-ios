@@ -12,6 +12,22 @@ actor FlowJourneyRunnerRuntimeBridge {
         self.runner = runner
     }
 
+    private func parseInt(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? Double { return Int(value) }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
+    }
+
+    private func parseDouble(_ value: Any?) -> Double? {
+        if let value = value as? Double { return value }
+        if let value = value as? Int { return Double(value) }
+        if let value = value as? NSNumber { return value.doubleValue }
+        if let value = value as? String { return Double(value) }
+        return nil
+    }
+
     private func parsePathRef(_ payload: [String: Any]) -> VmPathRef? {
         let isRelative = payload["isRelative"] as? Bool
         let nameBased = payload["nameBased"] as? Bool
@@ -42,6 +58,58 @@ actor FlowJourneyRunnerRuntimeBridge {
             let instanceId = payload["instanceId"] as? String
             _ = await runner.dispatchTrigger(
                 trigger: .tap,
+                screenId: screenId,
+                componentId: componentId,
+                instanceId: instanceId,
+                event: nil
+            )
+
+        case "action/long_press", "action/longpress":
+            let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
+            let screenId = payload["screenId"] as? String ?? currentScreenId
+            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
+            let instanceId = payload["instanceId"] as? String
+            _ = await runner.dispatchTrigger(
+                trigger: .longPress(minMs: minMs),
+                screenId: screenId,
+                componentId: componentId,
+                instanceId: instanceId,
+                event: nil
+            )
+
+        case "action/hover":
+            let screenId = payload["screenId"] as? String ?? currentScreenId
+            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
+            let instanceId = payload["instanceId"] as? String
+            _ = await runner.dispatchTrigger(
+                trigger: .hover,
+                screenId: screenId,
+                componentId: componentId,
+                instanceId: instanceId,
+                event: nil
+            )
+
+        case "action/press":
+            let screenId = payload["screenId"] as? String ?? currentScreenId
+            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
+            let instanceId = payload["instanceId"] as? String
+            _ = await runner.dispatchTrigger(
+                trigger: .press,
+                screenId: screenId,
+                componentId: componentId,
+                instanceId: instanceId,
+                event: nil
+            )
+
+        case "action/drag":
+            let direction = (payload["direction"] as? String)
+                .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
+            let threshold = parseDouble(payload["threshold"])
+            let screenId = payload["screenId"] as? String ?? currentScreenId
+            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
+            let instanceId = payload["instanceId"] as? String
+            _ = await runner.dispatchTrigger(
+                trigger: .drag(direction: direction, threshold: threshold),
                 screenId: screenId,
                 componentId: componentId,
                 instanceId: instanceId,
