@@ -174,6 +174,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
 				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
 				                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
+				                            let isCallDelegateFlow = reqFlowId.hasPrefix("flow_e2e_call_delegate_")
+				                            let isOpenLinkFlow = reqFlowId.hasPrefix("flow_e2e_open_link_")
 				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
 				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
 				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
@@ -184,6 +186,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                || isCompiledViewModelFlow
 				                                || isDidSetFlow
 				                                || isRemoteActionFlow
+				                                || isCallDelegateFlow
+				                                || isOpenLinkFlow
 				                                || isPurchaseFlow
 				                                || isRestoreFlow
 				                                || isNavStackFlow
@@ -209,13 +213,17 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                contentHashPrefix = "e2e-compiled-view-model-compiled"
 				                            } else if isDidSetFlow {
 				                                contentHashPrefix = "e2e-did-set-compiled"
-				                            } else if isRemoteActionFlow {
-				                                contentHashPrefix = "e2e-remote-action-compiled"
-				                            } else if isPurchaseFlow {
-				                                contentHashPrefix = "e2e-purchase-compiled"
-				                            } else if isRestoreFlow {
-				                                contentHashPrefix = "e2e-restore-compiled"
-				                            } else if isNavStackFlow {
+					                            } else if isRemoteActionFlow {
+					                                contentHashPrefix = "e2e-remote-action-compiled"
+					                            } else if isCallDelegateFlow {
+					                                contentHashPrefix = "e2e-call-delegate-compiled"
+					                            } else if isOpenLinkFlow {
+					                                contentHashPrefix = "e2e-open-link-compiled"
+					                            } else if isPurchaseFlow {
+					                                contentHashPrefix = "e2e-purchase-compiled"
+					                            } else if isRestoreFlow {
+					                                contentHashPrefix = "e2e-restore-compiled"
+					                            } else if isNavStackFlow {
 			                                contentHashPrefix = "e2e-nav-stack-compiled"
 			                            } else if isCustomerUpdateEventFlow {
 			                                contentHashPrefix = "e2e-customer-update-event-compiled"
@@ -440,12 +448,12 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
-			                        } else if isRemoteActionFlow {
-			                            remoteFlow = RemoteFlow(
-			                                id: reqFlowId,
-			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
-			                                screens: [
-			                                    RemoteFlowScreen(
+				                        } else if isRemoteActionFlow {
+				                            remoteFlow = RemoteFlow(
+				                                id: reqFlowId,
+				                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+				                                screens: [
+				                                    RemoteFlowScreen(
 			                                        id: "screen-entry",
 			                                        defaultViewModelId: nil,
 			                                        defaultInstanceId: nil
@@ -474,15 +482,79 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                        )
 			                                    ]
 			                                ],
-			                                viewModels: [],
-			                                viewModelInstances: nil,
-			                                converters: nil
-			                            )
-			                        } else if isPurchaseFlow {
-		                            remoteFlow = RemoteFlow(
-		                                id: reqFlowId,
-		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
-		                                screens: [
+				                                viewModels: [],
+				                                viewModelInstances: nil,
+				                                converters: nil
+				                            )
+				                        } else if isCallDelegateFlow {
+				                            remoteFlow = RemoteFlow(
+				                                id: reqFlowId,
+				                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+				                                screens: [
+				                                    RemoteFlowScreen(
+				                                        id: "screen-entry",
+				                                        defaultViewModelId: nil,
+				                                        defaultInstanceId: nil
+				                                    )
+				                                ],
+				                                interactions: [
+				                                    "tap": [
+				                                        Interaction(
+				                                            id: "int-tap",
+				                                            trigger: .tap,
+				                                            actions: [
+				                                                .callDelegate(
+				                                                    CallDelegateAction(
+				                                                        message: "e2e_delegate",
+				                                                        payload: AnyCodable(["k": "v"] as [String: Any])
+				                                                    )
+				                                                )
+				                                            ],
+				                                            enabled: true
+				                                        )
+				                                    ]
+				                                ],
+				                                viewModels: [],
+				                                viewModelInstances: nil,
+				                                converters: nil
+				                            )
+				                        } else if isOpenLinkFlow {
+				                            remoteFlow = RemoteFlow(
+				                                id: reqFlowId,
+				                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+				                                screens: [
+				                                    RemoteFlowScreen(
+				                                        id: "screen-entry",
+				                                        defaultViewModelId: nil,
+				                                        defaultInstanceId: nil
+				                                    )
+				                                ],
+				                                interactions: [
+				                                    "tap": [
+				                                        Interaction(
+				                                            id: "int-tap",
+				                                            trigger: .tap,
+				                                            actions: [
+				                                                .openLink(
+				                                                    OpenLinkAction(
+				                                                        url: AnyCodable("https://example.com"),
+				                                                        target: "external"
+				                                                    )
+				                                                )
+				                                            ],
+				                                            enabled: true
+				                                        )
+				                                    ]
+				                                ],
+				                                viewModels: [],
+				                                viewModelInstances: nil,
+				                                converters: nil
+				                            )
+				                        } else if isPurchaseFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
 	                                    RemoteFlowScreen(
 	                                        id: "screen-entry",
 	                                        defaultViewModelId: nil,
@@ -826,29 +898,33 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                         return LocalHTTPServer.Response.json(json)
                     }
 
-			                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
-			                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
-			                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
-				                            let reqFlowId = parts.first.map(String.init) ?? ""
-				                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
-				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
-				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
-				                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
-				                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
-				                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
-				                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
-				                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
-				                            let isListOpsFlow = reqFlowId.hasPrefix("flow_e2e_list_ops_")
-				                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
-				                            let isCompiledBundleFlow = isExperimentAbFlow
-				                                || isCompiledViewModelFlow
-				                                || isDidSetFlow
-				                                || isRemoteActionFlow
-				                                || isPurchaseFlow
-				                                || isRestoreFlow
-				                                || isNavStackFlow
-				                                || isCustomerUpdateEventFlow
-				                                || isListOpsFlow
+				                        if request.method == "GET", request.path.hasPrefix("/bundles/") {
+				                            let suffix = request.path.replacingOccurrences(of: "/bundles/", with: "")
+				                            let parts = suffix.split(separator: "/", omittingEmptySubsequences: true)
+					                            let reqFlowId = parts.first.map(String.init) ?? ""
+					                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
+					                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
+					                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+					                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
+					                            let isCallDelegateFlow = reqFlowId.hasPrefix("flow_e2e_call_delegate_")
+					                            let isOpenLinkFlow = reqFlowId.hasPrefix("flow_e2e_open_link_")
+					                            let isPurchaseFlow = reqFlowId.hasPrefix("flow_e2e_purchase_")
+					                            let isRestoreFlow = reqFlowId.hasPrefix("flow_e2e_restore_")
+					                            let isNavStackFlow = reqFlowId.hasPrefix("flow_e2e_nav_stack_")
+					                            let isCustomerUpdateEventFlow = reqFlowId.hasPrefix("flow_e2e_customer_update_event_")
+					                            let isListOpsFlow = reqFlowId.hasPrefix("flow_e2e_list_ops_")
+					                            let isMissingAssetFlow = reqFlowId.hasPrefix("flow_e2e_missing_asset_")
+					                            let isCompiledBundleFlow = isExperimentAbFlow
+					                                || isCompiledViewModelFlow
+					                                || isDidSetFlow
+					                                || isRemoteActionFlow
+					                                || isCallDelegateFlow
+					                                || isOpenLinkFlow
+					                                || isPurchaseFlow
+					                                || isRestoreFlow
+					                                || isNavStackFlow
+					                                || isCustomerUpdateEventFlow
+					                                || isListOpsFlow
 				                        let requestedFile = parts.dropFirst().joined(separator: "/")
 				                        let fileName = requestedFile.isEmpty ? "index.html" : requestedFile
 
@@ -2624,11 +2700,11 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                runExperimentBranchTest(variantKey: "b", expectedScreenId: "screen-b")
 		            }
 
-                it("navigates to screen-2 then back (fixture mode)") {
-                    guard server != nil else { return }
-                    guard isEnabled("NUXIE_E2E_ENABLE_NAVIGATION") else { return }
-                    guard experimentAbCompiledBundleFixture != nil else {
-                        fail("E2E: missing compiled bundle fixture")
+	                it("navigates to screen-2 then back (fixture mode)") {
+	                    guard server != nil else { return }
+	                    guard isEnabled("NUXIE_E2E_ENABLE_NAVIGATION") else { return }
+	                    guard experimentAbCompiledBundleFixture != nil else {
+	                        fail("E2E: missing compiled bundle fixture")
                         return
                     }
 
@@ -2745,15 +2821,357 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                         }
                     }
 
-                    expect(didNavigateTo2.get()).to(beTrue())
-                    expect(didNavigateBack.get()).to(beTrue())
-                }
+	                    expect(didNavigateTo2.get()).to(beTrue())
+	                    expect(didNavigateBack.get()).to(beTrue())
+	                }
 
-                it("executes remote nodes and applies server context updates (fixture mode)") {
-                    guard let eventBodies else { return }
-                    guard let requestLog else { return }
-                    guard server != nil else { return }
-                    guard isEnabled("NUXIE_E2E_ENABLE_REMOTE") else { return }
+	                it("executes call_delegate and tracks $delegate_called (fixture mode)") {
+	                    guard server != nil else { return }
+	                    guard isEnabled("NUXIE_E2E_ENABLE_CALL_DELEGATE") else { return }
+	                    guard experimentAbCompiledBundleFixture != nil else {
+	                        fail("E2E: missing compiled bundle fixture")
+	                        return
+	                    }
+
+	                    let flowId = "flow_e2e_call_delegate_\(UUID().uuidString)"
+	                    let distinctId = "e2e-user-call-delegate-1"
+	                    let expectedMessage = "e2e_delegate"
+	                    let expectedPayloadKey = "k"
+	                    let expectedPayloadValue = "v"
+
+	                    let didReceiveTap = LockedValue(false)
+	                    let didReceiveNotification = LockedValue(false)
+	                    let didTrackEvent = LockedValue(false)
+	                    let expectedJourneyId = LockedValue<String?>(nil)
+	                    let notificationInfo = LockedValue<[AnyHashable: Any]?>(nil)
+	                    let trackedProps = LockedValue<[String: Any]?>(nil)
+
+	                    waitUntil(timeout: .seconds(60)) { done in
+	                        var finished = false
+
+	                        func finishOnce() {
+	                            guard !finished else { return }
+	                            finished = true
+	                            done()
+	                        }
+
+	                        Task {
+	                            let mockEventService = MockEventService()
+	                            let observer = NotificationCenter.default.addObserver(
+	                                forName: .nuxieCallDelegate,
+	                                object: nil,
+	                                queue: nil
+	                            ) { notification in
+	                                notificationInfo.set(notification.userInfo)
+	                                didReceiveNotification.set(true)
+	                            }
+	                            defer { NotificationCenter.default.removeObserver(observer) }
+
+	                            do {
+	                                Container.shared.reset()
+	                                let config = NuxieConfiguration(apiKey: apiKey)
+	                                config.apiEndpoint = baseURL
+	                                config.enablePlugins = false
+	                                config.customStoragePath = FileManager.default.temporaryDirectory
+	                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                                Container.shared.sdkConfiguration.register { config }
+	                                Container.shared.eventService.register { mockEventService }
+
+	                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                                let remoteFlow = try await api.fetchFlow(flowId: flowId)
+	                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                                let archiveService = FlowArchiver()
+	                                await archiveService.removeArchive(for: flow.id)
+
+	                                await MainActor.run {
+	                                    let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                    let campaign = makeCampaign(flowId: flowId)
+	                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                    expectedJourneyId.set(journey.id)
+
+	                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                    runner.attach(viewController: vc)
+
+	                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
+	                                        if type == "action/tap" {
+	                                            didReceiveTap.set(true)
+	                                        }
+	                                    }
+	                                    runtimeDelegate = delegate
+	                                    vc.runtimeDelegate = delegate
+	                                    flowViewController = vc
+
+	                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                    testWindow.rootViewController = vc
+	                                    testWindow.makeKeyAndVisible()
+	                                    window = testWindow
+	                                    _ = vc.view
+	                                }
+
+	                                guard let vc = flowViewController else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                let webView = await MainActor.run { vc.flowWebView }
+	                                guard let webView else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                let entryMarkerId = "screen-screen-entry-marker"
+	                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+	                                let deadline = Date().addingTimeInterval(10.0)
+	                                while Date() < deadline {
+	                                    if didReceiveNotification.get(), trackedProps.get() != nil {
+	                                        break
+	                                    }
+
+	                                    let tracked = mockEventService.trackedEvents.first { $0.name == JourneyEvents.delegateCalled }
+	                                    if let props = tracked?.properties {
+	                                        trackedProps.set(props)
+	                                        didTrackEvent.set(true)
+	                                    }
+
+	                                    try await Task.sleep(nanoseconds: 50_000_000)
+	                                }
+
+	                                if !didReceiveNotification.get() {
+	                                    fail("E2E: expected a .nuxieCallDelegate notification after tap")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                if !didTrackEvent.get() {
+	                                    fail("E2E: expected \(JourneyEvents.delegateCalled) to be tracked after tap")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                finishOnce()
+	                            } catch {
+	                                fail("E2E setup failed: \(error)")
+	                                finishOnce()
+	                            }
+	                        }
+	                    }
+
+	                    expect(didReceiveTap.get()).to(beTrue())
+	                    expect(didReceiveNotification.get()).to(beTrue())
+	                    expect(didTrackEvent.get()).to(beTrue())
+
+	                    guard let journeyId = expectedJourneyId.get() else {
+	                        fail("E2E: expected journey id")
+	                        return
+	                    }
+
+	                    guard let userInfo = notificationInfo.get() else {
+	                        fail("E2E: missing .nuxieCallDelegate userInfo")
+	                        return
+	                    }
+	                    expect(userInfo["journeyId"] as? String).to(equal(journeyId))
+	                    expect(userInfo["campaignId"] as? String).to(equal("camp-e2e-1"))
+	                    expect(userInfo["message"] as? String).to(equal(expectedMessage))
+	                    if let payload = userInfo["payload"] as? [String: Any] {
+	                        expect(payload[expectedPayloadKey] as? String).to(equal(expectedPayloadValue))
+	                    } else {
+	                        fail("E2E: expected payload dict in .nuxieCallDelegate userInfo; userInfo=\(userInfo)")
+	                    }
+
+	                    guard let props = trackedProps.get() else {
+	                        fail("E2E: missing \(JourneyEvents.delegateCalled) properties")
+	                        return
+	                    }
+	                    expect(props["journey_id"] as? String).to(equal(journeyId))
+	                    expect(props["campaign_id"] as? String).to(equal("camp-e2e-1"))
+	                    expect(props["message"] as? String).to(equal(expectedMessage))
+	                    if let payload = props["payload"] as? [String: Any] {
+	                        expect(payload[expectedPayloadKey] as? String).to(equal(expectedPayloadValue))
+	                    } else {
+	                        fail("E2E: expected payload dict in \(JourneyEvents.delegateCalled) properties; props=\(props)")
+	                    }
+	                }
+
+	                it("executes open_link and notifies the host (fixture mode)") {
+	                    guard server != nil else { return }
+	                    guard isEnabled("NUXIE_E2E_ENABLE_OPEN_LINK") else { return }
+	                    guard experimentAbCompiledBundleFixture != nil else {
+	                        fail("E2E: missing compiled bundle fixture")
+	                        return
+	                    }
+
+	                    let flowId = "flow_e2e_open_link_\(UUID().uuidString)"
+	                    let distinctId = "e2e-user-open-link-1"
+	                    let expectedUrl = "https://example.com"
+	                    let expectedTarget = "external"
+
+	                    let didReceiveTap = LockedValue(false)
+	                    let didReceiveNotification = LockedValue(false)
+	                    let didCaptureOpenLink = LockedValue(false)
+	                    let expectedJourneyId = LockedValue<String?>(nil)
+	                    let notificationInfo = LockedValue<[AnyHashable: Any]?>(nil)
+	                    let openLinkRequest = LockedValue<OpenLinkCapturingFlowViewController.OpenLinkRequest?>(nil)
+
+	                    waitUntil(timeout: .seconds(60)) { done in
+	                        var finished = false
+
+	                        func finishOnce() {
+	                            guard !finished else { return }
+	                            finished = true
+	                            done()
+	                        }
+
+	                        Task {
+	                            let observer = NotificationCenter.default.addObserver(
+	                                forName: .nuxieOpenLink,
+	                                object: nil,
+	                                queue: nil
+	                            ) { notification in
+	                                notificationInfo.set(notification.userInfo)
+	                                didReceiveNotification.set(true)
+	                            }
+	                            defer { NotificationCenter.default.removeObserver(observer) }
+
+	                            do {
+	                                Container.shared.reset()
+	                                let config = NuxieConfiguration(apiKey: apiKey)
+	                                config.apiEndpoint = baseURL
+	                                config.enablePlugins = false
+	                                config.customStoragePath = FileManager.default.temporaryDirectory
+	                                    .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                                Container.shared.sdkConfiguration.register { config }
+	                                Container.shared.eventService.register { MockEventService() }
+
+	                                let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                                let remoteFlow = try await api.fetchFlow(flowId: flowId)
+	                                let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                                let archiveService = FlowArchiver()
+	                                await archiveService.removeArchive(for: flow.id)
+
+	                                await MainActor.run {
+	                                    let vc = OpenLinkCapturingFlowViewController(flow: flow, archiveService: archiveService)
+	                                    let campaign = makeCampaign(flowId: flowId)
+	                                    let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                    expectedJourneyId.set(journey.id)
+
+	                                    let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                    runner.attach(viewController: vc)
+
+	                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
+	                                        if type == "action/tap" {
+	                                            didReceiveTap.set(true)
+	                                        }
+	                                    }
+	                                    runtimeDelegate = delegate
+	                                    vc.runtimeDelegate = delegate
+	                                    flowViewController = vc
+
+	                                    let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                    testWindow.rootViewController = vc
+	                                    testWindow.makeKeyAndVisible()
+	                                    window = testWindow
+	                                    _ = vc.view
+	                                }
+
+	                                guard let vc = flowViewController else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                let webView = await MainActor.run { vc.flowWebView }
+	                                guard let webView else {
+	                                    fail("E2E: FlowViewController/webView was not created")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                let entryMarkerId = "screen-screen-entry-marker"
+	                                guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                    fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                _ = try? await evaluateJavaScript(webView, script: "document.getElementById('tap').click()")
+
+	                                let deadline = Date().addingTimeInterval(10.0)
+	                                while Date() < deadline {
+	                                    if didReceiveNotification.get(), didCaptureOpenLink.get() {
+	                                        break
+	                                    }
+
+	                                    let request = await MainActor.run {
+	                                        (flowViewController as? OpenLinkCapturingFlowViewController)?.openLinkRequests.first
+	                                    }
+	                                    if let request {
+	                                        openLinkRequest.set(request)
+	                                        didCaptureOpenLink.set(true)
+	                                    }
+
+	                                    try await Task.sleep(nanoseconds: 50_000_000)
+	                                }
+
+	                                if !didReceiveNotification.get() {
+	                                    fail("E2E: expected a .nuxieOpenLink notification after tap")
+	                                    finishOnce()
+	                                    return
+	                                }
+	                                if !didCaptureOpenLink.get() {
+	                                    fail("E2E: expected FlowViewController.performOpenLink to be called after tap")
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                finishOnce()
+	                            } catch {
+	                                fail("E2E setup failed: \(error)")
+	                                finishOnce()
+	                            }
+	                        }
+	                    }
+
+	                    expect(didReceiveTap.get()).to(beTrue())
+	                    expect(didReceiveNotification.get()).to(beTrue())
+	                    expect(didCaptureOpenLink.get()).to(beTrue())
+
+	                    guard let journeyId = expectedJourneyId.get() else {
+	                        fail("E2E: expected journey id")
+	                        return
+	                    }
+
+	                    guard let request = openLinkRequest.get() else {
+	                        fail("E2E: missing open link request")
+	                        return
+	                    }
+	                    expect(request.urlString).to(equal(expectedUrl))
+	                    expect(request.target).to(equal(expectedTarget))
+
+	                    guard let userInfo = notificationInfo.get() else {
+	                        fail("E2E: missing .nuxieOpenLink userInfo")
+	                        return
+	                    }
+	                    expect(userInfo["journeyId"] as? String).to(equal(journeyId))
+	                    expect(userInfo["campaignId"] as? String).to(equal("camp-e2e-1"))
+	                    expect(userInfo["url"] as? String).to(equal(expectedUrl))
+	                    expect(userInfo["target"] as? String).to(equal(expectedTarget))
+	                }
+
+	                it("executes remote nodes and applies server context updates (fixture mode)") {
+	                    guard let eventBodies else { return }
+	                    guard let requestLog else { return }
+	                    guard server != nil else { return }
+	                    guard isEnabled("NUXIE_E2E_ENABLE_REMOTE") else { return }
                     guard experimentAbCompiledBundleFixture != nil else {
                         fail("E2E: missing compiled bundle fixture")
                         return
@@ -3692,6 +4110,19 @@ private final class CapturingRuntimeDelegate: FlowRuntimeDelegate {
     }
 }
 
+private final class OpenLinkCapturingFlowViewController: FlowViewController {
+    struct OpenLinkRequest {
+        let urlString: String
+        let target: String?
+    }
+
+    private(set) var openLinkRequests: [OpenLinkRequest] = []
+
+    override func performOpenLink(urlString: String, target: String? = nil) {
+        openLinkRequests.append(OpenLinkRequest(urlString: urlString, target: target))
+    }
+}
+
 private final class LockedArray<T> {
     private let lock = NSLock()
     private(set) var values: [T] = []
@@ -3964,7 +4395,7 @@ private func jsStringLiteral(_ value: String) -> String {
 }
 
 @MainActor
-private func evaluateJavaScript(_ webView: FlowWebView, script: String) async throws -> Any? {
+private func evaluateJavaScript(_ webView: WKWebView, script: String) async throws -> Any? {
     try await withCheckedThrowingContinuation { continuation in
         webView.evaluateJavaScript(script) { result, error in
             if let error = error {
@@ -3978,7 +4409,7 @@ private func evaluateJavaScript(_ webView: FlowWebView, script: String) async th
 
 @MainActor
 private func waitForElementExists(
-    _ webView: FlowWebView,
+    _ webView: WKWebView,
     elementId: String,
     timeoutSeconds: Double = 3.0
 ) async throws -> Bool {
@@ -4002,7 +4433,7 @@ private func waitForElementExists(
 }
 
 @MainActor
-private func waitForVmText(_ webView: FlowWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
+private func waitForVmText(_ webView: WKWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     while Date() < deadline {
         do {
@@ -4023,7 +4454,7 @@ private func waitForVmText(_ webView: FlowWebView, equals expected: String, time
 
 @MainActor
 private func waitForListItems(
-    _ webView: FlowWebView,
+    _ webView: WKWebView,
     containerId: String,
     equals expected: [String],
     timeoutSeconds: Double = 3.0
@@ -4059,7 +4490,7 @@ private func waitForListItems(
 
 @MainActor
 private func waitForElementText(
-    _ webView: FlowWebView,
+    _ webView: WKWebView,
     elementId: String,
     equals expected: String,
     timeoutSeconds: Double = 3.0
@@ -4084,7 +4515,7 @@ private func waitForElementText(
 }
 
 @MainActor
-private func waitForScreenId(_ webView: FlowWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
+private func waitForScreenId(_ webView: WKWebView, equals expected: String, timeoutSeconds: Double = 3.0) async throws -> Bool {
     let deadline = Date().addingTimeInterval(timeoutSeconds)
     while Date() < deadline {
         do {
