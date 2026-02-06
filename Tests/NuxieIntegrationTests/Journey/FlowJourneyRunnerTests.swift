@@ -512,6 +512,33 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 }
             }
 
+            it("continues on time_window when inside configured hours") {
+                let flowId = "flow-time-window-in"
+                let action = TimeWindowAction(
+                    startTime: "09:00",
+                    endTime: "17:00",
+                    timezone: "UTC",
+                    daysOfWeek: nil
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.timeWindow(action)]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+                let date = calendar.date(from: DateComponents(year: 2024, month: 1, day: 1, hour: 10, minute: 0))!
+                mocks.dateProvider.setCurrentDate(date)
+
+                _ = await runner.handleRuntimeReady()
+
+                expect(journey.flowState.pendingAction).to(beNil())
+            }
+
             it("resumes wait_until when event condition is satisfied") {
                 let flowId = "flow-wait"
                 let viewModel = ViewModel(
@@ -561,6 +588,69 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 let event = TestEventBuilder(name: "ready").withDistinctId("user-1").build()
                 _ = await runner.resumePendingAction(reason: .event(event), event: event)
+
+                let snapshot = journey.flowState.viewModelSnapshot
+                let values = snapshot?.viewModelInstances.first?.values
+                let flag = values?["flag"]?.value as? Bool
+                expect(flag).to(equal(true))
+                expect(journey.flowState.pendingAction).to(beNil())
+            }
+
+            it("continues wait_until after maxTimeMs deadline") {
+                let flowId = "flow-wait-deadline"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "flag": ViewModelProperty(
+                            type: .boolean,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(false),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let waitAction = WaitUntilAction(
+                    condition: TestWaitCondition.expression("false"),
+                    maxTimeMs: 1_000
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .waitUntil(waitAction),
+                        .setViewModel(SetViewModelAction(
+                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            value: AnyCodable(["literal": true] as [String: Any])
+                        ))
+                    ],
+                    viewModels: [viewModel]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+                let start = calendar.date(from: DateComponents(year: 2024, month: 1, day: 1, hour: 0, minute: 0, second: 0))!
+                mocks.dateProvider.setCurrentDate(start)
+
+                let outcome = await runner.handleRuntimeReady()
+                guard case .paused(let pending) = outcome else {
+                    fail("Expected wait_until to pause")
+                    return
+                }
+                expect(pending.kind).to(equal(.waitUntil))
+                expect(pending.resumeAt).toNot(beNil())
+
+                mocks.dateProvider.setCurrentDate(start.addingTimeInterval(2.0))
+                _ = await runner.resumePendingAction(reason: .timer, event: nil)
 
                 let snapshot = journey.flowState.viewModelSnapshot
                 let values = snapshot?.viewModelInstances.first?.values
