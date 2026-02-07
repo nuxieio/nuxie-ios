@@ -143,7 +143,6 @@ public struct Interaction: Codable {
 }
 
 public enum InteractionTrigger: Codable {
-    case tap
     case longPress(minMs: Int?)
     case hover
     case press
@@ -175,7 +174,6 @@ public enum InteractionTrigger: Codable {
     }
 
     private enum TriggerType: String, Codable {
-        case tap
         case longPress = "long_press"
         case hover
         case press
@@ -189,8 +187,6 @@ public enum InteractionTrigger: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let typeValue = (try? container.decode(TriggerType.self, forKey: .type))
         switch typeValue {
-        case .tap:
-            self = .tap
         case .longPress:
             self = .longPress(minMs: try container.decodeIfPresent(Int.self, forKey: .minMs))
         case .hover:
@@ -225,8 +221,6 @@ public enum InteractionTrigger: Codable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .tap:
-            try container.encode(TriggerType.tap, forKey: .type)
         case .longPress(let minMs):
             try container.encode(TriggerType.longPress, forKey: .type)
             try container.encodeIfPresent(minMs, forKey: .minMs)

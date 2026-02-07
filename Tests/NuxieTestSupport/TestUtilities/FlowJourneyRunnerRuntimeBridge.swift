@@ -40,35 +40,23 @@ actor FlowJourneyRunnerRuntimeBridge {
         return nil
     }
 
-    func handle(type: String, payload: [String: Any], id: String?) async {
-        switch type {
-        case "runtime/ready":
-            guard !didHandleReady else { return }
-            didHandleReady = true
-            _ = await runner.handleRuntimeReady()
+	    func handle(type: String, payload: [String: Any], id: String?) async {
+	        switch type {
+	        case "runtime/ready":
+	            guard !didHandleReady else { return }
+	            didHandleReady = true
+	            _ = await runner.handleRuntimeReady()
 
-        case "runtime/screen_changed":
-            guard let screenId = payload["screenId"] as? String else { return }
-            currentScreenId = screenId
-            _ = await runner.handleScreenChanged(screenId)
+	        case "runtime/screen_changed":
+	            guard let screenId = payload["screenId"] as? String else { return }
+	            currentScreenId = screenId
+	            _ = await runner.handleScreenChanged(screenId)
 
-        case "action/tap":
-            let screenId = payload["screenId"] as? String ?? currentScreenId
-            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
-            let instanceId = payload["instanceId"] as? String
-            _ = await runner.dispatchTrigger(
-                trigger: .tap,
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId,
-                event: nil
-            )
-
-        case "action/long_press", "action/longpress":
-            let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
-            let screenId = payload["screenId"] as? String ?? currentScreenId
-            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
-            let instanceId = payload["instanceId"] as? String
+	        case "action/long_press", "action/longpress":
+	            let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
+	            let screenId = payload["screenId"] as? String ?? currentScreenId
+	            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
+	            let instanceId = payload["instanceId"] as? String
             _ = await runner.dispatchTrigger(
                 trigger: .longPress(minMs: minMs),
                 screenId: screenId,

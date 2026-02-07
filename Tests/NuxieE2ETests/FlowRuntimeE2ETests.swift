@@ -311,17 +311,17 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                         defaultViewModelId: nil,
                                         defaultInstanceId: nil
                                     )
-                                ],
-                                interactions: [
-                                    "tap": [
-                                        Interaction(
-                                            id: "int-tap",
-                                            trigger: .tap,
-                                            actions: [
-                                                .experiment(experiment)
-                                            ],
-                                            enabled: true
-                                        )
+	                                ],
+	                                interactions: [
+	                                    "tap": [
+	                                        Interaction(
+	                                            id: "int-press",
+	                                            trigger: .press,
+	                                            actions: [
+	                                                .experiment(experiment)
+	                                            ],
+	                                            enabled: true
+	                                        )
                                     ]
                                 ],
 		                                viewModels: [],
@@ -343,7 +343,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                                    "tap": [
 		                                        Interaction(
 		                                            id: "int-tap",
-		                                            trigger: .tap,
+		                                            trigger: .press,
 		                                            actions: [
 		                                                .setViewModel(
 		                                                    SetViewModelAction(
@@ -393,8 +393,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                interactions: [
 			                                    "tap": [
 			                                        Interaction(
-			                                            id: "int-tap",
-			                                            trigger: .tap,
+			                                            id: "int-press",
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .setViewModel(
 			                                                    SetViewModelAction(
@@ -466,16 +466,16 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                        defaultViewModelId: nil,
 			                                        defaultInstanceId: nil
 			                                    )
-			                                ],
-			                                interactions: [
-			                                    "tap": [
-			                                        Interaction(
-			                                            id: "int-tap",
-			                                            trigger: .tap,
-			                                            actions: [
-			                                                .remote(
-			                                                    RemoteAction(
-			                                                        action: "set_context",
+				                                ],
+				                                interactions: [
+				                                    "tap": [
+				                                        Interaction(
+				                                            id: "int-press",
+				                                            trigger: .press,
+				                                            actions: [
+				                                                .remote(
+				                                                    RemoteAction(
+				                                                        action: "set_context",
 			                                                        payload: AnyCodable(["value": "hello"] as [String: Any])
 			                                                    )
 			                                                ),
@@ -508,8 +508,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                interactions: [
 				                                    "tap": [
 				                                        Interaction(
-				                                            id: "int-tap",
-				                                            trigger: .tap,
+				                                            id: "int-press",
+				                                            trigger: .press,
 				                                            actions: [
 				                                                .callDelegate(
 				                                                    CallDelegateAction(
@@ -541,7 +541,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                    "tap": [
 				                                        Interaction(
 				                                            id: "int-tap",
-				                                            trigger: .tap,
+				                                            trigger: .press,
 				                                            actions: [
 				                                                .openLink(
 				                                                    OpenLinkAction(
@@ -573,7 +573,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                    "tap": [
 	                                        Interaction(
 	                                            id: "int-tap",
-	                                            trigger: .tap,
+	                                            trigger: .press,
 	                                            actions: [
 	                                                .purchase(
 	                                                    PurchaseAction(
@@ -605,7 +605,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 		                                    "tap": [
 		                                        Interaction(
 		                                            id: "int-tap",
-		                                            trigger: .tap,
+		                                            trigger: .press,
 		                                            actions: [
 		                                                .restore(RestoreAction())
 		                                            ],
@@ -637,7 +637,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                    "to-2": [
 			                                        Interaction(
 			                                            id: "int-to-2",
-			                                            trigger: .tap,
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .navigate(NavigateAction(screenId: "screen-2"))
 			                                            ],
@@ -647,7 +647,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                    "back": [
 			                                        Interaction(
 			                                            id: "int-back",
-			                                            trigger: .tap,
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .back(BackAction(steps: 1))
 			                                            ],
@@ -738,7 +738,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                    "tap": [
 			                                        Interaction(
 			                                            id: "int-tap",
-			                                            trigger: .tap,
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .updateCustomer(
 			                                                    UpdateCustomerAction(
@@ -792,7 +792,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                    "list-insert": [
 			                                        Interaction(
 			                                            id: "int-list-insert",
-			                                            trigger: .tap,
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .listInsert(
 			                                                    ListInsertAction(
@@ -810,7 +810,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                    "list-move": [
 			                                        Interaction(
 			                                            id: "int-list-move",
-			                                            trigger: .tap,
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .listMove(
 			                                                    ListMoveAction(
@@ -826,7 +826,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                    "list-remove": [
 			                                        Interaction(
 			                                            id: "int-list-remove",
-			                                            trigger: .tap,
+			                                            trigger: .press,
 			                                            actions: [
 			                                                .listRemove(
 			                                                    ListRemoveAction(
@@ -927,7 +927,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                     "tap": [
                                         Interaction(
                                             id: "int-tap",
-                                            trigger: .tap,
+                                            trigger: .press,
                                             actions: [
                                                 .setViewModel(
                                                     SetViewModelAction(
@@ -1045,7 +1045,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                 // - Emit runtime/ready and runtime/screen_changed (web -> host)
                                 // - Reflect runtime/navigate into the DOM
                                 // - Apply runtime/view_model_init + runtime/view_model_patch into the DOM
-                                // - Emit a deterministic action/tap from a button click
+                                // - Emit a deterministic action/press from a button click
 
                                 function post(type, payload) {
                                   try {
@@ -1111,7 +1111,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
                                 try {
                                   document.getElementById("tap").addEventListener("click", function() {
-                                    post("action/tap", { componentId: "tap", screenId: window.__nuxieScreenId || null });
+                                    post("action/press", { componentId: "tap", screenId: window.__nuxieScreenId || null });
                                   });
                                 } catch (e) {}
 
@@ -1260,7 +1260,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 expect(screenChangedId.get()).to(equal(expected))
             }
 
-            it("applies view model init/patch and emits action/tap (fixture mode)") {
+            it("applies view model init/patch and emits action/press (fixture mode)") {
                 guard server != nil else { return }
                 guard isEnabled("NUXIE_E2E_ENABLE_VIEWMODELS", legacyKeys: ["NUXIE_E2E_PHASE1"]) else { return }
 
@@ -1308,7 +1308,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                 let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, id in
                                     let payloadKeys = payload.keys.sorted().joined(separator: ",")
                                     messages.append("\(type) keys=[\(payloadKeys)]")
-                                    if type == "action/tap" {
+                                    if type == "action/press" {
                                         if payload["componentId"] as? String == "tap" || payload["elementId"] as? String == "tap" {
                                             didReceiveTap.set(true)
                                         }
@@ -1373,7 +1373,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 let messagesSnapshot = messages.snapshot()
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/screen_changed") })).to(beTrue())
-                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/press") })).to(beTrue())
                 expect(didApplyInit.get()).to(beTrue())
                 expect(didApplyPatch.get()).to(beTrue())
                 expect(didReceiveTap.get()).to(beTrue())
@@ -1433,7 +1433,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                 let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
                                     let payloadKeys = payload.keys.sorted().joined(separator: ",")
                                     messages.append("\(type) keys=[\(payloadKeys)]")
-                                    if type == "action/tap" {
+                                    if type == "action/press" {
                                         if payload["componentId"] as? String == "tap" || payload["elementId"] as? String == "tap" {
                                             didReceiveTap.set(true)
                                         }
@@ -1499,7 +1499,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
                 let messagesSnapshot = messages.snapshot()
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
-                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/press") })).to(beTrue())
                 expect(didApplyInit.get()).to(beTrue())
 	                expect(didApplyPatch.get()).to(beTrue())
 	                expect(didReceiveTap.get()).to(beTrue())
@@ -1705,7 +1705,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
 	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
 	                                    messages.append("\(type) keys=[\(payloadKeys)]")
-	                                    if type == "action/tap" {
+	                                    if type == "action/press" {
 	                                        let componentId = (payload["componentId"] as? String) ?? (payload["elementId"] as? String)
 	                                        switch componentId {
 	                                        case "list-insert":
@@ -1785,7 +1785,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                            if didReceiveInsertTap.get(), didReceiveMoveTap.get(), didReceiveRemoveTap.get() {
 	                                finishOnce()
 	                            } else {
-	                                fail("E2E: did not observe expected action/tap messages for list ops")
+	                                fail("E2E: did not observe expected action/press messages for list ops")
 	                                finishOnce()
 	                            }
 	                        } catch {
@@ -1797,7 +1797,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                let messagesSnapshot = messages.snapshot()
 	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
-	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
+	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/press") })).to(beTrue())
 	                expect(didReceiveInsertTap.get()).to(beTrue())
 	                expect(didReceiveMoveTap.get()).to(beTrue())
 	                expect(didReceiveRemoveTap.get()).to(beTrue())
@@ -2681,7 +2681,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                 let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
                                     let payloadKeys = payload.keys.sorted().joined(separator: ",")
                                     messages.append("\(type) keys=[\(payloadKeys)]")
-                                    if type == "action/tap" {
+                                    if type == "action/press" {
                                         didReceiveTap.set(true)
                                     }
                                 }
@@ -2751,7 +2751,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
                 let messagesSnapshot = messages.snapshot()
                 expect(messagesSnapshot.contains(where: { $0.hasPrefix("runtime/ready") })).to(beTrue())
-                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/tap") })).to(beTrue())
+                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/press") })).to(beTrue())
                 expect(didReceiveTap.get()).to(beTrue())
                 expect(didNavigateToExpected.get()).to(beTrue())
 
@@ -3189,7 +3189,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
 	                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
-	                                        if type == "action/tap" {
+	                                        if type == "action/press" {
 	                                            didReceiveTap.set(true)
 	                                        }
 	                                    }
@@ -3363,7 +3363,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                                    let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
 	                                    let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
-	                                        if type == "action/tap" {
+	                                        if type == "action/press" {
 	                                            didReceiveTap.set(true)
 	                                        }
 	                                    }
@@ -3537,7 +3537,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
                                     let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
                                     let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
-                                        if type == "action/tap" {
+                                        if type == "action/press" {
                                             didReceiveTap.set(true)
                                         }
                                     }
@@ -3720,7 +3720,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
                                     let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
                                     let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, _, _ in
-                                        if type == "action/tap" {
+                                        if type == "action/press" {
                                             didReceiveTap.set(true)
                                         }
                                     }
@@ -4015,7 +4015,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
 	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
 	                                    messages.append("\(type) keys=[\(payloadKeys)]")
-	                                    if type == "action/tap" {
+	                                    if type == "action/press" {
 	                                        didReceiveTap.set(true)
 	                                    }
 	                                }
@@ -4248,7 +4248,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                let delegate = FlowJourneyRunnerRuntimeDelegate(bridge: bridge) { type, payload, _ in
 	                                    let payloadKeys = payload.keys.sorted().joined(separator: ",")
 	                                    messages.append("\(type) keys=[\(payloadKeys)]")
-	                                    if type == "action/tap" {
+	                                    if type == "action/press" {
 	                                        didReceiveTap.set(true)
 	                                    }
 	                                }

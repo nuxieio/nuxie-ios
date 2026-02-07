@@ -1590,8 +1590,7 @@ final class FlowJourneyRunner {
         _ inputTrigger: InteractionTrigger
     ) -> Bool {
         switch (interactionTrigger, inputTrigger) {
-        case (.tap, .tap),
-             (.hover, .hover),
+        case (.hover, .hover),
              (.press, .press),
              (.manual, .manual):
             return true
