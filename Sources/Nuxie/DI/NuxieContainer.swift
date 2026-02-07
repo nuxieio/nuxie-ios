@@ -29,7 +29,7 @@ extension Container {
         urlSession: config.urlSession
       )
     }
-    .singleton
+    .scope(.sdk)
   }
 
   var identityService: Factory<IdentityServiceProtocol> {
