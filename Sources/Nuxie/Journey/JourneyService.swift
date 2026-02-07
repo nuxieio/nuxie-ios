@@ -1003,22 +1003,20 @@ public actor JourneyService: JourneyServiceProtocol {
     return nil
   }
 
-  private func parseTriggerType(_ raw: String, payload: [String: Any]) -> InteractionTrigger? {
-    let normalized = raw
-      .replacingOccurrences(of: "action/", with: "")
-      .replacingOccurrences(of: "-", with: "_")
-      .lowercased()
+	  private func parseTriggerType(_ raw: String, payload: [String: Any]) -> InteractionTrigger? {
+	    let normalized = raw
+	      .replacingOccurrences(of: "action/", with: "")
+	      .replacingOccurrences(of: "-", with: "_")
+	      .lowercased()
 
-    switch normalized {
-    case "tap":
-      return .tap
-    case "long_press", "longpress":
-      let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
-      return .longPress(minMs: minMs)
-    case "hover":
-      return .hover
-    case "press":
-      return .press
+	    switch normalized {
+	    case "long_press", "longpress":
+	      let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
+	      return .longPress(minMs: minMs)
+	    case "hover":
+	      return .hover
+	    case "press":
+	      return .press
     case "drag":
       let direction = (payload["direction"] as? String)
         .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
