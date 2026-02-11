@@ -88,6 +88,31 @@ targets:
         - NuxieSDKUnitTests
       gatherCoverageData: true
 
+  NuxieSDKMacUnitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/NuxieUnitTests
+        name: NuxieUnitTests
+      - path: Tests/NuxieTestSupport
+        name: NuxieTestSupport
+    dependencies:
+      - target: NuxieSDKMac
+      - package: Quick
+      - package: Nimble
+      - package: Factory
+        product: FactoryKit
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.macos.unittests
+      TEST_HOST: ""
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+    scheme:
+      testTargets:
+        - NuxieSDKMacUnitTests
+      gatherCoverageData: true
+
   NuxieSDKIntegrationTests:
     type: bundle.unit-test
     platform: iOS
@@ -171,6 +196,15 @@ schemes:
     test:
       targets:
         - NuxieSDKUnitTests
+      gatherCoverageData: true
+
+  NuxieSDKMacUnitTests:
+    build:
+      targets:
+        NuxieSDKMac: all
+    test:
+      targets:
+        - NuxieSDKMacUnitTests
       gatherCoverageData: true
 
   NuxieSDKIntegrationTests:

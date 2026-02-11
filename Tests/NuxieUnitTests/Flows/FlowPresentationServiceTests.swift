@@ -2,7 +2,6 @@ import Foundation
 import Quick
 import Nimble
 import FactoryKit
-import UIKit
 @testable import Nuxie
 
 final class FlowPresentationServiceTests: AsyncSpec {
