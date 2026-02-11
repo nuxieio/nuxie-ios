@@ -263,7 +263,11 @@ final class EventStorageTests: AsyncSpec {
                     let properties = try? event.getProperties()
                     expect(properties?["version"]?.value as? String) == "1.0.0"
                     expect(properties?["sdk_version"]?.value as? String) == SDKVersion.current
+                    #if os(macOS)
+                    expect(properties?["platform"]?.value as? String) == "macos"
+                    #else
                     expect(properties?["platform"]?.value as? String) == "ios"
+                    #endif
                     expect(properties?["device_model"]).toNot(beNil())
                     expect(properties?["os_version"]).toNot(beNil())
                 } catch {

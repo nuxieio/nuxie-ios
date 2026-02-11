@@ -1,9 +1,10 @@
-.PHONY: generate test test-ios test-xcode test-unit test-integration test-e2e test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
 XCODEPROJ := NuxieSDK.xcodeproj
 SCHEME_UNIT := NuxieSDKUnitTests
+SCHEME_MACOS_UNIT := NuxieSDKMacUnitTests
 SCHEME_INTEGRATION := NuxieSDKIntegrationTests
 SCHEME_E2E := NuxieSDKE2ETests
 SCHEME_MACOS := NuxieSDKMac
@@ -19,6 +20,7 @@ help:
 	@echo "  test             - Run unit tests (default)"
 	@echo "  test-ios         - Run tests on iOS simulator (alias)"
 	@echo "  test-unit        - Run unit tests"
+	@echo "  test-macos-unit  - Run unit tests on macOS"
 	@echo "  test-integration - Run integration tests"
 	@echo "  test-e2e         - Run end-to-end tests"
 	@echo "  test-all         - Run unit + integration + e2e tests"
@@ -65,6 +67,16 @@ test-xcode: generate
 
 test-unit: SCHEME = $(SCHEME_UNIT)
 test-unit: test-xcode
+
+test-macos-unit: generate
+	@echo "Running unit tests on macOS..."
+	@xcodebuild test \
+		-project "$(XCODEPROJ)" \
+		-scheme "$(SCHEME_MACOS_UNIT)" \
+		-configuration Debug \
+		-derivedDataPath "$(DERIVED_DATA)" \
+		-destination 'platform=macOS' \
+		$(XCODEBUILD_TEST_FLAGS)
 
 test-integration: SCHEME = $(SCHEME_INTEGRATION)
 test-integration: test-xcode
