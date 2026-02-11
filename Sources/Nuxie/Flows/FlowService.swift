@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 import FactoryKit
 
 /// Protocol defining the FlowService interface

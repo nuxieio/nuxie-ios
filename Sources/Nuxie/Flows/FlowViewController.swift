@@ -1,54 +1,75 @@
 import Foundation
-import SafariServices
-import UIKit
-import WebKit
 import FactoryKit
+import WebKit
+
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
+#if canImport(SafariServices)
+import SafariServices
+#endif
 
 /// Delegate for Flow runtime bridge messages
 protocol FlowRuntimeDelegate: AnyObject {
-    func flowViewController(_ controller: FlowViewController, didReceiveRuntimeMessage type: String, payload: [String: Any], id: String?)
+    func flowViewController(
+        _ controller: FlowViewController,
+        didReceiveRuntimeMessage type: String,
+        payload: [String: Any],
+        id: String?
+    )
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason)
 }
 
 /// FlowViewController - displays flow content in a WebView with loading and error states
-public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
-    
+public class FlowViewController: NuxiePlatformViewController, FlowMessageHandlerDelegate {
+
     // MARK: - Properties
-    
+
     private let viewModel: FlowViewModel
     private let fontStore: FontStore
 
     /// Delegate for runtime bridge messages
     weak var runtimeDelegate: FlowRuntimeDelegate?
-    
+
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
-    
+
     // UI Components
     internal var flowWebView: FlowWebView!
-    private var loadingView: UIView!
-    private var errorView: UIView!
-    private var activityIndicator: UIActivityIndicatorView!
-    private var refreshButton: UIButton!
-    private var closeButton: UIButton!
+    #if canImport(UIKit)
+    var loadingView: UIView!
+    var errorView: UIView!
+    var activityIndicator: UIActivityIndicatorView!
+    var refreshButton: UIButton!
+    var closeButton: UIButton!
+    #elseif canImport(AppKit)
+    var loadingView: NSView!
+    var errorView: NSView!
+    var activityIndicator: NSProgressIndicator!
+    var refreshButton: NSButton!
+    var closeButton: NSButton!
+    #endif
 
     // Runtime readiness + message buffering
     private var runtimeReady = false
     private var pendingRuntimeMessages: [(type: String, payload: [String: Any], replyTo: String?)] = []
     private var didInvokeClose = false
-    
+
     // MARK: - Computed Properties
-    
+
     var flow: Flow {
         return viewModel.flow
     }
-    
+
     var products: [FlowProduct] {
         return viewModel.products
     }
-    
+
     // MARK: - Initialization
-    
+
     init(flow: Flow, archiveService: FlowArchiver, fontStore: FontStore = FontStore()) {
         self.viewModel = FlowViewModel(
             flow: flow,
@@ -57,40 +78,41 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
         )
         self.fontStore = fontStore
         super.init(nibName: nil, bundle: nil)
-        
+
         setupBindings()
         LogDebug("FlowViewController initialized for flow: \(flow.id)")
     }
-    
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
     // MARK: - Lifecycle
-    
+
     public override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
         viewModel.loadFlow()
     }
-    
+
+    #if canImport(UIKit)
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Timer cleanup is handled by view model
     }
-    
+    #endif
+
     // MARK: - Public Methods
-    
+
     func preloadView() {
         // Force view to load
         _ = self.view
         LogDebug("Preloaded view for flow: \(flow.id)")
     }
-    
+
     func updateProducts(_ newProducts: [FlowProduct]) {
         viewModel.updateProducts(newProducts)
     }
-    
+
     func updateFlowIfNeeded(_ newFlow: Flow) {
         viewModel.updateFlowIfNeeded(newFlow)
     }
@@ -105,11 +127,17 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
 
     func performDismiss(reason: CloseReason = .userDismissed) {
         runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: reason)
+
+        #if canImport(UIKit)
         dismiss(animated: true) { [weak self] in
             self?.invokeOnCloseOnce(reason)
         }
-        // Fallback: ensure onClose is invoked even if UIKit never calls the dismissal completion
-        // (can happen in unit-test windows / synthetic presentations).
+        #elseif canImport(AppKit)
+        view.window?.orderOut(nil)
+        invokeOnCloseOnce(reason)
+        #endif
+
+        // Fallback: ensure onClose is invoked even if platform dismissal completion never fires.
         Task { @MainActor [weak self] in
             guard let self else { return }
             try? await Task.sleep(nanoseconds: 500_000_000)
@@ -120,15 +148,25 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
     func performOpenLink(urlString: String, target: String? = nil) {
         guard let url = URL(string: urlString) else { return }
         let normalizedTarget = target?.lowercased()
+
         if normalizedTarget == "in_app" {
             let scheme = url.scheme?.lowercased()
             guard scheme == "http" || scheme == "https" else { return }
+            #if canImport(UIKit)
             let safariViewController = SFSafariViewController(url: url)
             present(safariViewController, animated: true)
+            #elseif canImport(AppKit)
+            NSWorkspace.shared.open(url)
+            #endif
             return
         }
+
+        #if canImport(UIKit)
         guard UIApplication.shared.canOpenURL(url) else { return }
         UIApplication.shared.open(url)
+        #elseif canImport(AppKit)
+        NSWorkspace.shared.open(url)
+        #endif
     }
 
     /// Send a runtime message to the Flow bundle
@@ -144,211 +182,105 @@ public class FlowViewController: UIViewController, FlowMessageHandlerDelegate {
         }
         flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
     }
-    
+
     // MARK: - Setup
-    
+
     private func setupBindings() {
         // Bind to view model state changes
         viewModel.onStateChanged = { [weak self] state in
             self?.updateUIState(state)
         }
-        
+
         // Bind to load URL requests
         viewModel.onLoadURL = { [weak self] url in
             self?.flowWebView.loadFileURL(url)
         }
-        
+
         // Bind to load request
         viewModel.onLoadRequest = { [weak self] request in
             self?.flowWebView.load(request)
         }
-        
-        // Product injection handled via runtime bridge when needed
     }
-    
+
     private func setupViews() {
-        view.backgroundColor = .systemBackground
-        
-        // Setup web view
+        platformApplyDefaultBackgroundColor()
+
         setupWebView()
-        
-        // Setup loading view
-        setupLoadingView()
-        
-        // Setup error view
-        setupErrorView()
-        
-        // Bridge-only: no legacy message controller
-        
+        platformSetupLoadingView()
+        platformSetupErrorView()
+
         // Start in loading state
         updateUIState(.loading)
     }
-    
+
     private func setupWebView() {
         flowWebView = FlowWebView(messageHandlerDelegate: self, fontStore: fontStore)
         flowWebView.isHidden = true
         view.addSubview(flowWebView)
-        
+
         // Set up callbacks
         flowWebView.onLoadingStarted = { [weak self] in
             self?.viewModel.handleLoadingStarted()
         }
-        
+
         flowWebView.onLoadingFinished = { [weak self] in
             self?.viewModel.handleLoadingFinished()
         }
-        
+
         flowWebView.onLoadingFailed = { [weak self] error in
             self?.viewModel.handleLoadingFailed(error)
         }
-        
+
         NSLayoutConstraint.activate([
             flowWebView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             flowWebView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             flowWebView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             flowWebView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-        
+
         LogDebug("FlowWebView added for flow: \(flow.id)")
     }
-    
-    private func setupLoadingView() {
-        // Container view
-        loadingView = UIView()
-        loadingView.backgroundColor = .systemBackground
-        loadingView.isHidden = true
-        view.addSubview(loadingView)
-        
-        // Activity indicator
-        if #available(iOS 13.0, *) {
-            activityIndicator = UIActivityIndicatorView(style: .large)
-        } else {
-            activityIndicator = UIActivityIndicatorView(style: .whiteLarge)
-            activityIndicator.color = .gray
-        }
-        activityIndicator.hidesWhenStopped = true
-        loadingView.addSubview(activityIndicator)
-        
-        // Loading label
-        let loadingLabel = UILabel()
-        loadingLabel.text = "Loading..."
-        loadingLabel.textColor = .secondaryLabel
-        loadingLabel.font = .systemFont(ofSize: 16)
-        loadingLabel.textAlignment = .center
-        loadingView.addSubview(loadingLabel)
-        
-        // Setup constraints
-        loadingView.translatesAutoresizingMaskIntoConstraints = false
-        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
-        loadingLabel.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            loadingView.topAnchor.constraint(equalTo: view.topAnchor),
-            loadingView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            loadingView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            loadingView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            
-            activityIndicator.centerXAnchor.constraint(equalTo: loadingView.centerXAnchor),
-            activityIndicator.centerYAnchor.constraint(equalTo: loadingView.centerYAnchor, constant: -20),
-            
-            loadingLabel.topAnchor.constraint(equalTo: activityIndicator.bottomAnchor, constant: 16),
-            loadingLabel.centerXAnchor.constraint(equalTo: loadingView.centerXAnchor)
-        ])
-    }
-    
-    private func setupErrorView() {
-        // Container view
-        errorView = UIView()
-        errorView.backgroundColor = .systemBackground
-        errorView.isHidden = true
-        view.addSubview(errorView)
-        
-        // Refresh button with icon
-        refreshButton = UIButton(type: .system)
-        if let refreshImage = UIImage(systemName: "arrow.clockwise") {
-            refreshButton.setImage(refreshImage, for: .normal)
-        }
-        refreshButton.setTitle(" Refresh", for: .normal)
-        refreshButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .medium)
-        refreshButton.backgroundColor = .systemBlue
-        refreshButton.setTitleColor(.white, for: .normal)
-        refreshButton.tintColor = .white
-        refreshButton.layer.cornerRadius = 22
-        refreshButton.addAction(UIAction { [weak self] _ in
-            self?.viewModel.retry()
-        }, for: .touchUpInside)
-        errorView.addSubview(refreshButton)
-        
-        // Close button
-        closeButton = UIButton(type: .system)
-        closeButton.setTitle("Close", for: .normal)
-        closeButton.titleLabel?.font = .systemFont(ofSize: 17)
-        closeButton.setTitleColor(.label, for: .normal)
-        closeButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            self.runtimeDelegate?.flowViewControllerDidRequestDismiss(self, reason: .userDismissed)
-            self.dismiss(animated: true) { self.onClose?(.userDismissed) }
-        }, for: .touchUpInside)
-        errorView.addSubview(closeButton)
-        
-        // Setup constraints
-        errorView.translatesAutoresizingMaskIntoConstraints = false
-        refreshButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        
-        NSLayoutConstraint.activate([
-            errorView.topAnchor.constraint(equalTo: view.topAnchor),
-            errorView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            errorView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            errorView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            
-            // Refresh button centered
-            refreshButton.centerXAnchor.constraint(equalTo: errorView.centerXAnchor),
-            refreshButton.centerYAnchor.constraint(equalTo: errorView.centerYAnchor),
-            refreshButton.widthAnchor.constraint(equalToConstant: 140),
-            refreshButton.heightAnchor.constraint(equalToConstant: 44),
-            
-            // Close button below refresh
-            closeButton.topAnchor.constraint(equalTo: refreshButton.bottomAnchor, constant: 16),
-            closeButton.centerXAnchor.constraint(equalTo: errorView.centerXAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 100),
-            closeButton.heightAnchor.constraint(equalToConstant: 44)
-        ])
-    }
-    
+
     // MARK: - UI State Management
-    
+
     private func updateUIState(_ state: FlowViewModel.State) {
-        // This is already called on main thread from the view model's binding
         switch state {
         case .loading:
-            self.flowWebView.isHidden = true
-            self.loadingView.isHidden = false
-            self.errorView.isHidden = true
-            self.activityIndicator.startAnimating()
-            
+            flowWebView.isHidden = true
+            loadingView.isHidden = false
+            errorView.isHidden = true
+            platformStartLoadingIndicator()
+
         case .loaded:
-            self.flowWebView.isHidden = false
-            self.loadingView.isHidden = true
-            self.errorView.isHidden = true
-            self.activityIndicator.stopAnimating()
-            
+            flowWebView.isHidden = false
+            loadingView.isHidden = true
+            errorView.isHidden = true
+            platformStopLoadingIndicator()
+
         case .error:
-            self.flowWebView.isHidden = true
-            self.loadingView.isHidden = true
-            self.errorView.isHidden = false
-            self.activityIndicator.stopAnimating()
+            flowWebView.isHidden = true
+            loadingView.isHidden = true
+            errorView.isHidden = false
+            platformStopLoadingIndicator()
         }
     }
-    
-    // MARK: - Actions
+
+    func retryFromErrorView() {
+        viewModel.retry()
+    }
 }
 
 // MARK: - FlowMessageHandlerDelegate
 
 extension FlowViewController {
     // Handle @nuxie/bridge messages directly
-    func messageHandler(_ handler: FlowMessageHandler, didReceiveBridgeMessage type: String, payload: [String : Any], id: String?, from webView: FlowWebView) {
+    func messageHandler(
+        _ handler: FlowMessageHandler,
+        didReceiveBridgeMessage type: String,
+        payload: [String: Any],
+        id: String?,
+        from webView: FlowWebView
+    ) {
         switch type {
         case "runtime/ready":
             runtimeReady = true
@@ -360,13 +292,13 @@ extension FlowViewController {
             if runtimeDelegate != nil {
                 runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
             } else if let productId = payload["productId"] as? String {
-                self.handleBridgePurchase(productId: productId, requestId: id)
+                handleBridgePurchase(productId: productId, requestId: id)
             }
         case "action/restore":
             if runtimeDelegate != nil {
                 runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
             } else {
-                self.handleBridgeRestore(requestId: id)
+                handleBridgeRestore(requestId: id)
             }
         case "action/open_link":
             if runtimeDelegate != nil {
@@ -385,8 +317,8 @@ extension FlowViewController {
         case "dismiss", "closeFlow":
             performDismiss(reason: .userDismissed)
         case "openURL":
-            if let urlString = payload["url"] as? String, let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url)
+            if let urlString = payload["url"] as? String {
+                performOpenLink(urlString: urlString)
             }
         default:
             if type.hasPrefix("action/") {
@@ -404,15 +336,18 @@ private extension FlowViewController {
         didInvokeClose = true
         onClose?(reason)
     }
-}
 
-private extension FlowViewController {
     func flushPendingRuntimeMessages() {
         guard runtimeReady, !pendingRuntimeMessages.isEmpty else { return }
         let queued = pendingRuntimeMessages
         pendingRuntimeMessages.removeAll()
         for message in queued {
-            flowWebView.sendBridgeMessage(type: message.type, payload: message.payload, replyTo: message.replyTo, completion: nil)
+            flowWebView.sendBridgeMessage(
+                type: message.type,
+                payload: message.payload,
+                replyTo: message.replyTo,
+                completion: nil
+            )
         }
     }
 }
@@ -429,7 +364,7 @@ extension FlowViewController {
             do {
                 let products = try await productService.fetchProducts(for: [productId])
                 guard let product = products.first else {
-                    self.flowWebView.sendBridgeMessage(type: "purchase_error", payload: ["error": "Product not found"])            
+                    self.flowWebView.sendBridgeMessage(type: "purchase_error", payload: ["error": "Product not found"])
                     return
                 }
                 let syncResult = try await transactionService.purchase(product)
@@ -461,5 +396,3 @@ extension FlowViewController {
         }
     }
 }
-
-// (Legacy FlowMessageControllerDelegate removed — bridge-only path)

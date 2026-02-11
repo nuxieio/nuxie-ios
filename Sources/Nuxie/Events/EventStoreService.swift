@@ -153,7 +153,7 @@ final class EventStore: EventStoreProtocol {
         // Create enriched properties with metadata
         var enrichedProperties = properties
         enrichedProperties["sdk_version"] = SDKVersion.current
-        enrichedProperties["platform"] = "ios"
+        enrichedProperties["platform"] = currentPlatform()
         
         // Add device info if not already present
         if enrichedProperties["device_model"] == nil {
@@ -320,5 +320,19 @@ final class EventStore: EventStoreProtocol {
     private func getOSVersion() -> String {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    }
+
+    private func currentPlatform() -> String {
+        #if os(iOS)
+        return "ios"
+        #elseif os(macOS)
+        return "macos"
+        #elseif os(tvOS)
+        return "tvos"
+        #elseif os(watchOS)
+        return "watchos"
+        #else
+        return "unknown"
+        #endif
     }
 }

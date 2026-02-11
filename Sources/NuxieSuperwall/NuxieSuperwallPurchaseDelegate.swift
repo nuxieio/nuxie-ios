@@ -1,11 +1,15 @@
 import Foundation
 import Nuxie
+
+#if canImport(SuperwallKit)
 import SuperwallKit
+#endif
 
 /// Errors thrown by the Superwall bridge.
 public enum NuxieSuperwallBridgeError: LocalizedError {
     case productNotFound(identifier: String)
     case unknownRestoreFailure
+    case unsupportedPlatform
 
     public var errorDescription: String? {
         switch self {
@@ -13,10 +17,13 @@ public enum NuxieSuperwallBridgeError: LocalizedError {
             return "Superwall product not found for identifier \(identifier)."
         case .unknownRestoreFailure:
             return "Restore failed without an underlying error from Superwall."
+        case .unsupportedPlatform:
+            return "Superwall bridge is unavailable on this platform."
         }
     }
 }
 
+#if canImport(SuperwallKit)
 /// Concrete implementation of ``NuxiePurchaseDelegate`` that routes purchase and
 /// restore calls through Superwall's purchasing APIs.
 public final class NuxieSuperwallPurchaseDelegate: NuxiePurchaseDelegate {
@@ -82,3 +89,17 @@ public final class NuxieSuperwallPurchaseDelegate: NuxiePurchaseDelegate {
         }
     }
 }
+#else
+/// macOS fallback implementation when SuperwallKit isn't available for import.
+public final class NuxieSuperwallPurchaseDelegate: NuxiePurchaseDelegate {
+    public init() {}
+
+    public func purchase(_ product: any StoreProductProtocol) async -> Nuxie.PurchaseResult {
+        return .failed(NuxieSuperwallBridgeError.unsupportedPlatform)
+    }
+
+    public func restore() async -> RestoreResult {
+        return .failed(NuxieSuperwallBridgeError.unsupportedPlatform)
+    }
+}
+#endif

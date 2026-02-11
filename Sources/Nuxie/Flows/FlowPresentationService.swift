@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 import FactoryKit
 
 /// Protocol for presenting flows in dedicated windows
@@ -77,7 +76,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         
         // 1. Check if we can present
         guard windowProvider.canPresentWindow() else {
-            LogError("FlowPresentationService: No active window scene available")
+            LogError("FlowPresentationService: No active window available")
             throw FlowPresentationError.noActiveScene
         }
         
@@ -225,31 +224,11 @@ enum FlowPresentationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noActiveScene:
-            return "No active window scene available for presentation"
+            return "No active window available for presentation"
         case .flowNotFound(let flowId):
             return "Flow not found: \(flowId)"
         case .presentationFailed(let error):
             return "Flow presentation failed: \(error.localizedDescription)"
-        }
-    }
-}
-
-// MARK: - UIViewController Async Presentation Extension
-
-private extension UIViewController {
-    func present(_ viewControllerToPresent: UIViewController, animated: Bool) async {
-        await withCheckedContinuation { continuation in
-            self.present(viewControllerToPresent, animated: animated) {
-                continuation.resume()
-            }
-        }
-    }
-    
-    func dismiss(animated: Bool) async {
-        await withCheckedContinuation { continuation in
-            self.dismiss(animated: animated) {
-                continuation.resume()
-            }
         }
     }
 }

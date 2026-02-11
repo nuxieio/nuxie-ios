@@ -4,7 +4,8 @@ import PackageDescription
 let package = Package(
     name: "Nuxie",
     platforms: [
-        .iOS(.v15)
+        .iOS(.v15),
+        .macOS(.v12)
     ],
     products: [
         .library(
@@ -92,7 +93,11 @@ let package = Package(
             name: "NuxieSuperwall",
             dependencies: [
                 "Nuxie",
-                .product(name: "SuperwallKit", package: "Superwall-iOS")
+                .product(
+                    name: "SuperwallKit",
+                    package: "Superwall-iOS",
+                    condition: .when(platforms: [.iOS])
+                )
             ],
             path: "Sources/NuxieSuperwall"
         ),

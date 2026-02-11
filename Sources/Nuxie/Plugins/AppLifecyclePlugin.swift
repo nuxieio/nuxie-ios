@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// Plugin that automatically tracks app lifecycle events
 public class AppLifecyclePlugin: NuxiePlugin {

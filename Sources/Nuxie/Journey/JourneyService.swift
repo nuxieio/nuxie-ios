@@ -1,6 +1,5 @@
 import FactoryKit
 import Foundation
-import UIKit
 
 /// Reason for resuming a journey
 public enum ResumeReason {

@@ -18,6 +18,7 @@ Thank you for your interest in contributing to the Nuxie iOS SDK! We welcome con
 - Swift 5.9 or later
 - macOS 14.0 or later for development
 - iOS 15.0+ deployment target
+- macOS 12.0+ deployment target
 
 ### Building the Project
 
@@ -31,6 +32,9 @@ make install-deps
 
 # Generate Xcode project
 make generate
+
+# Build macOS framework target
+make build-macos
 
 # Run unit tests
 make test-unit
@@ -79,6 +83,7 @@ You can also open `Package.swift` directly in Xcode, but the repo’s primary de
 - Use Quick and Nimble for behavior-driven tests
 - Follow the existing test structure and naming conventions
 - Run tests before submitting PR: `make test-unit` (and `make test-integration`/`make test-e2e` when applicable)
+- Validate macOS builds before submitting PR: `make build-macos`
 
 ### Code Coverage
 
