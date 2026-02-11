@@ -41,7 +41,7 @@ class MockWindowProvider: WindowProviderProtocol {
 class MockPresentationWindow: PresentationWindowProtocol {
     
     // State tracking
-    var presentedViewController: UIViewController?
+    var presentedViewController: NuxiePlatformViewController?
     var presentCalled = false
     var presentAnimated = false
     var dismissCalled = false
@@ -53,7 +53,7 @@ class MockPresentationWindow: PresentationWindowProtocol {
     var dismissDelay: TimeInterval = 0
     
     @MainActor
-    func present(_ viewController: UIViewController) async {
+    func present(_ viewController: NuxiePlatformViewController) async {
         presentCalled = true
         presentAnimated = true
         

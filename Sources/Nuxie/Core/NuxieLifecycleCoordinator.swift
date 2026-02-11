@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 import FactoryKit
 
 // NuxieLifecycleCoordinator.swift
@@ -19,7 +18,7 @@ final class NuxieLifecycleCoordinator {
 
     observers.append(
       nc.addObserver(
-        forName: UIApplication.didEnterBackgroundNotification,
+        forName: NuxieSystemNotifications.appDidEnterBackground,
         object: nil, queue: .main
       ) { [weak self] _ in
         guard let self else { return }
@@ -35,7 +34,7 @@ final class NuxieLifecycleCoordinator {
 
     observers.append(
       nc.addObserver(
-        forName: UIApplication.willEnterForegroundNotification,
+        forName: NuxieSystemNotifications.appWillEnterForeground,
         object: nil, queue: .main
       ) { [weak self] _ in
         guard let self else { return }
@@ -50,7 +49,7 @@ final class NuxieLifecycleCoordinator {
 
     observers.append(
       nc.addObserver(
-        forName: UIApplication.didBecomeActiveNotification,
+        forName: NuxieSystemNotifications.appDidBecomeActive,
         object: nil, queue: .main
       ) { [weak self] _ in
         guard let self else { return }

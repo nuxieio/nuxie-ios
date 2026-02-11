@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 /// Manages creation and caching of flow view controllers
 @MainActor

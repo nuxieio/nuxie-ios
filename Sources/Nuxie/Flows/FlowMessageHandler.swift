@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 import WebKit
 
 /// Protocol for receiving bridge messages from JavaScript

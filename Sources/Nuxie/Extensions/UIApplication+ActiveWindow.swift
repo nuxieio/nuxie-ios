@@ -1,3 +1,4 @@
+#if canImport(UIKit)
 import UIKit
 
 public extension UIApplication {
@@ -68,3 +69,4 @@ public extension UIApplication {
         return nil
     }
 }
+#endif

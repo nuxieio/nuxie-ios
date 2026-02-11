@@ -1,10 +1,6 @@
 import Foundation
 import FactoryKit
 
-#if canImport(UIKit)
-  import UIKit
-#endif
-
 /// Main entry point for the Nuxie SDK
 public final class NuxieSDK {
 

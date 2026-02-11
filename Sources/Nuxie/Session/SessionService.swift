@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// Protocol for session management operations
 public protocol SessionServiceProtocol {

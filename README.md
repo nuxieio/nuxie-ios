@@ -5,9 +5,9 @@
 </p>
 
 <div align="center">
-  <strong>Nuxie iOS SDK</strong>
+  <strong>Nuxie Apple SDK</strong>
   <br />
-  Bring targeted in‑app flows, paywalls, and analytics to your iOS app.
+  Bring targeted in‑app flows, paywalls, and analytics to your iOS or macOS app.
   <br /><br />
   <a href="https://nuxie.io" target="_blank" rel="noopener">Website</a>
 </div>
@@ -16,7 +16,7 @@
 
 ## What is Nuxie?
 
-Nuxie is a platform for running targeted in‑app flows such as paywalls, upgrade prompts, surveys, and more — without shipping new app releases. This SDK connects your iOS app to Nuxie so you can track events, identify users, and automatically present flows configured in the Nuxie dashboard.
+Nuxie is a platform for running targeted in‑app flows such as paywalls, upgrade prompts, surveys, and more — without shipping new app releases. This SDK connects your iOS or macOS app to Nuxie so you can track events, identify users, and automatically present flows configured in the Nuxie dashboard.
 
 Learn more at https://nuxie.io
 
@@ -34,6 +34,7 @@ Learn more at https://nuxie.io
 ## Requirements
 
 - iOS 15+
+- macOS 12+
 - Swift 5.9+ (Xcode 15+)
 
 ## Installation (Swift Package Manager)
@@ -159,6 +160,7 @@ NuxieSDK.shared.reset() // keepAnonymousId = true by default
 
 - `NuxieSDK.shared.getFlowViewController(with:)`: asynchronously returns a view controller for a specific flow ID using the flow cache (or fetches on-demand). Useful for debugging a flow directly.
 - `NuxieSDK.shared.showFlow(with:)`: presents a flow by ID in a dedicated overlay window.
+- On macOS, `target: "in_app"` link actions open in the default browser (no in-app Safari view).
 
 Example (UIKit):
 
@@ -166,7 +168,7 @@ Example (UIKit):
 @MainActor
 func debugFlow() async {
   do {
-    let vc = try await NuxieSDK.shared.getFlowViewController(id: "your_flow_id")
+    let vc = try await NuxieSDK.shared.getFlowViewController(with: "your_flow_id")
     present(vc, animated: true)
   } catch {
     print("Failed to load flow: \(error)")

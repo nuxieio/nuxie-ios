@@ -1,6 +1,5 @@
 import CryptoKit
 import Foundation
-import UIKit
 
 public struct DiskCacheOptions {
     /// Base directory to write under (e.g., Application Support or Caches)

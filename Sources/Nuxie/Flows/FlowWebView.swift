@@ -1,6 +1,11 @@
 import Foundation
-import UIKit
 import WebKit
+
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 /// Custom web view for displaying flow content with Nuxie-specific configuration
 public class FlowWebView: WKWebView {
@@ -31,10 +36,12 @@ public class FlowWebView: WKWebView {
         configuration.applicationNameForUserAgent = "NuxieSDK/\(SDKVersion.current)"
         
         // Media Playback Configuration
+        #if canImport(UIKit)
         configuration.allowsInlineMediaPlayback = true
         configuration.allowsAirPlayForMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        #endif
         configuration.suppressesIncrementalRendering = false
 
         let schemeHandler = NuxieFontSchemeHandler(fontStore: fontStore)
@@ -60,11 +67,16 @@ public class FlowWebView: WKWebView {
     
     private func setupWebView() {
         // WebView Appearance
+        #if canImport(UIKit)
         isOpaque = false
         backgroundColor = .clear
         scrollView.backgroundColor = .clear
+        #elseif canImport(AppKit)
+        setValue(false, forKey: "drawsBackground")
+        #endif
         
         // Configure scroll view
+        #if canImport(UIKit)
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.bounces = true
         scrollView.showsVerticalScrollIndicator = false
@@ -79,6 +91,7 @@ public class FlowWebView: WKWebView {
         
         // Disable link preview
         allowsLinkPreview = false
+        #endif
         
         // Disable navigation gestures
         allowsBackForwardNavigationGestures = false

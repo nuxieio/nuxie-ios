@@ -1,4 +1,4 @@
-.PHONY: generate test test-ios test-xcode test-unit test-integration test-e2e test-all clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-integration test-e2e test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
@@ -6,6 +6,7 @@ XCODEPROJ := NuxieSDK.xcodeproj
 SCHEME_UNIT := NuxieSDKUnitTests
 SCHEME_INTEGRATION := NuxieSDKIntegrationTests
 SCHEME_E2E := NuxieSDKE2ETests
+SCHEME_MACOS := NuxieSDKMac
 SCHEME ?= $(SCHEME_UNIT)
 DERIVED_DATA := DerivedData
 TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1
@@ -21,6 +22,7 @@ help:
 	@echo "  test-integration - Run integration tests"
 	@echo "  test-e2e         - Run end-to-end tests"
 	@echo "  test-all         - Run unit + integration + e2e tests"
+	@echo "  build-macos      - Build macOS framework target"
 	@echo "  coverage         - Run tests with code coverage (Swift Package Manager)"
 	@echo "  coverage-html    - Generate HTML coverage report"
 	@echo "  coverage-json    - Export coverage as JSON (Xcode)"
@@ -75,6 +77,15 @@ test-all: test-unit test-integration test-e2e
 # Alias for test-ios
 test: test-unit
 test-ios: test
+
+build-macos: generate
+	@echo "Building macOS framework..."
+	@xcodebuild build \
+		-project "$(XCODEPROJ)" \
+		-scheme "$(SCHEME_MACOS)" \
+		-configuration Debug \
+		-derivedDataPath "$(DERIVED_DATA)" \
+		-destination 'generic/platform=macOS'
 
 
 # Run tests with code coverage (Swift Package Manager)

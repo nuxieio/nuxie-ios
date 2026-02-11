@@ -4566,7 +4566,7 @@ private final class E2ETestPresentationWindow: PresentationWindowProtocol {
         window.backgroundColor = .clear
     }
 
-    func present(_ viewController: UIViewController) async {
+    func present(_ viewController: NuxiePlatformViewController) async {
         window.makeKeyAndVisible()
         // In unit test bundles, UIKit sometimes fails to call the completion block for modal
         // presentations off a synthetic window. Avoid hanging the E2E suite by not awaiting it.
