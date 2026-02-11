@@ -113,12 +113,18 @@ private final class IOSPresentationWindow: PresentationWindowProtocol {
 import AppKit
 
 @MainActor
+private final class KeyableBorderlessWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+@MainActor
 private final class MacPresentationWindow: PresentationWindowProtocol {
     private let window: NSWindow
     private var presentedViewController: NSViewController?
 
     init(frame: NSRect) {
-        self.window = NSWindow(
+        self.window = KeyableBorderlessWindow(
             contentRect: frame,
             styleMask: [.borderless],
             backing: .buffered,
