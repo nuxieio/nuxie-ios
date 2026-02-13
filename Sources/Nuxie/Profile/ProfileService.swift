@@ -500,7 +500,7 @@ internal actor ProfileService: ProfileServiceProtocol {
 
         for flow in newFlows {
             if let previous = previousById[flow.id] {
-                if previous.bundle.manifest.contentHash != flow.bundle.manifest.contentHash {
+                if previous.selectedBundle.manifest.contentHash != flow.selectedBundle.manifest.contentHash {
                     flowIdsToRemove.insert(flow.id)
                     flowsToPrefetch.append(flow)
                 }

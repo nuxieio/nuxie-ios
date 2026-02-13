@@ -13,8 +13,8 @@ public struct Flow {
     // Convenience accessors proxy to remoteFlow for common properties
     public var id: String { remoteFlow.id }
     public var name: String { remoteFlow.id }
-    public var manifest: BuildManifest { remoteFlow.bundle.manifest }
-    public var url: String { remoteFlow.bundle.url }
+    public var manifest: BuildManifest { remoteFlow.selectedBundle.manifest }
+    public var url: String { remoteFlow.selectedBundle.url }
     
     // Validation
     public var isValid: Bool {
