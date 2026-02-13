@@ -500,7 +500,7 @@ internal actor ProfileService: ProfileServiceProtocol {
 
         for flow in newFlows {
             if let previous = previousById[flow.id] {
-                if previous.selectedBundle.manifest.contentHash != flow.selectedBundle.manifest.contentHash {
+                if Self.shouldRefreshCachedFlow(previous: previous, next: flow) {
                     flowIdsToRemove.insert(flow.id)
                     flowsToPrefetch.append(flow)
                 }
@@ -520,5 +520,21 @@ internal actor ProfileService: ProfileServiceProtocol {
         if !flowsToPrefetch.isEmpty {
             flowService.prefetchFlows(flowsToPrefetch)
         }
+    }
+
+    static func shouldRefreshCachedFlow(previous: RemoteFlow, next: RemoteFlow) -> Bool {
+        let previousSelectionKey = previous.selectedTarget.map {
+            "\($0.compilerBackend.lowercased()):\($0.buildId)"
+        } ?? "legacy"
+        let nextSelectionKey = next.selectedTarget.map {
+            "\($0.compilerBackend.lowercased()):\($0.buildId)"
+        } ?? "legacy"
+
+        let previousBundle = previous.selectedBundle
+        let nextBundle = next.selectedBundle
+
+        return previousSelectionKey != nextSelectionKey
+            || previousBundle.url != nextBundle.url
+            || previousBundle.manifest.contentHash != nextBundle.manifest.contentHash
     }
 }
