@@ -32,7 +32,7 @@ struct FlowRendererAdapterResolution {
     }
 
     var didFallback: Bool {
-        guard let requestedCompilerBackend else { return true }
+        guard let requestedCompilerBackend else { return false }
         return requestedCompilerBackend != resolvedCompilerBackend
     }
 }
