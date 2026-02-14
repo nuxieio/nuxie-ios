@@ -83,7 +83,7 @@ public struct RemoteFlow: Codable {
             }
         }
 
-        return compatibleTargets.first
+        return nil
     }
 
     public var selectedTarget: RemoteFlowTarget? {
