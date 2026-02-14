@@ -41,6 +41,30 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 )
             }
 
+            final class TraceRecordingMockEventService: MockEventService {
+                private let traceRecorder: FlowRuntimeTraceRecorder
+
+                init(traceRecorder: FlowRuntimeTraceRecorder) {
+                    self.traceRecorder = traceRecorder
+                    super.init()
+                }
+
+                override func track(
+                    _ event: String,
+                    properties: [String: Any]? = nil,
+                    userProperties: [String: Any]? = nil,
+                    userPropertiesSetOnce: [String: Any]? = nil
+                ) {
+                    traceRecorder.recordEvent(name: event, properties: properties)
+                    super.track(
+                        event,
+                        properties: properties,
+                        userProperties: userProperties,
+                        userPropertiesSetOnce: userPropertiesSetOnce
+                    )
+                }
+            }
+
             beforeEach {
                 flowViewController = nil
                 runtimeDelegate = nil
@@ -173,6 +197,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
 				                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
 				                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+				                            let isParityTraceFlow = reqFlowId.hasPrefix("flow_e2e_parity_trace_")
 				                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
 				                            let isCallDelegateFlow = reqFlowId.hasPrefix("flow_e2e_call_delegate_")
 				                            let isOpenLinkFlow = reqFlowId.hasPrefix("flow_e2e_open_link_")
@@ -187,6 +212,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                            let isCompiledBundleFlow = isExperimentAbFlow
 				                                || isCompiledViewModelFlow
 				                                || isDidSetFlow
+				                                || isParityTraceFlow
 				                                || isRemoteActionFlow
 				                                || isCallDelegateFlow
 				                                || isOpenLinkFlow
@@ -217,6 +243,8 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 				                                contentHashPrefix = "e2e-compiled-view-model-compiled"
 				                            } else if isDidSetFlow {
 				                                contentHashPrefix = "e2e-did-set-compiled"
+					                            } else if isParityTraceFlow {
+					                                contentHashPrefix = "e2e-parity-trace-compiled"
 					                            } else if isRemoteActionFlow {
 					                                contentHashPrefix = "e2e-remote-action-compiled"
 					                            } else if isCallDelegateFlow {
@@ -456,7 +484,84 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
-				                        } else if isRemoteActionFlow {
+			                        } else if isParityTraceFlow {
+			                            remoteFlow = RemoteFlow(
+			                                id: reqFlowId,
+			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+			                                screens: [
+			                                    RemoteFlowScreen(
+			                                        id: "screen-entry",
+			                                        defaultViewModelId: "vm-1",
+			                                        defaultInstanceId: nil
+			                                    ),
+			                                    RemoteFlowScreen(
+			                                        id: "screen-2",
+			                                        defaultViewModelId: nil,
+			                                        defaultInstanceId: nil
+			                                    )
+			                                ],
+			                                interactions: [
+			                                    "to-2": [
+			                                        Interaction(
+			                                            id: "int-to-2",
+			                                            trigger: .press,
+			                                            actions: [
+			                                                .navigate(NavigateAction(screenId: "screen-2"))
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ],
+			                                    "screen-entry": [
+			                                        Interaction(
+			                                            id: "int-title-did-set",
+			                                            trigger: .didSet(path: .ids(VmPathIds(pathIds: [0, 1])), debounceMs: nil),
+			                                            actions: [
+			                                                .setViewModel(
+			                                                    SetViewModelAction(
+			                                                        path: .ids(VmPathIds(pathIds: [0, 2])),
+			                                                        value: AnyCodable(["literal": "ack"] as [String: Any])
+			                                                    )
+			                                                )
+			                                            ],
+			                                            enabled: true
+			                                        )
+			                                    ]
+			                                ],
+			                                viewModels: [
+			                                    ViewModel(
+			                                        id: "vm-1",
+			                                        name: "VM",
+			                                        viewModelPathId: 0,
+			                                        properties: [
+			                                            "title": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 1,
+			                                                defaultValue: AnyCodable("hello"),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            ),
+			                                            "didSetAck": ViewModelProperty(
+			                                                type: .string,
+			                                                propertyId: 2,
+			                                                defaultValue: AnyCodable(""),
+			                                                required: nil,
+			                                                enumValues: nil,
+			                                                itemType: nil,
+			                                                schema: nil,
+			                                                viewModelId: nil,
+			                                                validation: nil
+			                                            )
+			                                        ]
+			                                    )
+			                                ],
+			                                viewModelInstances: nil,
+			                                converters: nil
+			                            )
+			                        } else if isRemoteActionFlow {
 				                            remoteFlow = RemoteFlow(
 				                                id: reqFlowId,
 				                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
@@ -977,6 +1082,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 					                            let isExperimentAbFlow = reqFlowId.hasPrefix("flow_e2e_experiment_ab_")
 					                            let isCompiledViewModelFlow = reqFlowId.hasPrefix("flow_e2e_compiled_view_model_")
 					                            let isDidSetFlow = reqFlowId.hasPrefix("flow_e2e_did_set_")
+					                            let isParityTraceFlow = reqFlowId.hasPrefix("flow_e2e_parity_trace_")
 					                            let isRemoteActionFlow = reqFlowId.hasPrefix("flow_e2e_remote_action_")
 					                            let isCallDelegateFlow = reqFlowId.hasPrefix("flow_e2e_call_delegate_")
 					                            let isOpenLinkFlow = reqFlowId.hasPrefix("flow_e2e_open_link_")
@@ -991,6 +1097,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 					                            let isCompiledBundleFlow = isExperimentAbFlow
 					                                || isCompiledViewModelFlow
 					                                || isDidSetFlow
+					                                || isParityTraceFlow
 					                                || isRemoteActionFlow
 					                                || isCallDelegateFlow
 					                                || isOpenLinkFlow
@@ -1649,6 +1756,182 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                expect(messagesSnapshot.contains(where: { $0.hasPrefix("action/did_set") })).to(beTrue())
 	                expect(didReceiveDidSet.get()).to(beTrue())
 	                expect(didApplyDidSetAck.get()).to(beTrue())
+	            }
+
+	            it("records canonical runtime parity trace for navigation + did_set input (fixture mode)") {
+	                guard server != nil else { return }
+	                guard isEnabled("NUXIE_E2E_ENABLE_VIEWMODELS", legacyKeys: ["NUXIE_E2E_PHASE1"]) else { return }
+	                guard isEnabled("NUXIE_E2E_ENABLE_NAVIGATION") else { return }
+	                guard experimentAbCompiledBundleFixture != nil else {
+	                    fail("E2E: missing compiled bundle fixture")
+	                    return
+	                }
+
+	                let parityFlowId = "flow_e2e_parity_trace_\(UUID().uuidString)"
+	                let distinctId = "e2e-user-parity-trace-1"
+
+	                let didApplyDidSetAck = LockedValue(false)
+	                let didNavigateToScreen2 = LockedValue(false)
+	                let recordedTrace = LockedValue<FlowRuntimeTrace?>(nil)
+
+	                waitUntil(timeout: .seconds(60)) { done in
+	                    var finished = false
+
+	                    func finishOnce() {
+	                        guard !finished else { return }
+	                        finished = true
+	                        done()
+	                    }
+
+	                    Task {
+	                        let traceRecorder = FlowRuntimeTraceRecorder()
+	                        let mockEventService = TraceRecordingMockEventService(
+	                            traceRecorder: traceRecorder
+	                        )
+
+	                        do {
+	                            Container.shared.reset()
+	                            let config = NuxieConfiguration(apiKey: apiKey)
+	                            config.apiEndpoint = baseURL
+	                            config.enablePlugins = false
+	                            config.customStoragePath = FileManager.default.temporaryDirectory
+	                                .appendingPathComponent("nuxie-e2e-\(UUID().uuidString)", isDirectory: true)
+	                            Container.shared.sdkConfiguration.register { config }
+	                            Container.shared.eventService.register { mockEventService }
+
+	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
+	                            let remoteFlow = try await api.fetchFlow(flowId: parityFlowId)
+	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+
+	                            let archiveService = FlowArchiver()
+	                            await archiveService.removeArchive(for: flow.id)
+
+	                            await MainActor.run {
+	                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                let campaign = makeCampaign(flowId: parityFlowId)
+	                                let journey = Journey(campaign: campaign, distinctId: distinctId)
+	                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+	                                runner.attach(viewController: vc)
+
+	                                let bridge = FlowJourneyRunnerRuntimeBridge(runner: runner)
+	                                let delegate = FlowJourneyRunnerRuntimeDelegate(
+	                                    bridge: bridge,
+	                                    onMessage: nil,
+	                                    traceRecorder: traceRecorder
+	                                )
+	                                runtimeDelegate = delegate
+	                                vc.runtimeDelegate = delegate
+	                                flowViewController = vc
+
+	                                let testWindow = UIWindow(frame: UIScreen.main.bounds)
+	                                testWindow.rootViewController = vc
+	                                testWindow.makeKeyAndVisible()
+	                                window = testWindow
+	                                _ = vc.view
+	                            }
+
+	                            guard let vc = flowViewController else {
+	                                fail("E2E: FlowViewController/webView was not created")
+	                                finishOnce()
+	                                return
+	                            }
+	                            let webView = await MainActor.run { vc.flowWebView }
+	                            guard let webView else {
+	                                fail("E2E: FlowViewController/webView was not created")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            let entryMarkerId = "screen-screen-entry-marker"
+	                            guard (try? await waitForElementExists(webView, elementId: entryMarkerId, timeoutSeconds: 20.0)) == true else {
+	                                fail("E2E: compiled web runtime did not render entry marker '\(entryMarkerId)'")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            guard (try? await waitForElementExists(webView, elementId: "title-input", timeoutSeconds: 20.0)) == true else {
+	                                fail("E2E: compiled web runtime did not render title-input")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            let nextValue = "parity-next"
+	                            let didDispatchInput = try? await evaluateJavaScript(webView, script: """
+	                            (function(){
+	                              var el = document.getElementById('title-input');
+	                              if (!el) return false;
+	                              el.value = \(jsStringLiteral(nextValue));
+	                              el.dispatchEvent(new Event('input', { bubbles: true }));
+	                              return true;
+	                            })();
+	                            """) as? Bool
+	                            if didDispatchInput != true {
+	                                fail("E2E: failed to dispatch input event on title-input")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            if (try? await waitForElementText(webView, elementId: "did-set-ack", equals: "ack", timeoutSeconds: 30.0)) == true {
+	                                didApplyDidSetAck.set(true)
+	                            } else {
+	                                fail("E2E: did_set trigger did not produce host patch (did-set-ack)")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            guard (try? await waitForElementExists(webView, elementId: "to-2", timeoutSeconds: 10.0)) == true else {
+	                                fail("E2E: compiled web runtime is missing button 'to-2'")
+	                                finishOnce()
+	                                return
+	                            }
+	                            _ = try? await evaluateJavaScript(webView, script: "document.getElementById('to-2').click()")
+
+	                            let screen2MarkerId = "screen-screen-2-marker"
+	                            if (try? await waitForElementExists(webView, elementId: screen2MarkerId, timeoutSeconds: 20.0)) == true {
+	                                didNavigateToScreen2.set(true)
+	                            } else {
+	                                fail("E2E: expected navigation to render marker '\(screen2MarkerId)'")
+	                                finishOnce()
+	                                return
+	                            }
+
+	                            recordedTrace.set(
+	                                traceRecorder.trace(
+	                                    fixtureId: "fixture-nav-binding",
+	                                    rendererBackend: "react"
+	                                )
+	                            )
+	                            finishOnce()
+	                        } catch {
+	                            fail("E2E setup failed: \(error)")
+	                            finishOnce()
+	                        }
+	                    }
+	                }
+
+	                expect(didApplyDidSetAck.get()).to(beTrue())
+	                expect(didNavigateToScreen2.get()).to(beTrue())
+	                guard let trace = recordedTrace.get() else {
+	                    fail("E2E: expected parity trace to be recorded")
+	                    return
+	                }
+
+	                expect(trace.schemaVersion).to(equal(FlowRuntimeTrace.currentSchemaVersion))
+	                expect(trace.fixtureId).to(equal("fixture-nav-binding"))
+	                expect(trace.rendererBackend).to(equal("react"))
+	                expect(trace.entries).toNot(beEmpty())
+	                expect(trace.entries.contains(where: {
+	                    $0.kind == .navigation
+	                        && $0.name == "navigate"
+	                        && $0.screenId == "screen-2"
+	                })).to(beTrue())
+	                expect(trace.entries.contains(where: {
+	                    $0.kind == .binding
+	                        && $0.name == "did_set"
+	                })).to(beTrue())
+	                expect(trace.entries.contains(where: {
+	                    $0.kind == .event
+	                })).to(beTrue())
 	            }
 
 	            it("applies list operations (insert/move/remove) in the compiled web runtime (fixture mode)") {
