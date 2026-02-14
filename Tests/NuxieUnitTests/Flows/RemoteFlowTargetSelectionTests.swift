@@ -88,7 +88,7 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 expect(flow.selectedBundle.manifest.contentHash).to(equal("react-hash"))
             }
 
-            it("prefers an in-progress react target when succeeded is unavailable") {
+            it("falls back to legacy bundle when react targets are in-progress") {
                 let flow = makeFlow(targets: [
                     makeTarget(
                         backend: "react",
@@ -106,9 +106,9 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                     ),
                 ])
 
-                expect(flow.selectedTarget?.buildId).to(equal("build-react-building"))
-                expect(flow.selectedBundle.url).to(equal("https://cdn.example/react-building/index.html"))
-                expect(flow.selectedBundle.manifest.contentHash).to(equal("react-building-hash"))
+                expect(flow.selectedTarget).to(beNil())
+                expect(flow.selectedBundle.url).to(equal("https://cdn.example/legacy/index.html"))
+                expect(flow.selectedBundle.manifest.contentHash).to(equal("legacy-hash"))
             }
 
             it("falls back to legacy bundle when only non-react targets exist") {

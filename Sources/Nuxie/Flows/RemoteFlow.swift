@@ -39,16 +39,7 @@ public struct RemoteFlow: Codable {
         let reactTargets = targets.filter { $0.compilerBackend.lowercased() == "react" }
         guard !reactTargets.isEmpty else { return nil }
 
-        if let succeeded = reactTargets.first(where: { $0.status.lowercased() == "succeeded" }) {
-            return succeeded
-        }
-        if let inProgress = reactTargets.first(where: {
-            let normalized = $0.status.lowercased()
-            return normalized == "building" || normalized == "queued"
-        }) {
-            return inProgress
-        }
-        return reactTargets.first
+        return reactTargets.first(where: { $0.status.lowercased() == "succeeded" })
     }
 
     public var selectedBundle: FlowBundleRef {
