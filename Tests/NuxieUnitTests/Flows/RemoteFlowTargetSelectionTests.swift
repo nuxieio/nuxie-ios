@@ -159,7 +159,8 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
 
                 let selected = flow.selectedTarget(
                     supportedCapabilities: [],
-                    preferredCompilerBackends: ["rive", "react"]
+                    preferredCompilerBackends: ["rive", "react"],
+                    renderableCompilerBackends: ["react", "rive"]
                 )
                 expect(selected?.buildId).to(equal("build-rive"))
                 expect(selected?.bundle.url).to(equal("https://cdn.example/rive/index.html"))
@@ -216,10 +217,34 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
 
                 let selected = flow.selectedTarget(
                     supportedCapabilities: ["renderer.rive.native.v1"],
-                    preferredCompilerBackends: ["rive", "react"]
+                    preferredCompilerBackends: ["rive", "react"],
+                    renderableCompilerBackends: ["react", "rive"]
                 )
                 expect(selected?.compilerBackend).to(equal("rive"))
                 expect(selected?.buildId).to(equal("build-rive"))
+            }
+
+            it("falls back to legacy bundle when target backend is not renderable") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: []
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["rive", "react"],
+                    renderableCompilerBackends: ["react"]
+                )
+                expect(selected).to(beNil())
+                expect(flow.selectedBundle(
+                    supportedCapabilities: []
+                ).url).to(equal("https://cdn.example/legacy/index.html"))
             }
 
             it("falls back to legacy bundle when only unknown backends are available") {
