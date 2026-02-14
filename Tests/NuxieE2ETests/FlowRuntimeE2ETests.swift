@@ -41,6 +41,30 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                 )
             }
 
+            final class TraceRecordingMockEventService: MockEventService {
+                private let traceRecorder: FlowRuntimeTraceRecorder
+
+                init(traceRecorder: FlowRuntimeTraceRecorder) {
+                    self.traceRecorder = traceRecorder
+                    super.init()
+                }
+
+                override func track(
+                    _ event: String,
+                    properties: [String: Any]? = nil,
+                    userProperties: [String: Any]? = nil,
+                    userPropertiesSetOnce: [String: Any]? = nil
+                ) {
+                    traceRecorder.recordEvent(name: event, properties: properties)
+                    super.track(
+                        event,
+                        properties: properties,
+                        userProperties: userProperties,
+                        userPropertiesSetOnce: userPropertiesSetOnce
+                    )
+                }
+            }
+
             beforeEach {
                 flowViewController = nil
                 runtimeDelegate = nil
@@ -1760,8 +1784,10 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                    }
 
 	                    Task {
-	                        let mockEventService = MockEventService()
 	                        let traceRecorder = FlowRuntimeTraceRecorder()
+	                        let mockEventService = TraceRecordingMockEventService(
+	                            traceRecorder: traceRecorder
+	                        )
 
 	                        do {
 	                            Container.shared.reset()
@@ -1869,7 +1895,6 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                return
 	                            }
 
-	                            traceRecorder.ingestTrackedEvents(mockEventService.trackedEvents)
 	                            recordedTrace.set(
 	                                traceRecorder.trace(
 	                                    fixtureId: "fixture-nav-binding",
