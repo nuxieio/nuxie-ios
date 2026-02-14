@@ -124,6 +124,13 @@ public class NuxieConfiguration {
     public var flowRuntimeCapabilities: Set<String> = [
         "renderer.react.webview.v1",
     ]
+
+    /// Preferred compiler backend selection order for published targets.
+    /// The runtime picks the first compatible succeeded target in this order.
+    public var flowPreferredCompilerBackends: [String] = [
+        "react",
+        "rive",
+    ]
     
     /// Custom URLSession for testing (if nil, a default one will be created)
     public var urlSession: URLSession?

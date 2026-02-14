@@ -145,6 +145,26 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 expect(flow.selectedBundle(supportedCapabilities: []).manifest.contentHash).to(equal("legacy-hash"))
             }
 
+            it("treats explicit empty required capabilities as no requirements") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: []
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["rive", "react"]
+                )
+                expect(selected?.buildId).to(equal("build-rive"))
+                expect(selected?.bundle.url).to(equal("https://cdn.example/rive/index.html"))
+            }
+
             it("selects a compatible succeeded react target when multiple succeeded targets exist") {
                 let flow = makeFlow(targets: [
                     makeTarget(
@@ -172,6 +192,59 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 expect(flow.selectedBundle(
                     supportedCapabilities: ["renderer.react.webview.v1"]
                 ).url).to(equal("https://cdn.example/react-v1/index.html"))
+            }
+
+            it("selects rive target when preference and capabilities allow it") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "react",
+                        buildId: "build-react",
+                        status: "succeeded",
+                        url: "https://cdn.example/react/index.html",
+                        hash: "react-hash",
+                        requiredCapabilities: ["renderer.react.webview.v1"]
+                    ),
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: ["renderer.rive.native.v1"]
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: ["renderer.rive.native.v1"],
+                    preferredCompilerBackends: ["rive", "react"]
+                )
+                expect(selected?.compilerBackend).to(equal("rive"))
+                expect(selected?.buildId).to(equal("build-rive"))
+            }
+
+            it("falls back to first compatible succeeded target when preferred backends are unavailable") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "custom_backend",
+                        buildId: "build-custom-1",
+                        status: "succeeded",
+                        url: "https://cdn.example/custom-1/index.html",
+                        hash: "custom-1-hash"
+                    ),
+                    makeTarget(
+                        backend: "custom_backend",
+                        buildId: "build-custom-2",
+                        status: "succeeded",
+                        url: "https://cdn.example/custom-2/index.html",
+                        hash: "custom-2-hash"
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["react", "rive"]
+                )
+                expect(selected?.buildId).to(equal("build-custom-1"))
             }
         }
 
