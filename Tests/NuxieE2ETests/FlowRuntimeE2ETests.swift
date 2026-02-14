@@ -4399,6 +4399,15 @@ private final class CapturingRuntimeDelegate: FlowRuntimeDelegate {
         onMessage(type, payload, id)
     }
 
+    func flowViewController(
+        _ controller: FlowViewController,
+        didSendRuntimeMessage type: String,
+        payload: [String : Any],
+        replyTo: String?
+    ) {
+        onMessage(type, payload, replyTo)
+    }
+
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
         onDismiss?(reason)
     }
