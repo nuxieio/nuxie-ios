@@ -48,3 +48,8 @@ Field notes:
   - `kind=event`: Analytics events tracked by runtime.
   - `kind=navigation`: Runtime navigation or screen-change observations.
   - `kind=binding`: Key binding outputs (`action/did_set`) including path/value.
+
+Harness selection:
+
+- E2E parity harness defaults to `react`.
+- Set `NUXIE_E2E_PARITY_RENDERER=rive` to run the same assertions through the Rive adapter path.

@@ -484,13 +484,37 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 			                                viewModelInstances: nil,
 			                                converters: nil
 			                            )
-			                        } else if isParityTraceFlow {
-			                            remoteFlow = RemoteFlow(
-			                                id: reqFlowId,
-			                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
-			                                screens: [
-			                                    RemoteFlowScreen(
-			                                        id: "screen-entry",
+		                        } else if isParityTraceFlow {
+		                            remoteFlow = RemoteFlow(
+		                                id: reqFlowId,
+		                                bundle: FlowBundleRef(url: bundleBaseUrl, manifest: manifest),
+		                                targets: [
+		                                    RemoteFlowTarget(
+		                                        compilerBackend: "react",
+		                                        buildId: "build-react-\(reqFlowId)",
+		                                        bundle: FlowBundleRef(
+		                                            url: bundleBaseUrl,
+		                                            manifest: manifest
+		                                        ),
+		                                        status: "succeeded",
+		                                        requiredCapabilities: ["renderer.react.webview.v1"],
+		                                        recommendedSelectionOrder: nil
+		                                    ),
+		                                    RemoteFlowTarget(
+		                                        compilerBackend: "rive",
+		                                        buildId: "build-rive-\(reqFlowId)",
+		                                        bundle: FlowBundleRef(
+		                                            url: bundleBaseUrl,
+		                                            manifest: manifest
+		                                        ),
+		                                        status: "succeeded",
+		                                        requiredCapabilities: ["renderer.rive.native.v1"],
+		                                        recommendedSelectionOrder: nil
+		                                    ),
+		                                ],
+		                                screens: [
+		                                    RemoteFlowScreen(
+		                                        id: "screen-entry",
 			                                        defaultViewModelId: "vm-1",
 			                                        defaultInstanceId: nil
 			                                    ),
@@ -1766,6 +1790,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                    fail("E2E: missing compiled bundle fixture")
 	                    return
 	                }
+	                let parityRenderer = parityRendererSelectionFromEnvironment()
 
 	                let parityFlowId = "flow_e2e_parity_trace_\(UUID().uuidString)"
 	                let distinctId = "e2e-user-parity-trace-1"
@@ -1773,6 +1798,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                let didApplyDidSetAck = LockedValue(false)
 	                let didNavigateToScreen2 = LockedValue(false)
 	                let recordedTrace = LockedValue<FlowRuntimeTrace?>(nil)
+	                let selectedRendererBackend = LockedValue<String?>(nil)
 
 	                waitUntil(timeout: .seconds(60)) { done in
 	                    var finished = false
@@ -1788,8 +1814,20 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                        let mockEventService = TraceRecordingMockEventService(
 	                            traceRecorder: traceRecorder
 	                        )
+	                        let originalSupportedCapabilities = RemoteFlow.supportedCapabilities
+	                        let originalPreferredCompilerBackends = RemoteFlow.preferredCompilerBackends
+	                        let originalRenderableCompilerBackends = RemoteFlow.renderableCompilerBackends
 
 	                        do {
+	                            RemoteFlow.supportedCapabilities = parityRenderer.supportedCapabilities
+	                            RemoteFlow.preferredCompilerBackends = parityRenderer.preferredCompilerBackends
+	                            RemoteFlow.renderableCompilerBackends = parityRenderer.renderableCompilerBackends
+	                            defer {
+	                                RemoteFlow.supportedCapabilities = originalSupportedCapabilities
+	                                RemoteFlow.preferredCompilerBackends = originalPreferredCompilerBackends
+	                                RemoteFlow.renderableCompilerBackends = originalRenderableCompilerBackends
+	                            }
+
 	                            Container.shared.reset()
 	                            let config = NuxieConfiguration(apiKey: apiKey)
 	                            config.apiEndpoint = baseURL
@@ -1802,6 +1840,14 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
 	                            let remoteFlow = try await api.fetchFlow(flowId: parityFlowId)
 	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
+	                            let targetSelection = flow.remoteFlow.selectedTargetResult
+	                            let rendererBackend = targetSelection.selectedCompilerBackend ?? "legacy"
+	                            selectedRendererBackend.set(rendererBackend)
+	                            if rendererBackend != parityRenderer.expectedRendererBackend {
+	                                fail("E2E: expected parity renderer '\(parityRenderer.expectedRendererBackend)' but selected '\(rendererBackend)'")
+	                                finishOnce()
+	                                return
+	                            }
 
 	                            let archiveService = FlowArchiver()
 	                            await archiveService.removeArchive(for: flow.id)
@@ -1898,7 +1944,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                            recordedTrace.set(
 	                                traceRecorder.trace(
 	                                    fixtureId: "fixture-nav-binding",
-	                                    rendererBackend: "react"
+	                                    rendererBackend: rendererBackend
 	                                )
 	                            )
 	                            finishOnce()
@@ -1911,6 +1957,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                expect(didApplyDidSetAck.get()).to(beTrue())
 	                expect(didNavigateToScreen2.get()).to(beTrue())
+	                expect(selectedRendererBackend.get()).to(equal(parityRenderer.expectedRendererBackend))
 	                guard let trace = recordedTrace.get() else {
 	                    fail("E2E: expected parity trace to be recorded")
 	                    return
@@ -1918,7 +1965,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                expect(trace.schemaVersion).to(equal(FlowRuntimeTrace.currentSchemaVersion))
 	                expect(trace.fixtureId).to(equal("fixture-nav-binding"))
-	                expect(trace.rendererBackend).to(equal("react"))
+	                expect(trace.rendererBackend).to(equal(parityRenderer.expectedRendererBackend))
 	                expect(trace.entries).toNot(beEmpty())
 	                expect(trace.entries.contains(where: {
 	                    $0.kind == .navigation
@@ -1929,9 +1976,12 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                    $0.kind == .binding
 	                        && $0.name == "did_set"
 	                })).to(beTrue())
-	                expect(trace.entries.contains(where: {
+	                let artifactLoadEvent = trace.entries.first(where: {
 	                    $0.kind == .event
-	                })).to(beTrue())
+	                        && $0.name == JourneyEvents.flowArtifactLoadSucceeded
+	                })
+	                expect(artifactLoadEvent).toNot(beNil())
+	                expect(artifactLoadEvent?.output).to(contain("\"adapter_backend\":\"\(parityRenderer.expectedRendererBackend)\""))
 	            }
 
 	            it("applies list operations (insert/move/remove) in the compiled web runtime (fixture mode)") {
@@ -4747,6 +4797,39 @@ private final class LockedValue<T> {
         lock.unlock()
         return current
     }
+}
+
+private struct ParityRendererSelection {
+    let expectedRendererBackend: String
+    let supportedCapabilities: Set<String>
+    let preferredCompilerBackends: [String]
+    let renderableCompilerBackends: Set<String>
+}
+
+private func parityRendererSelectionFromEnvironment() -> ParityRendererSelection {
+    let env = ProcessInfo.processInfo.environment
+    let rawRenderer = env["NUXIE_E2E_PARITY_RENDERER"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+
+    if rawRenderer == "rive" {
+        return ParityRendererSelection(
+            expectedRendererBackend: "rive",
+            supportedCapabilities: [
+                "renderer.react.webview.v1",
+                "renderer.rive.native.v1",
+            ],
+            preferredCompilerBackends: ["rive", "react"],
+            renderableCompilerBackends: ["react", "rive"]
+        )
+    }
+
+    return ParityRendererSelection(
+        expectedRendererBackend: "react",
+        supportedCapabilities: ["renderer.react.webview.v1"],
+        preferredCompilerBackends: ["react", "rive"],
+        renderableCompilerBackends: ["react"]
+    )
 }
 
 private func isEnabled(_ key: String, legacyKeys: [String] = []) -> Bool {
