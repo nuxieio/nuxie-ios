@@ -1840,8 +1840,10 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                            let api = NuxieApi(apiKey: apiKey, baseURL: baseURL)
 	                            let remoteFlow = try await api.fetchFlow(flowId: parityFlowId)
 	                            let flow = Flow(remoteFlow: remoteFlow, products: [])
-	                            let targetSelection = flow.remoteFlow.selectedTargetResult
-	                            let rendererBackend = targetSelection.selectedCompilerBackend ?? "legacy"
+	                            let rendererAdapterRegistry = FlowRendererAdapterRegistry.standard()
+	                            let rendererBackend = rendererAdapterRegistry.resolve(
+	                                for: flow.remoteFlow.selectedTargetResult.selectedCompilerBackend
+	                            ).resolvedCompilerBackend
 	                            selectedRendererBackend.set(rendererBackend)
 	                            if rendererBackend != parityRenderer.expectedRendererBackend {
 	                                fail("E2E: expected parity renderer '\(parityRenderer.expectedRendererBackend)' but selected '\(rendererBackend)'")
@@ -1851,9 +1853,13 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 
 	                            let archiveService = FlowArchiver()
 	                            await archiveService.removeArchive(for: flow.id)
+	                            let flowService = FlowService(
+	                                flowArchiver: archiveService,
+	                                rendererAdapterRegistry: rendererAdapterRegistry
+	                            )
 
 	                            await MainActor.run {
-	                                let vc = FlowViewController(flow: flow, archiveService: archiveService)
+	                                let vc = flowService.viewController(for: flow)
 	                                let campaign = makeCampaign(flowId: parityFlowId)
 	                                let journey = Journey(campaign: campaign, distinctId: distinctId)
 	                                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
