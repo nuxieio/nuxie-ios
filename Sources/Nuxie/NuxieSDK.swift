@@ -62,6 +62,7 @@ public final class NuxieSDK {
     self.configuration = configuration
     container.sdkConfiguration.register { configuration }
     RemoteFlow.supportedCapabilities = configuration.flowRuntimeCapabilities
+    RemoteFlow.preferredCompilerBackends = configuration.flowPreferredCompilerBackends
 
     // Configure logger
     NuxieLogger.shared.configure(

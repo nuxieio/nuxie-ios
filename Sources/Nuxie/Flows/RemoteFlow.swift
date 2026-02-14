@@ -3,8 +3,17 @@ import Foundation
 // MARK: - Remote Flow
 
 public struct RemoteFlow: Codable {
+    private static let defaultRequiredCapabilitiesByBackend: [String: [String]] = [
+        "react": ["renderer.react.webview.v1"],
+        "rive": ["renderer.rive.native.v1"],
+    ]
+
     public static var supportedCapabilities: Set<String> = [
         "renderer.react.webview.v1",
+    ]
+    public static var preferredCompilerBackends: [String] = [
+        "react",
+        "rive",
     ]
 
     public let id: String
@@ -40,20 +49,41 @@ public struct RemoteFlow: Codable {
     public func selectedTarget(
         supportedCapabilities: Set<String>
     ) -> RemoteFlowTarget? {
+        selectedTarget(
+            supportedCapabilities: supportedCapabilities,
+            preferredCompilerBackends: Self.preferredCompilerBackends
+        )
+    }
+
+    public func selectedTarget(
+        supportedCapabilities: Set<String>,
+        preferredCompilerBackends: [String]
+    ) -> RemoteFlowTarget? {
         guard let targets, !targets.isEmpty else { return nil }
 
-        let reactTargets = targets.filter { $0.compilerBackend.lowercased() == "react" }
-        guard !reactTargets.isEmpty else { return nil }
-
-        let succeededReactTargets = reactTargets.filter {
+        let succeededTargets = targets.filter {
             $0.status.lowercased() == "succeeded"
         }
-        return succeededReactTargets.first(where: {
+        let compatibleTargets = succeededTargets.filter {
             supportsRequiredCapabilities(
                 target: $0,
                 supportedCapabilities: supportedCapabilities
             )
-        })
+        }
+        guard !compatibleTargets.isEmpty else { return nil }
+
+        let normalizedPreferredBackends = preferredCompilerBackends.map {
+            $0.lowercased()
+        }
+        for preferredBackend in normalizedPreferredBackends {
+            if let target = compatibleTargets.first(where: {
+                $0.compilerBackend.lowercased() == preferredBackend
+            }) {
+                return target
+            }
+        }
+
+        return compatibleTargets.first
     }
 
     public var selectedTarget: RemoteFlowTarget? {
@@ -64,8 +94,18 @@ public struct RemoteFlow: Codable {
         target: RemoteFlowTarget,
         supportedCapabilities: Set<String>
     ) -> Bool {
-        guard let requiredCapabilities = target.requiredCapabilities,
-              !requiredCapabilities.isEmpty else {
+        let explicitRequiredCapabilities = target.requiredCapabilities ?? []
+        let requiredCapabilities: [String]
+        if explicitRequiredCapabilities.isEmpty {
+            requiredCapabilities =
+                Self.defaultRequiredCapabilitiesByBackend[
+                    target.compilerBackend.lowercased()
+                ] ?? []
+        } else {
+            requiredCapabilities = explicitRequiredCapabilities
+        }
+
+        guard !requiredCapabilities.isEmpty else {
             return true
         }
         return requiredCapabilities.allSatisfy { capability in
