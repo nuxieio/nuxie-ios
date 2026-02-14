@@ -129,13 +129,20 @@ final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
 
     private let bridge: FlowJourneyRunnerRuntimeBridge
     private let onMessage: OnMessage?
+    private let traceRecorder: FlowRuntimeTraceRecorder?
 
-    init(bridge: FlowJourneyRunnerRuntimeBridge, onMessage: OnMessage? = nil) {
+    init(
+        bridge: FlowJourneyRunnerRuntimeBridge,
+        onMessage: OnMessage? = nil,
+        traceRecorder: FlowRuntimeTraceRecorder? = nil
+    ) {
         self.bridge = bridge
         self.onMessage = onMessage
+        self.traceRecorder = traceRecorder
     }
 
     func flowViewController(_ controller: FlowViewController, didReceiveRuntimeMessage type: String, payload: [String: Any], id: String?) {
+        traceRecorder?.recordRuntimeMessage(type: type, payload: payload)
         onMessage?(type, payload, id)
         Task { [bridge] in
             await bridge.handle(type: type, payload: payload, id: id)
