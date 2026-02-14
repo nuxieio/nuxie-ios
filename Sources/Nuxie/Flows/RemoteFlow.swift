@@ -5,17 +5,59 @@ import Foundation
 public struct RemoteFlow: Codable {
     public let id: String
     public let bundle: FlowBundleRef
+    public let targets: [RemoteFlowTarget]?
     public let fontManifest: FontManifest? = nil
     public let screens: [RemoteFlowScreen]
     public let interactions: [String: [Interaction]]
     public let viewModels: [ViewModel]
     public let viewModelInstances: [ViewModelInstance]?
     public let converters: [String: [String: AnyCodable]]?
+
+    public init(
+        id: String,
+        bundle: FlowBundleRef,
+        targets: [RemoteFlowTarget]? = nil,
+        screens: [RemoteFlowScreen],
+        interactions: [String: [Interaction]],
+        viewModels: [ViewModel],
+        viewModelInstances: [ViewModelInstance]?,
+        converters: [String: [String: AnyCodable]]?
+    ) {
+        self.id = id
+        self.bundle = bundle
+        self.targets = targets
+        self.screens = screens
+        self.interactions = interactions
+        self.viewModels = viewModels
+        self.viewModelInstances = viewModelInstances
+        self.converters = converters
+    }
+
+    public var selectedTarget: RemoteFlowTarget? {
+        guard let targets, !targets.isEmpty else { return nil }
+
+        let reactTargets = targets.filter { $0.compilerBackend.lowercased() == "react" }
+        guard !reactTargets.isEmpty else { return nil }
+
+        return reactTargets.first(where: { $0.status.lowercased() == "succeeded" })
+    }
+
+    public var selectedBundle: FlowBundleRef {
+        selectedTarget?.bundle ?? bundle
+    }
 }
 
 public struct FlowBundleRef: Codable {
     public let url: String
     public let manifest: BuildManifest
+}
+
+public struct RemoteFlowTarget: Codable {
+    public let compilerBackend: String
+    public let buildId: String
+    public let bundle: FlowBundleRef
+    public let status: String
+    public let requiredCapabilities: [String]?
 }
 
 public struct FontManifest: Codable {
