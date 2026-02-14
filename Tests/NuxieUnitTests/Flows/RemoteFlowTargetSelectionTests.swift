@@ -62,6 +62,7 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 let flow = makeFlow()
 
                 expect(flow.selectedTarget).to(beNil())
+                expect(flow.selectedTargetResult.reason).to(equal(.targetsMissing))
                 expect(flow.selectedBundle.url).to(equal("https://cdn.example/legacy/index.html"))
                 expect(flow.selectedBundle.manifest.contentHash).to(equal("legacy-hash"))
             }
@@ -85,6 +86,7 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 ])
 
                 expect(flow.selectedTarget?.compilerBackend).to(equal("react"))
+                expect(flow.selectedTargetResult.reason).to(equal(.selectedPreferredBackend))
                 expect(flow.selectedBundle.url).to(equal("https://cdn.example/react/index.html"))
                 expect(flow.selectedBundle.manifest.contentHash).to(equal("react-hash"))
             }
@@ -108,6 +110,7 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 ])
 
                 expect(flow.selectedTarget).to(beNil())
+                expect(flow.selectedTargetResult.reason).to(equal(.noSucceededTargets))
                 expect(flow.selectedBundle.url).to(equal("https://cdn.example/legacy/index.html"))
                 expect(flow.selectedBundle.manifest.contentHash).to(equal("legacy-hash"))
             }
@@ -124,6 +127,7 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 ])
 
                 expect(flow.selectedTarget).to(beNil())
+                expect(flow.selectedTargetResult.reason).to(equal(.noCapabilityCompatibleTargets))
                 expect(flow.selectedBundle.url).to(equal("https://cdn.example/legacy/index.html"))
                 expect(flow.selectedBundle.manifest.contentHash).to(equal("legacy-hash"))
             }
@@ -141,6 +145,9 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 ])
 
                 expect(flow.selectedTarget(supportedCapabilities: [])).to(beNil())
+                expect(flow.selectedTargetResult(
+                    supportedCapabilities: []
+                ).reason).to(equal(.noCapabilityCompatibleTargets))
                 expect(flow.selectedBundle(supportedCapabilities: []).url).to(equal("https://cdn.example/legacy/index.html"))
                 expect(flow.selectedBundle(supportedCapabilities: []).manifest.contentHash).to(equal("legacy-hash"))
             }
@@ -241,7 +248,13 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                     preferredCompilerBackends: ["rive", "react"],
                     renderableCompilerBackends: ["react"]
                 )
+                let selection = flow.selectedTargetResult(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["rive", "react"],
+                    renderableCompilerBackends: ["react"]
+                )
                 expect(selected).to(beNil())
+                expect(selection.reason).to(equal(.noRenderableTargets))
                 expect(flow.selectedBundle(
                     supportedCapabilities: []
                 ).url).to(equal("https://cdn.example/legacy/index.html"))
@@ -270,9 +283,34 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                     preferredCompilerBackends: ["react", "rive"]
                 )
                 expect(selected).to(beNil())
+                expect(flow.selectedTargetResult(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["react", "rive"]
+                ).reason).to(equal(.noRenderableTargets))
                 expect(flow.selectedBundle(
                     supportedCapabilities: []
                 ).url).to(equal("https://cdn.example/legacy/index.html"))
+            }
+
+            it("returns no preferred backend match when compatible targets exclude preference order") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: []
+                    ),
+                ])
+
+                let selection = flow.selectedTargetResult(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["react"],
+                    renderableCompilerBackends: ["react", "rive"]
+                )
+                expect(selection.target).to(beNil())
+                expect(selection.reason).to(equal(.noPreferredBackendMatch))
             }
         }
 

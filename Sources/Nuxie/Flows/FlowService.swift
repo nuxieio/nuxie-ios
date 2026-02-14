@@ -131,13 +131,30 @@ final class FlowService: FlowServiceProtocol {
     /// Must be called from main thread as it creates UIViewController
     @MainActor
     func viewController(for flow: Flow) -> FlowViewController {
+        let targetSelection = flow.remoteFlow.selectedTargetResult
+        let adapterResolution = rendererAdapterRegistry.resolve(
+            for: targetSelection.selectedCompilerBackend
+        )
+
         // Path A: Check cache first
         if let cached = viewControllerCache.updateCachedViewControllerIfNeeded(for: flow) {
+            logRendererSelection(
+                flow: flow,
+                targetSelection: targetSelection,
+                adapterResolution: adapterResolution,
+                cacheHit: true
+            )
             LogDebug("Cache hit: returning cached view controller for flow: \(flow.id)")
             return cached
         }
         
         // Path B: Create new view controller and cache it
+        logRendererSelection(
+            flow: flow,
+            targetSelection: targetSelection,
+            adapterResolution: adapterResolution,
+            cacheHit: false
+        )
         LogDebug("Cache miss: creating new view controller for flow: \(flow.id)")
         let viewController = viewControllerCache.createViewController(for: flow)
         return viewController
@@ -189,6 +206,20 @@ final class FlowService: FlowServiceProtocol {
     func clearViewControllerCache() {
         viewControllerCache.clearCache()
         LogInfo("Cleared view controller cache")
+    }
+
+    @MainActor
+    private func logRendererSelection(
+        flow: Flow,
+        targetSelection: RemoteFlow.TargetSelectionResult,
+        adapterResolution: FlowRendererAdapterResolution,
+        cacheHit: Bool
+    ) {
+        let selectedCompilerBackend = targetSelection.selectedCompilerBackend ?? "legacy"
+        let selectedBuildId = targetSelection.selectedBuildId ?? "legacy"
+        LogInfo(
+            "Flow renderer selection: flowId=\(flow.id) targetBackend=\(selectedCompilerBackend) targetBuildId=\(selectedBuildId) targetReason=\(targetSelection.reason.rawValue) adapterBackend=\(adapterResolution.resolvedCompilerBackend) adapterFallback=\(adapterResolution.didFallback) cacheHit=\(cacheHit)"
+        )
     }
 }
 

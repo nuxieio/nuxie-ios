@@ -19,6 +19,28 @@ public struct RemoteFlow: Codable {
         "react",
     ]
 
+    public enum TargetSelectionReason: String {
+        case selectedPreferredBackend = "selected_preferred_backend"
+        case targetsMissing = "targets_missing"
+        case noSucceededTargets = "no_succeeded_targets"
+        case noCapabilityCompatibleTargets = "no_capability_compatible_targets"
+        case noRenderableTargets = "no_renderable_targets"
+        case noPreferredBackendMatch = "no_preferred_backend_match"
+    }
+
+    public struct TargetSelectionResult {
+        public let target: RemoteFlowTarget?
+        public let reason: TargetSelectionReason
+
+        public var selectedCompilerBackend: String? {
+            target?.compilerBackend.lowercased()
+        }
+
+        public var selectedBuildId: String? {
+            target?.buildId
+        }
+    }
+
     public let id: String
     public let bundle: FlowBundleRef
     public let targets: [RemoteFlowTarget]?
@@ -52,32 +74,43 @@ public struct RemoteFlow: Codable {
     public func selectedTarget(
         supportedCapabilities: Set<String>
     ) -> RemoteFlowTarget? {
-        selectedTarget(
+        selectedTargetResult(
             supportedCapabilities: supportedCapabilities,
             preferredCompilerBackends: Self.preferredCompilerBackends
-        )
+        ).target
     }
 
     public func selectedTarget(
         supportedCapabilities: Set<String>,
         preferredCompilerBackends: [String]
     ) -> RemoteFlowTarget? {
-        selectedTarget(
+        selectedTargetResult(
             supportedCapabilities: supportedCapabilities,
             preferredCompilerBackends: preferredCompilerBackends,
             renderableCompilerBackends: Self.renderableCompilerBackends
-        )
+        ).target
     }
 
-    public func selectedTarget(
+    public func selectedTargetResult(
         supportedCapabilities: Set<String>,
         preferredCompilerBackends: [String],
         renderableCompilerBackends: Set<String>
-    ) -> RemoteFlowTarget? {
-        guard let targets, !targets.isEmpty else { return nil }
+    ) -> TargetSelectionResult {
+        guard let targets, !targets.isEmpty else {
+            return TargetSelectionResult(
+                target: nil,
+                reason: .targetsMissing
+            )
+        }
 
         let succeededTargets = targets.filter {
             $0.status.lowercased() == "succeeded"
+        }
+        guard !succeededTargets.isEmpty else {
+            return TargetSelectionResult(
+                target: nil,
+                reason: .noSucceededTargets
+            )
         }
         let compatibleTargets = succeededTargets.filter {
             supportsRequiredCapabilities(
@@ -85,7 +118,12 @@ public struct RemoteFlow: Codable {
                 supportedCapabilities: supportedCapabilities
             )
         }
-        guard !compatibleTargets.isEmpty else { return nil }
+        guard !compatibleTargets.isEmpty else {
+            return TargetSelectionResult(
+                target: nil,
+                reason: .noCapabilityCompatibleTargets
+            )
+        }
 
         let normalizedRenderableBackends = Set(
             renderableCompilerBackends.map { $0.lowercased() }
@@ -93,7 +131,12 @@ public struct RemoteFlow: Codable {
         let renderableTargets = compatibleTargets.filter { target in
             normalizedRenderableBackends.contains(target.compilerBackend.lowercased())
         }
-        guard !renderableTargets.isEmpty else { return nil }
+        guard !renderableTargets.isEmpty else {
+            return TargetSelectionResult(
+                target: nil,
+                reason: .noRenderableTargets
+            )
+        }
 
         let normalizedPreferredBackends = preferredCompilerBackends.map {
             $0.lowercased()
@@ -102,15 +145,58 @@ public struct RemoteFlow: Codable {
             if let target = renderableTargets.first(where: {
                 $0.compilerBackend.lowercased() == preferredBackend
             }) {
-                return target
+                return TargetSelectionResult(
+                    target: target,
+                    reason: .selectedPreferredBackend
+                )
             }
         }
 
-        return nil
+        return TargetSelectionResult(
+            target: nil,
+            reason: .noPreferredBackendMatch
+        )
+    }
+
+    public func selectedTarget(
+        supportedCapabilities: Set<String>,
+        preferredCompilerBackends: [String],
+        renderableCompilerBackends: Set<String>
+    ) -> RemoteFlowTarget? {
+        selectedTargetResult(
+            supportedCapabilities: supportedCapabilities,
+            preferredCompilerBackends: preferredCompilerBackends,
+            renderableCompilerBackends: renderableCompilerBackends
+        ).target
+    }
+
+    public func selectedTargetResult(
+        supportedCapabilities: Set<String>,
+        preferredCompilerBackends: [String]
+    ) -> TargetSelectionResult {
+        selectedTargetResult(
+            supportedCapabilities: supportedCapabilities,
+            preferredCompilerBackends: preferredCompilerBackends,
+            renderableCompilerBackends: Self.renderableCompilerBackends
+        )
+    }
+
+    public func selectedTargetResult(
+        supportedCapabilities: Set<String>
+    ) -> TargetSelectionResult {
+        selectedTargetResult(
+            supportedCapabilities: supportedCapabilities,
+            preferredCompilerBackends: Self.preferredCompilerBackends,
+            renderableCompilerBackends: Self.renderableCompilerBackends
+        )
     }
 
     public var selectedTarget: RemoteFlowTarget? {
         selectedTarget(supportedCapabilities: Self.supportedCapabilities)
+    }
+
+    public var selectedTargetResult: TargetSelectionResult {
+        selectedTargetResult(supportedCapabilities: Self.supportedCapabilities)
     }
 
     private func supportsRequiredCapabilities(
