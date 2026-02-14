@@ -15,6 +15,9 @@ public struct RemoteFlow: Codable {
         "react",
         "rive",
     ]
+    public static var renderableCompilerBackends: Set<String> = [
+        "react",
+    ]
 
     public let id: String
     public let bundle: FlowBundleRef
@@ -59,6 +62,18 @@ public struct RemoteFlow: Codable {
         supportedCapabilities: Set<String>,
         preferredCompilerBackends: [String]
     ) -> RemoteFlowTarget? {
+        selectedTarget(
+            supportedCapabilities: supportedCapabilities,
+            preferredCompilerBackends: preferredCompilerBackends,
+            renderableCompilerBackends: Self.renderableCompilerBackends
+        )
+    }
+
+    public func selectedTarget(
+        supportedCapabilities: Set<String>,
+        preferredCompilerBackends: [String],
+        renderableCompilerBackends: Set<String>
+    ) -> RemoteFlowTarget? {
         guard let targets, !targets.isEmpty else { return nil }
 
         let succeededTargets = targets.filter {
@@ -72,11 +87,19 @@ public struct RemoteFlow: Codable {
         }
         guard !compatibleTargets.isEmpty else { return nil }
 
+        let normalizedRenderableBackends = Set(
+            renderableCompilerBackends.map { $0.lowercased() }
+        )
+        let renderableTargets = compatibleTargets.filter { target in
+            normalizedRenderableBackends.contains(target.compilerBackend.lowercased())
+        }
+        guard !renderableTargets.isEmpty else { return nil }
+
         let normalizedPreferredBackends = preferredCompilerBackends.map {
             $0.lowercased()
         }
         for preferredBackend in normalizedPreferredBackends {
-            if let target = compatibleTargets.first(where: {
+            if let target = renderableTargets.first(where: {
                 $0.compilerBackend.lowercased() == preferredBackend
             }) {
                 return target
