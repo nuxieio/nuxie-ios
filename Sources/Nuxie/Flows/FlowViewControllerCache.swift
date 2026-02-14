@@ -16,18 +16,18 @@ final class FlowViewControllerCache {
     // Flow archiver for creating view controllers
     private let flowArchiver: FlowArchiver
     private let fontStore: FontStore
-    private let rendererAdapter: any FlowRendererAdapter
+    private let rendererAdapterRegistry: FlowRendererAdapterRegistry
     
     // MARK: - Initialization
     
     init(
         flowArchiver: FlowArchiver,
         fontStore: FontStore,
-        rendererAdapter: any FlowRendererAdapter
+        rendererAdapterRegistry: FlowRendererAdapterRegistry
     ) {
         self.flowArchiver = flowArchiver
         self.fontStore = fontStore
-        self.rendererAdapter = rendererAdapter
+        self.rendererAdapterRegistry = rendererAdapterRegistry
         LogDebug("FlowViewControllerCache initialized")
     }
     
@@ -37,12 +37,23 @@ final class FlowViewControllerCache {
     func getCachedViewController(for flowId: String) -> FlowViewController? {
         return cache[flowId]
     }
+
+    /// Update a cached view controller with the correct renderer-normalized flow.
+    func updateCachedViewControllerIfNeeded(for flow: Flow) -> FlowViewController? {
+        guard let cached = cache[flow.id] else {
+            return nil
+        }
+
+        let rendererInput = resolveRendererInput(for: flow)
+        cached.updateFlowIfNeeded(rendererInput.flow)
+        return cached
+    }
     
     /// 2. Create view controller and insert into cache
     func createViewController(for flow: Flow) -> FlowViewController {
-        // MainActor ensures we're on main thread
-        let viewController = rendererAdapter.makeViewController(
-            flow: flow,
+        let rendererInput = resolveRendererInput(for: flow)
+        let viewController = rendererInput.adapter.makeViewController(
+            flow: rendererInput.flow,
             archiveService: flowArchiver,
             fontStore: fontStore
         )
@@ -72,5 +83,49 @@ final class FlowViewControllerCache {
     /// Get loaded view controller count
     var loadedCount: Int {
         return loadedViewControllers.count
+    }
+
+    private func resolveRendererInput(
+        for flow: Flow
+    ) -> (adapter: any FlowRendererAdapter, flow: Flow) {
+        let selectedCompilerBackend = flow.remoteFlow.selectedTarget?.compilerBackend
+        let resolution = rendererAdapterRegistry.resolve(for: selectedCompilerBackend)
+
+        let normalizedFlow: Flow
+        if resolution.didFallback {
+            normalizedFlow = forceFlow(flow, toCompilerBackend: resolution.resolvedCompilerBackend)
+        } else {
+            normalizedFlow = flow
+        }
+
+        return (
+            adapter: resolution.adapter,
+            flow: resolution.adapter.prepareFlowForRendering(normalizedFlow)
+        )
+    }
+
+    private func forceFlow(
+        _ flow: Flow,
+        toCompilerBackend compilerBackend: String
+    ) -> Flow {
+        let source = flow.remoteFlow
+        let backendTarget = source.selectedTarget(
+            supportedCapabilities: RemoteFlow.supportedCapabilities,
+            preferredCompilerBackends: [compilerBackend],
+            renderableCompilerBackends: [compilerBackend]
+        )
+        let forcedBundle = backendTarget?.bundle ?? source.bundle
+
+        let forcedRemoteFlow = RemoteFlow(
+            id: source.id,
+            bundle: forcedBundle,
+            targets: nil,
+            screens: source.screens,
+            interactions: source.interactions,
+            viewModels: source.viewModels,
+            viewModelInstances: source.viewModelInstances,
+            converters: source.converters
+        )
+        return Flow(remoteFlow: forcedRemoteFlow, products: flow.products)
     }
 }

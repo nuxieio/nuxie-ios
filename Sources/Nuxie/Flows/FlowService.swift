@@ -33,7 +33,7 @@ final class FlowService: FlowServiceProtocol {
     private let flowStore: FlowStore
     private let flowArchiver: FlowArchiver
     private let fontStore: FontStore
-    private let rendererAdapter: any FlowRendererAdapter
+    private let rendererAdapterRegistry: FlowRendererAdapterRegistry
     
     // Lazy initialization ensures this is created on MainActor when first accessed
     @MainActor
@@ -41,7 +41,7 @@ final class FlowService: FlowServiceProtocol {
         FlowViewControllerCache(
             flowArchiver: self.flowArchiver,
             fontStore: self.fontStore,
-            rendererAdapter: self.rendererAdapter
+            rendererAdapterRegistry: self.rendererAdapterRegistry
         )
     }()
     
@@ -49,15 +49,25 @@ final class FlowService: FlowServiceProtocol {
     
     internal init(
         flowArchiver: FlowArchiver? = nil,
-        rendererAdapter: (any FlowRendererAdapter)? = nil
+        rendererAdapter: (any FlowRendererAdapter)? = nil,
+        rendererAdapterRegistry: FlowRendererAdapterRegistry? = nil
     ) {
         self.flowStore = FlowStore()
         // Use injected flowArchiver or create new instance
         self.flowArchiver = flowArchiver ?? FlowArchiver()
         self.fontStore = FontStore()
-        self.rendererAdapter = rendererAdapter ?? ReactFlowRendererAdapter()
+        if let rendererAdapterRegistry {
+            self.rendererAdapterRegistry = rendererAdapterRegistry
+        } else if let rendererAdapter {
+            self.rendererAdapterRegistry = FlowRendererAdapterRegistry(
+                adapters: [rendererAdapter],
+                defaultCompilerBackend: rendererAdapter.id
+            )
+        } else {
+            self.rendererAdapterRegistry = FlowRendererAdapterRegistry.standard()
+        }
         
-        LogInfo("FlowService initialized with all subsystems (renderer: \(self.rendererAdapter.id))")
+        LogInfo("FlowService initialized with all subsystems (default renderer: \(self.rendererAdapterRegistry.defaultCompilerBackend))")
     }
     
     // MARK: - Flow Lifecycle Management (called by ProfileService)
@@ -122,13 +132,8 @@ final class FlowService: FlowServiceProtocol {
     @MainActor
     func viewController(for flow: Flow) -> FlowViewController {
         // Path A: Check cache first
-        if let cached = viewControllerCache.getCachedViewController(for: flow.id) {
+        if let cached = viewControllerCache.updateCachedViewControllerIfNeeded(for: flow) {
             LogDebug("Cache hit: returning cached view controller for flow: \(flow.id)")
-            
-            // Update the cached view controller with the latest flow data
-            // This will check if content changed and reload if necessary
-            cached.updateFlowIfNeeded(flow)
-            
             return cached
         }
         
