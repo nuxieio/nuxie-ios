@@ -70,11 +70,17 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     // MARK: - Initialization
 
-    init(flow: Flow, archiveService: FlowArchiver, fontStore: FontStore = FontStore()) {
+    init(
+        flow: Flow,
+        archiveService: FlowArchiver,
+        fontStore: FontStore = FontStore(),
+        artifactTelemetryContext: FlowArtifactTelemetryContext? = nil
+    ) {
         self.viewModel = FlowViewModel(
             flow: flow,
             archiveService: archiveService,
-            fontStore: fontStore
+            fontStore: fontStore,
+            artifactTelemetryContext: artifactTelemetryContext
         )
         self.fontStore = fontStore
         super.init(nibName: nil, bundle: nil)
@@ -115,6 +121,10 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     func updateFlowIfNeeded(_ newFlow: Flow) {
         viewModel.updateFlowIfNeeded(newFlow)
+    }
+
+    func updateArtifactTelemetryContext(_ context: FlowArtifactTelemetryContext) {
+        viewModel.updateArtifactTelemetryContext(context)
     }
 
     func performPurchase(productId: String, placementIndex: Any? = nil) {

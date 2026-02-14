@@ -1,6 +1,26 @@
 import Foundation
 import FactoryKit
 
+struct FlowArtifactTelemetryContext {
+    let targetCompilerBackend: String
+    let targetBuildId: String?
+    let targetSelectionReason: String
+    let adapterCompilerBackend: String
+    let adapterFallback: Bool
+
+    static func from(flow: Flow) -> FlowArtifactTelemetryContext {
+        let targetSelection = flow.remoteFlow.selectedTargetResult
+        let targetCompilerBackend = targetSelection.selectedCompilerBackend ?? "legacy"
+        return FlowArtifactTelemetryContext(
+            targetCompilerBackend: targetCompilerBackend,
+            targetBuildId: targetSelection.selectedBuildId,
+            targetSelectionReason: targetSelection.reason.rawValue,
+            adapterCompilerBackend: targetCompilerBackend,
+            adapterFallback: false
+        )
+    }
+}
+
 /// View model for FlowViewController - handles business logic and state management
 @MainActor
 class FlowViewModel {
@@ -25,6 +45,8 @@ class FlowViewModel {
     
     private let archiveService: FlowArchiver
     private let fontStore: FontStore?
+    private var artifactTelemetryContext: FlowArtifactTelemetryContext
+    @Injected(\.eventService) private var eventService: EventServiceProtocol
     
     // MARK: - Bindings (Closures)
     
@@ -44,14 +66,29 @@ class FlowViewModel {
     
     private var loadingTimer: Timer?
     private let loadingTimeoutSeconds: TimeInterval = 15.0
+    private var currentArtifactSource: ArtifactSource = .unknown
+    private var hasRecordedArtifactLoadOutcome = false
+
+    private enum ArtifactSource: String {
+        case cachedArchive = "cached_archive"
+        case remoteURL = "remote_url"
+        case unavailable = "unavailable"
+        case unknown = "unknown"
+    }
     
     // MARK: - Initialization
     
-    init(flow: Flow, archiveService: FlowArchiver, fontStore: FontStore? = nil) {
+    init(
+        flow: Flow,
+        archiveService: FlowArchiver,
+        fontStore: FontStore? = nil,
+        artifactTelemetryContext: FlowArtifactTelemetryContext? = nil
+    ) {
         self.flow = flow
         self.products = flow.products
         self.archiveService = archiveService
         self.fontStore = fontStore
+        self.artifactTelemetryContext = artifactTelemetryContext ?? FlowArtifactTelemetryContext.from(flow: flow)
         LogDebug("FlowViewModel initialized for flow: \(flow.id)")
     }
     
@@ -65,6 +102,8 @@ class FlowViewModel {
     /// Start loading the flow content
     func loadFlow() {
         currentState = .loading
+        hasRecordedArtifactLoadOutcome = false
+        currentArtifactSource = .unknown
         startLoadingTimeout()
         
         Task {
@@ -79,6 +118,7 @@ class FlowViewModel {
         }
         // 1. Try loading from cached WebArchive first
         if let archiveURL = await archiveService.getArchiveURL(for: flow) {
+            currentArtifactSource = .cachedArchive
             onLoadURL?(archiveURL)
             LogDebug("Loading flow from cached WebArchive: \(archiveURL)")
             return
@@ -86,6 +126,7 @@ class FlowViewModel {
         
         // 2. Fallback to loading from remote URL
         if let remoteURL = URL(string: flow.url) {
+            currentArtifactSource = .remoteURL
             let request = URLRequest(url: remoteURL)
             onLoadRequest?(request)
             LogDebug("Loading flow from remote URL: \(remoteURL)")
@@ -94,6 +135,8 @@ class FlowViewModel {
             await archiveService.preloadArchive(for: flow)
         } else {
             // 4. Show error state
+            currentArtifactSource = .unavailable
+            recordArtifactLoadFailure(errorMessage: "no_content_available")
             currentState = .error
             LogError("Failed to load flow: \(flow.id) - no content available")
         }
@@ -108,6 +151,7 @@ class FlowViewModel {
     /// Called when loading finishes successfully
     func handleLoadingFinished() {
         LogDebug("Finished loading flow: \(flow.id)")
+        recordArtifactLoadSuccess()
         cancelLoadingTimeout()
         currentState = .loaded
         
@@ -118,8 +162,13 @@ class FlowViewModel {
     /// Called when loading fails
     func handleLoadingFailed(_ error: Error) {
         LogError("Failed to load flow \(flow.id): \(error)")
+        recordArtifactLoadFailure(errorMessage: error.localizedDescription)
         cancelLoadingTimeout()
         currentState = .error
+    }
+
+    func updateArtifactTelemetryContext(_ context: FlowArtifactTelemetryContext) {
+        artifactTelemetryContext = context
     }
     
     /// Update products
@@ -181,6 +230,7 @@ class FlowViewModel {
         loadingTimer = Timer.scheduledTimer(withTimeInterval: loadingTimeoutSeconds, repeats: false) { [weak self] _ in
             guard let self = self else { return }
             if case .loading = self.currentState {
+                self.recordArtifactLoadFailure(errorMessage: "loading_timeout")
                 self.currentState = .error
                 LogDebug("Loading timeout reached for flow: \(self.flow.id)")
             }
@@ -190,5 +240,48 @@ class FlowViewModel {
     private func cancelLoadingTimeout() {
         loadingTimer?.invalidate()
         loadingTimer = nil
+    }
+
+    private func recordArtifactLoadSuccess() {
+        guard !hasRecordedArtifactLoadOutcome else { return }
+        hasRecordedArtifactLoadOutcome = true
+
+        eventService.track(
+            JourneyEvents.flowArtifactLoadSucceeded,
+            properties: JourneyEvents.flowArtifactLoadSucceededProperties(
+                flowId: flow.id,
+                targetCompilerBackend: artifactTelemetryContext.targetCompilerBackend,
+                targetBuildId: artifactTelemetryContext.targetBuildId,
+                targetSelectionReason: artifactTelemetryContext.targetSelectionReason,
+                adapterCompilerBackend: artifactTelemetryContext.adapterCompilerBackend,
+                adapterFallback: artifactTelemetryContext.adapterFallback,
+                artifactSource: currentArtifactSource.rawValue,
+                artifactContentHash: flow.manifest.contentHash
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+    }
+
+    private func recordArtifactLoadFailure(errorMessage: String?) {
+        guard !hasRecordedArtifactLoadOutcome else { return }
+        hasRecordedArtifactLoadOutcome = true
+
+        eventService.track(
+            JourneyEvents.flowArtifactLoadFailed,
+            properties: JourneyEvents.flowArtifactLoadFailedProperties(
+                flowId: flow.id,
+                targetCompilerBackend: artifactTelemetryContext.targetCompilerBackend,
+                targetBuildId: artifactTelemetryContext.targetBuildId,
+                targetSelectionReason: artifactTelemetryContext.targetSelectionReason,
+                adapterCompilerBackend: artifactTelemetryContext.adapterCompilerBackend,
+                adapterFallback: artifactTelemetryContext.adapterFallback,
+                artifactSource: currentArtifactSource.rawValue,
+                artifactContentHash: flow.manifest.contentHash,
+                errorMessage: errorMessage
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
     }
 }
