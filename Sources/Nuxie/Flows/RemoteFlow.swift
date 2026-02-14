@@ -3,6 +3,10 @@ import Foundation
 // MARK: - Remote Flow
 
 public struct RemoteFlow: Codable {
+    public static var supportedCapabilities: Set<String> = [
+        "renderer.react.webview.v1",
+    ]
+
     public let id: String
     public let bundle: FlowBundleRef
     public let targets: [RemoteFlowTarget]?
@@ -33,17 +37,50 @@ public struct RemoteFlow: Codable {
         self.converters = converters
     }
 
-    public var selectedTarget: RemoteFlowTarget? {
+    public func selectedTarget(
+        supportedCapabilities: Set<String>
+    ) -> RemoteFlowTarget? {
         guard let targets, !targets.isEmpty else { return nil }
 
         let reactTargets = targets.filter { $0.compilerBackend.lowercased() == "react" }
         guard !reactTargets.isEmpty else { return nil }
 
-        return reactTargets.first(where: { $0.status.lowercased() == "succeeded" })
+        let succeededReactTargets = reactTargets.filter {
+            $0.status.lowercased() == "succeeded"
+        }
+        return succeededReactTargets.first(where: {
+            supportsRequiredCapabilities(
+                target: $0,
+                supportedCapabilities: supportedCapabilities
+            )
+        })
+    }
+
+    public var selectedTarget: RemoteFlowTarget? {
+        selectedTarget(supportedCapabilities: Self.supportedCapabilities)
+    }
+
+    private func supportsRequiredCapabilities(
+        target: RemoteFlowTarget,
+        supportedCapabilities: Set<String>
+    ) -> Bool {
+        guard let requiredCapabilities = target.requiredCapabilities,
+              !requiredCapabilities.isEmpty else {
+            return true
+        }
+        return requiredCapabilities.allSatisfy { capability in
+            supportedCapabilities.contains(capability)
+        }
+    }
+
+    public func selectedBundle(
+        supportedCapabilities: Set<String>
+    ) -> FlowBundleRef {
+        selectedTarget(supportedCapabilities: supportedCapabilities)?.bundle ?? bundle
     }
 
     public var selectedBundle: FlowBundleRef {
-        selectedTarget?.bundle ?? bundle
+        selectedBundle(supportedCapabilities: Self.supportedCapabilities)
     }
 }
 
