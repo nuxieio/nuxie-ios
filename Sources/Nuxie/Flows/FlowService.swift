@@ -33,22 +33,31 @@ final class FlowService: FlowServiceProtocol {
     private let flowStore: FlowStore
     private let flowArchiver: FlowArchiver
     private let fontStore: FontStore
+    private let rendererAdapter: any FlowRendererAdapter
     
     // Lazy initialization ensures this is created on MainActor when first accessed
     @MainActor
     private lazy var viewControllerCache: FlowViewControllerCache = {
-        FlowViewControllerCache(flowArchiver: self.flowArchiver, fontStore: self.fontStore)
+        FlowViewControllerCache(
+            flowArchiver: self.flowArchiver,
+            fontStore: self.fontStore,
+            rendererAdapter: self.rendererAdapter
+        )
     }()
     
     // MARK: - Initialization
     
-    internal init(flowArchiver: FlowArchiver? = nil) {
+    internal init(
+        flowArchiver: FlowArchiver? = nil,
+        rendererAdapter: (any FlowRendererAdapter)? = nil
+    ) {
         self.flowStore = FlowStore()
         // Use injected flowArchiver or create new instance
         self.flowArchiver = flowArchiver ?? FlowArchiver()
         self.fontStore = FontStore()
+        self.rendererAdapter = rendererAdapter ?? ReactFlowRendererAdapter()
         
-        LogInfo("FlowService initialized with all subsystems")
+        LogInfo("FlowService initialized with all subsystems (renderer: \(self.rendererAdapter.id))")
     }
     
     // MARK: - Flow Lifecycle Management (called by ProfileService)
