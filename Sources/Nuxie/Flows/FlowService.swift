@@ -132,13 +132,8 @@ final class FlowService: FlowServiceProtocol {
     @MainActor
     func viewController(for flow: Flow) -> FlowViewController {
         // Path A: Check cache first
-        if let cached = viewControllerCache.getCachedViewController(for: flow.id) {
+        if let cached = viewControllerCache.updateCachedViewControllerIfNeeded(for: flow) {
             LogDebug("Cache hit: returning cached view controller for flow: \(flow.id)")
-            
-            // Update the cached view controller with the latest flow data
-            // This will check if content changed and reload if necessary
-            cached.updateFlowIfNeeded(flow)
-            
             return cached
         }
         

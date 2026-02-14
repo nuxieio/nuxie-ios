@@ -69,6 +69,7 @@ final class FlowRendererAdapterTests: QuickSpec {
         final class RecordingRendererAdapter: FlowRendererAdapter {
             let id: String
             var createdFlowIds: [String] = []
+            var createdFlowUrls: [String] = []
 
             init(id: String) {
                 self.id = id
@@ -81,6 +82,7 @@ final class FlowRendererAdapterTests: QuickSpec {
                 fontStore: FontStore
             ) -> FlowViewController {
                 createdFlowIds.append(flow.id)
+                createdFlowUrls.append(flow.url)
                 return MockFlowViewController(mockFlowId: flow.id)
             }
         }
@@ -125,6 +127,7 @@ final class FlowRendererAdapterTests: QuickSpec {
                 }
 
                 expect(adapter.createdFlowIds).to(equal(["flow-1"]))
+                expect(adapter.createdFlowUrls).to(equal(["https://cdn.example/flow-1/index.html"]))
                 expect(created).toNot(beNil())
                 expect(cached).toNot(beNil())
                 expect(created).to(beIdenticalTo(cached))
@@ -218,6 +221,7 @@ final class FlowRendererAdapterTests: QuickSpec {
                 }
 
                 expect(reactAdapter.createdFlowIds).to(equal(["flow-3"]))
+                expect(reactAdapter.createdFlowUrls).to(equal(["https://cdn.example/flow-3/index.html"]))
             }
 
             it("falls back to default adapter when no compatible target is selected") {
@@ -257,6 +261,55 @@ final class FlowRendererAdapterTests: QuickSpec {
                 }
 
                 expect(reactAdapter.createdFlowIds).to(equal(["flow-4"]))
+                expect(reactAdapter.createdFlowUrls).to(equal(["https://cdn.example/flow-4/index.html"]))
+            }
+
+            it("keeps fallback bundle stable on cache-hit updates for rive placeholder adapter") {
+                RemoteFlow.supportedCapabilities = ["renderer.rive.native.v1"]
+                RemoteFlow.preferredCompilerBackends = ["rive", "react"]
+                RemoteFlow.renderableCompilerBackends = ["react", "rive"]
+
+                var createdController: FlowViewController?
+                var updatedController: FlowViewController?
+
+                waitUntil { done in
+                    Task { @MainActor in
+                        let cache = FlowViewControllerCache(
+                            flowArchiver: FlowArchiver(),
+                            fontStore: FontStore(),
+                            rendererAdapterRegistry: FlowRendererAdapterRegistry(
+                                adapters: [
+                                    ReactFlowRendererAdapter(),
+                                    RiveFlowRendererAdapter(),
+                                ],
+                                defaultCompilerBackend: "react"
+                            )
+                        )
+
+                        let flow = makeFlow(
+                            id: "flow-5",
+                            targets: [
+                                makeTarget(
+                                    backend: "rive",
+                                    buildId: "build-rive",
+                                    url: "https://cdn.example/rive/index.json",
+                                    hash: "hash-rive",
+                                    requiredCapabilities: ["renderer.rive.native.v1"]
+                                ),
+                            ]
+                        )
+
+                        createdController = cache.createViewController(for: flow)
+                        updatedController = cache.updateCachedViewControllerIfNeeded(for: flow)
+                        done()
+                    }
+                }
+
+                expect(createdController).toNot(beNil())
+                expect(updatedController).toNot(beNil())
+                expect(createdController).to(beIdenticalTo(updatedController))
+                expect(updatedController?.flow.url).to(equal("https://cdn.example/flow-5/index.html"))
+                expect(updatedController?.flow.manifest.contentHash).to(equal("hash-flow-5"))
             }
         }
     }

@@ -7,12 +7,34 @@ import Foundation
 protocol FlowRendererAdapter {
     var id: String { get }
 
+    func prepareFlowForRendering(_ flow: Flow) -> Flow
+
     @MainActor
     func makeViewController(
         flow: Flow,
         archiveService: FlowArchiver,
         fontStore: FontStore
     ) -> FlowViewController
+}
+
+extension FlowRendererAdapter {
+    func prepareFlowForRendering(_ flow: Flow) -> Flow {
+        flow
+    }
+}
+
+struct FlowRendererAdapterResolution {
+    let requestedCompilerBackend: String?
+    let adapter: any FlowRendererAdapter
+
+    var resolvedCompilerBackend: String {
+        adapter.id.lowercased()
+    }
+
+    var didFallback: Bool {
+        guard let requestedCompilerBackend else { return true }
+        return requestedCompilerBackend != resolvedCompilerBackend
+    }
 }
 
 struct FlowRendererAdapterRegistry {
@@ -41,14 +63,21 @@ struct FlowRendererAdapterRegistry {
         self.adaptersByCompilerBackend = indexedAdapters
     }
 
-    func resolve(for compilerBackend: String?) -> any FlowRendererAdapter {
+    func resolve(for compilerBackend: String?) -> FlowRendererAdapterResolution {
+        let normalizedRequestedBackend = compilerBackend?.lowercased()
         guard
-            let compilerBackend,
-            let adapter = adaptersByCompilerBackend[compilerBackend.lowercased()]
+            let normalizedRequestedBackend,
+            let adapter = adaptersByCompilerBackend[normalizedRequestedBackend]
         else {
-            return defaultAdapter
+            return FlowRendererAdapterResolution(
+                requestedCompilerBackend: normalizedRequestedBackend,
+                adapter: defaultAdapter
+            )
         }
-        return adapter
+        return FlowRendererAdapterResolution(
+            requestedCompilerBackend: normalizedRequestedBackend,
+            adapter: adapter
+        )
     }
 
     static func standard() -> FlowRendererAdapterRegistry {
@@ -83,25 +112,7 @@ struct RiveFlowRendererAdapter: FlowRendererAdapter {
     let id: String = "rive"
     private let reactFallback = ReactFlowRendererAdapter()
 
-    @MainActor
-    func makeViewController(
-        flow: Flow,
-        archiveService: FlowArchiver,
-        fontStore: FontStore
-    ) -> FlowViewController {
-        // Placeholder behavior until native rive rendering is implemented:
-        // route through the known-good React path using the legacy bundle.
-        LogWarning(
-            "RiveFlowRendererAdapter is a placeholder; falling back to React renderer"
-        )
-        return reactFallback.makeViewController(
-            flow: fallbackReactFlow(for: flow),
-            archiveService: archiveService,
-            fontStore: fontStore
-        )
-    }
-
-    private func fallbackReactFlow(for flow: Flow) -> Flow {
+    func prepareFlowForRendering(_ flow: Flow) -> Flow {
         let source = flow.remoteFlow
         let fallbackRemoteFlow = RemoteFlow(
             id: source.id,
@@ -114,5 +125,23 @@ struct RiveFlowRendererAdapter: FlowRendererAdapter {
             converters: source.converters
         )
         return Flow(remoteFlow: fallbackRemoteFlow, products: flow.products)
+    }
+
+    @MainActor
+    func makeViewController(
+        flow: Flow,
+        archiveService: FlowArchiver,
+        fontStore: FontStore
+    ) -> FlowViewController {
+        // Placeholder behavior until native rive rendering is implemented:
+        // route through the known-good React path using the legacy bundle.
+        LogWarning(
+            "RiveFlowRendererAdapter is a placeholder; falling back to React renderer"
+        )
+        return reactFallback.makeViewController(
+            flow: prepareFlowForRendering(flow),
+            archiveService: archiveService,
+            fontStore: fontStore
+        )
     }
 }
