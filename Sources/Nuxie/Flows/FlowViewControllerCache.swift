@@ -16,18 +16,18 @@ final class FlowViewControllerCache {
     // Flow archiver for creating view controllers
     private let flowArchiver: FlowArchiver
     private let fontStore: FontStore
-    private let rendererAdapter: any FlowRendererAdapter
+    private let rendererAdapterRegistry: FlowRendererAdapterRegistry
     
     // MARK: - Initialization
     
     init(
         flowArchiver: FlowArchiver,
         fontStore: FontStore,
-        rendererAdapter: any FlowRendererAdapter
+        rendererAdapterRegistry: FlowRendererAdapterRegistry
     ) {
         self.flowArchiver = flowArchiver
         self.fontStore = fontStore
-        self.rendererAdapter = rendererAdapter
+        self.rendererAdapterRegistry = rendererAdapterRegistry
         LogDebug("FlowViewControllerCache initialized")
     }
     
@@ -41,6 +41,10 @@ final class FlowViewControllerCache {
     /// 2. Create view controller and insert into cache
     func createViewController(for flow: Flow) -> FlowViewController {
         // MainActor ensures we're on main thread
+        let selectedCompilerBackend = flow.remoteFlow.selectedTarget?.compilerBackend
+        let rendererAdapter = rendererAdapterRegistry.resolve(
+            for: selectedCompilerBackend
+        )
         let viewController = rendererAdapter.makeViewController(
             flow: flow,
             archiveService: flowArchiver,

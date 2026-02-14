@@ -131,6 +131,12 @@ public class NuxieConfiguration {
         "react",
         "rive",
     ]
+
+    /// Compiler backends this SDK can actively render.
+    /// Backends outside this set are treated as non-renderable and will fall back.
+    public var flowRenderableCompilerBackends: Set<String> = [
+        "react",
+    ]
     
     /// Custom URLSession for testing (if nil, a default one will be created)
     public var urlSession: URLSession?
