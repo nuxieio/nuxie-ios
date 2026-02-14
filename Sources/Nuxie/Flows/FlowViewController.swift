@@ -20,7 +20,25 @@ protocol FlowRuntimeDelegate: AnyObject {
         payload: [String: Any],
         id: String?
     )
+    /// Called when the host emits a runtime message toward the web runtime.
+    /// This is fired when the message is requested, even if delivery is queued
+    /// until runtime readiness.
+    func flowViewController(
+        _ controller: FlowViewController,
+        didSendRuntimeMessage type: String,
+        payload: [String: Any],
+        replyTo: String?
+    )
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason)
+}
+
+extension FlowRuntimeDelegate {
+    func flowViewController(
+        _ controller: FlowViewController,
+        didSendRuntimeMessage type: String,
+        payload: [String: Any],
+        replyTo: String?
+    ) {}
 }
 
 /// FlowViewController - displays flow content in a WebView with loading and error states
@@ -186,6 +204,12 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
         replyTo: String? = nil,
         completion: ((Any?, Error?) -> Void)? = nil
     ) {
+        runtimeDelegate?.flowViewController(
+            self,
+            didSendRuntimeMessage: type,
+            payload: payload,
+            replyTo: replyTo
+        )
         if !runtimeReady {
             pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
             return

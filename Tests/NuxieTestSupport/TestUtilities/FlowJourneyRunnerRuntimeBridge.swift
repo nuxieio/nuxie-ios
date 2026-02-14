@@ -149,6 +149,15 @@ final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
         }
     }
 
+    func flowViewController(
+        _ controller: FlowViewController,
+        didSendRuntimeMessage type: String,
+        payload: [String : Any],
+        replyTo: String?
+    ) {
+        traceRecorder?.recordRuntimeMessage(type: type, payload: payload)
+    }
+
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
         // Not used in these E2E tests.
     }

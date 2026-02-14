@@ -5,6 +5,53 @@ import Nimble
 
 final class FlowRuntimeTraceTests: QuickSpec {
     override class func spec() {
+        func makeFlow(id: String = "trace-flow") -> Flow {
+            let remoteFlow = RemoteFlow(
+                id: id,
+                bundle: FlowBundleRef(
+                    url: "https://cdn.example/\(id)/index.html",
+                    manifest: BuildManifest(
+                        totalFiles: 1,
+                        totalSize: 100,
+                        contentHash: "hash-\(id)",
+                        files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
+                    )
+                ),
+                screens: [RemoteFlowScreen(id: "screen-entry", defaultViewModelId: nil, defaultInstanceId: nil)],
+                interactions: [:],
+                viewModels: [],
+                viewModelInstances: nil,
+                converters: nil
+            )
+            return Flow(remoteFlow: remoteFlow, products: [])
+        }
+
+        final class TraceOnlyRuntimeDelegate: FlowRuntimeDelegate {
+            private let recorder: FlowRuntimeTraceRecorder
+
+            init(recorder: FlowRuntimeTraceRecorder) {
+                self.recorder = recorder
+            }
+
+            func flowViewController(
+                _ controller: FlowViewController,
+                didReceiveRuntimeMessage type: String,
+                payload: [String : Any],
+                id: String?
+            ) {}
+
+            func flowViewController(
+                _ controller: FlowViewController,
+                didSendRuntimeMessage type: String,
+                payload: [String : Any],
+                replyTo: String?
+            ) {
+                recorder.recordRuntimeMessage(type: type, payload: payload)
+            }
+
+            func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {}
+        }
+
         describe("FlowRuntimeTraceRecorder") {
             it("records navigation and binding entries in deterministic step order") {
                 let recorder = FlowRuntimeTraceRecorder()
@@ -91,6 +138,35 @@ final class FlowRuntimeTraceTests: QuickSpec {
 
                 expect(decoded).to(equal(trace))
                 expect(decoded.entries.map(\.kind)).to(equal([.event, .event]))
+            }
+
+            it("records host-sent runtime navigation messages via runtime delegate") { @MainActor in
+                let recorder = FlowRuntimeTraceRecorder()
+                let delegate = TraceOnlyRuntimeDelegate(recorder: recorder)
+
+                let viewController = FlowViewController(
+                    flow: makeFlow(id: "trace-host-sent"),
+                    archiveService: FlowArchiver()
+                )
+                viewController.runtimeDelegate = delegate
+
+                viewController.sendRuntimeMessage(
+                    type: "runtime/navigate",
+                    payload: ["screenId": "screen-2"]
+                )
+
+                let trace = recorder.trace(
+                    fixtureId: "fixture-host-sent-navigation",
+                    rendererBackend: "react"
+                )
+                guard let entry = trace.entries.first else {
+                    fail("Expected at least one trace entry")
+                    return
+                }
+
+                expect(entry.kind).to(equal(.navigation))
+                expect(entry.name).to(equal("navigate"))
+                expect(entry.screenId).to(equal("screen-2"))
             }
         }
     }

@@ -1127,6 +1127,13 @@ private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate {
     }
   }
 
+  func flowViewController(
+    _ controller: FlowViewController,
+    didSendRuntimeMessage type: String,
+    payload: [String : Any],
+    replyTo: String?
+  ) {}
+
   func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
     Task { [weak journeyService] in
       await journeyService?.handleRuntimeDismiss(
