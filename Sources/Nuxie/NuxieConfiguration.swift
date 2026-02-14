@@ -118,6 +118,12 @@ public class NuxieConfiguration {
     public var maxConcurrentFlowDownloads: Int = 4
     public var flowDownloadTimeout: TimeInterval = 30
     public var flowCacheDirectory: URL?
+
+    /// Runtime capabilities used to select compatible published targets.
+    /// Targets that require unsupported capabilities fall back to the legacy bundle.
+    public var flowRuntimeCapabilities: Set<String> = [
+        "renderer.react.webview.v1",
+    ]
     
     /// Custom URLSession for testing (if nil, a default one will be created)
     public var urlSession: URLSession?

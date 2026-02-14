@@ -26,14 +26,15 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
             buildId: String,
             status: String,
             url: String,
-            hash: String
+            hash: String,
+            requiredCapabilities: [String]? = nil
         ) -> RemoteFlowTarget {
             RemoteFlowTarget(
                 compilerBackend: backend,
                 buildId: buildId,
                 bundle: makeBundle(url: url, hash: hash),
                 status: status,
-                requiredCapabilities: nil
+                requiredCapabilities: requiredCapabilities
             )
         }
 
@@ -125,6 +126,52 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 expect(flow.selectedTarget).to(beNil())
                 expect(flow.selectedBundle.url).to(equal("https://cdn.example/legacy/index.html"))
                 expect(flow.selectedBundle.manifest.contentHash).to(equal("legacy-hash"))
+            }
+
+            it("falls back to legacy bundle when required capabilities are unsupported") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "react",
+                        buildId: "build-react",
+                        status: "succeeded",
+                        url: "https://cdn.example/react/index.html",
+                        hash: "react-hash",
+                        requiredCapabilities: ["renderer.react.webview.v1"]
+                    ),
+                ])
+
+                expect(flow.selectedTarget(supportedCapabilities: [])).to(beNil())
+                expect(flow.selectedBundle(supportedCapabilities: []).url).to(equal("https://cdn.example/legacy/index.html"))
+                expect(flow.selectedBundle(supportedCapabilities: []).manifest.contentHash).to(equal("legacy-hash"))
+            }
+
+            it("selects a compatible succeeded react target when multiple succeeded targets exist") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "react",
+                        buildId: "build-react-v2",
+                        status: "succeeded",
+                        url: "https://cdn.example/react-v2/index.html",
+                        hash: "react-v2-hash",
+                        requiredCapabilities: ["renderer.react.webview.v2"]
+                    ),
+                    makeTarget(
+                        backend: "react",
+                        buildId: "build-react-v1",
+                        status: "succeeded",
+                        url: "https://cdn.example/react-v1/index.html",
+                        hash: "react-v1-hash",
+                        requiredCapabilities: ["renderer.react.webview.v1"]
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: ["renderer.react.webview.v1"]
+                )
+                expect(selected?.buildId).to(equal("build-react-v1"))
+                expect(flow.selectedBundle(
+                    supportedCapabilities: ["renderer.react.webview.v1"]
+                ).url).to(equal("https://cdn.example/react-v1/index.html"))
             }
         }
 
