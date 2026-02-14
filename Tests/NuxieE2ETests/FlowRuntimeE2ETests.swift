@@ -4104,15 +4104,42 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                     }
                                     try await Task.sleep(nanoseconds: 50_000_000)
                                 }
-                                if !didUpdateProperties.get() {
-                                    fail("E2E: expected update_customer to write plan='\(expectedPlan)' into identity properties")
-                                    finishOnce()
-                                    return
-                                }
+	                                if !didUpdateProperties.get() {
+	                                    fail("E2E: expected update_customer to write plan='\(expectedPlan)' into identity properties")
+	                                    finishOnce()
+	                                    return
+	                                }
 
-                                await eventService.drain()
-                                let queuedDeadline = Date().addingTimeInterval(5.0)
-                                var queuedCount = await eventService.getQueuedEventCount()
+	                                let requiredEventNames: Set<String> = [
+	                                    JourneyEvents.customerUpdated,
+	                                    JourneyEvents.eventSent,
+	                                    expectedEventName,
+	                                ]
+	                                let requiredEventsDeadline = Date().addingTimeInterval(5.0)
+	                                var observedEventNames: [String] = []
+	                                while Date() < requiredEventsDeadline {
+	                                    await eventService.drain()
+	                                    observedEventNames = await eventService.getRecentEvents(limit: 40).map(\.name)
+	                                    let observedSet = Set(observedEventNames)
+	                                    if requiredEventNames.isSubset(of: observedSet) {
+	                                        break
+	                                    }
+	                                    try await Task.sleep(nanoseconds: 50_000_000)
+	                                }
+	                                let observedSet = Set(observedEventNames)
+	                                if !requiredEventNames.isSubset(of: observedSet) {
+	                                    let missing = Array(requiredEventNames.subtracting(observedSet)).sorted()
+	                                    let requests = requestLog.snapshot()
+	                                    let message = "E2E: expected internal events before flush; missing=\(missing) recent=\(observedEventNames) requests=\(requests)"
+	                                    failureReason.set(message)
+	                                    fail(message)
+	                                    finishOnce()
+	                                    return
+	                                }
+
+	                                await eventService.drain()
+	                                let queuedDeadline = Date().addingTimeInterval(5.0)
+	                                var queuedCount = await eventService.getQueuedEventCount()
                                 while queuedCount == 0, Date() < queuedDeadline {
                                     try await Task.sleep(nanoseconds: 50_000_000)
                                     queuedCount = await eventService.getQueuedEventCount()
