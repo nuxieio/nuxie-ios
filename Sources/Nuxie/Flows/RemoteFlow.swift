@@ -141,15 +141,38 @@ public struct RemoteFlow: Codable {
         let normalizedPreferredBackends = preferredCompilerBackends.map {
             $0.lowercased()
         }
-        for preferredBackend in normalizedPreferredBackends {
-            if let target = renderableTargets.first(where: {
-                $0.compilerBackend.lowercased() == preferredBackend
-            }) {
-                return TargetSelectionResult(
-                    target: target,
-                    reason: .selectedPreferredBackend
-                )
+        var preferredBackendRanks: [String: Int] = [:]
+        for (index, backend) in normalizedPreferredBackends.enumerated()
+        where preferredBackendRanks[backend] == nil {
+            preferredBackendRanks[backend] = index
+        }
+
+        let orderedTargets = renderableTargets.enumerated().sorted { lhs, rhs in
+            let lhsTarget = lhs.element
+            let rhsTarget = rhs.element
+
+            let lhsRecommendation = lhsTarget.recommendedSelectionOrder ?? Int.max
+            let rhsRecommendation = rhsTarget.recommendedSelectionOrder ?? Int.max
+            if lhsRecommendation != rhsRecommendation {
+                return lhsRecommendation < rhsRecommendation
             }
+
+            let lhsPreferredRank = preferredBackendRanks[lhsTarget.compilerBackend.lowercased()] ?? Int.max
+            let rhsPreferredRank = preferredBackendRanks[rhsTarget.compilerBackend.lowercased()] ?? Int.max
+            if lhsPreferredRank != rhsPreferredRank {
+                return lhsPreferredRank < rhsPreferredRank
+            }
+
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+
+        if let target = orderedTargets.first(where: {
+            preferredBackendRanks[$0.compilerBackend.lowercased()] != nil
+        }) {
+            return TargetSelectionResult(
+                target: target,
+                reason: .selectedPreferredBackend
+            )
         }
 
         return TargetSelectionResult(
@@ -243,6 +266,23 @@ public struct RemoteFlowTarget: Codable {
     public let bundle: FlowBundleRef
     public let status: String
     public let requiredCapabilities: [String]?
+    public let recommendedSelectionOrder: Int?
+
+    public init(
+        compilerBackend: String,
+        buildId: String,
+        bundle: FlowBundleRef,
+        status: String,
+        requiredCapabilities: [String]? = nil,
+        recommendedSelectionOrder: Int? = nil
+    ) {
+        self.compilerBackend = compilerBackend
+        self.buildId = buildId
+        self.bundle = bundle
+        self.status = status
+        self.requiredCapabilities = requiredCapabilities
+        self.recommendedSelectionOrder = recommendedSelectionOrder
+    }
 }
 
 public struct FontManifest: Codable {
