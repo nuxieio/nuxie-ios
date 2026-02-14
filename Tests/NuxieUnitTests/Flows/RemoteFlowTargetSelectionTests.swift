@@ -222,7 +222,7 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 expect(selected?.buildId).to(equal("build-rive"))
             }
 
-            it("falls back to first compatible succeeded target when preferred backends are unavailable") {
+            it("falls back to legacy bundle when only unknown backends are available") {
                 let flow = makeFlow(targets: [
                     makeTarget(
                         backend: "custom_backend",
@@ -244,7 +244,10 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                     supportedCapabilities: [],
                     preferredCompilerBackends: ["react", "rive"]
                 )
-                expect(selected?.buildId).to(equal("build-custom-1"))
+                expect(selected).to(beNil())
+                expect(flow.selectedBundle(
+                    supportedCapabilities: []
+                ).url).to(equal("https://cdn.example/legacy/index.html"))
             }
         }
 
