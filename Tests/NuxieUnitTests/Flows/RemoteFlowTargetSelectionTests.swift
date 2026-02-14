@@ -27,14 +27,16 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
             status: String,
             url: String,
             hash: String,
-            requiredCapabilities: [String]? = nil
+            requiredCapabilities: [String]? = nil,
+            recommendedSelectionOrder: Int? = nil
         ) -> RemoteFlowTarget {
             RemoteFlowTarget(
                 compilerBackend: backend,
                 buildId: buildId,
                 bundle: makeBundle(url: url, hash: hash),
                 status: status,
-                requiredCapabilities: requiredCapabilities
+                requiredCapabilities: requiredCapabilities,
+                recommendedSelectionOrder: recommendedSelectionOrder
             )
         }
 
@@ -229,6 +231,66 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 )
                 expect(selected?.compilerBackend).to(equal("rive"))
                 expect(selected?.buildId).to(equal("build-rive"))
+            }
+
+            it("honors manifest recommended selection order when multiple backends are renderable") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "react",
+                        buildId: "build-react",
+                        status: "succeeded",
+                        url: "https://cdn.example/react/index.html",
+                        hash: "react-hash",
+                        requiredCapabilities: [],
+                        recommendedSelectionOrder: 1
+                    ),
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: [],
+                        recommendedSelectionOrder: 0
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["react", "rive"],
+                    renderableCompilerBackends: ["react", "rive"]
+                )
+                expect(selected?.compilerBackend).to(equal("rive"))
+                expect(selected?.buildId).to(equal("build-rive"))
+            }
+
+            it("falls back to preferred backend order when recommendation is absent") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "react",
+                        buildId: "build-react",
+                        status: "succeeded",
+                        url: "https://cdn.example/react/index.html",
+                        hash: "react-hash",
+                        requiredCapabilities: []
+                    ),
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: []
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["react", "rive"],
+                    renderableCompilerBackends: ["react", "rive"]
+                )
+                expect(selected?.compilerBackend).to(equal("react"))
+                expect(selected?.buildId).to(equal("build-react"))
             }
 
             it("falls back to legacy bundle when target backend is not renderable") {
