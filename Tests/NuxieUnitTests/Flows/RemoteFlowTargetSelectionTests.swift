@@ -145,6 +145,26 @@ final class RemoteFlowTargetSelectionTests: QuickSpec {
                 expect(flow.selectedBundle(supportedCapabilities: []).manifest.contentHash).to(equal("legacy-hash"))
             }
 
+            it("treats explicit empty required capabilities as no requirements") {
+                let flow = makeFlow(targets: [
+                    makeTarget(
+                        backend: "rive",
+                        buildId: "build-rive",
+                        status: "succeeded",
+                        url: "https://cdn.example/rive/index.html",
+                        hash: "rive-hash",
+                        requiredCapabilities: []
+                    ),
+                ])
+
+                let selected = flow.selectedTarget(
+                    supportedCapabilities: [],
+                    preferredCompilerBackends: ["rive", "react"]
+                )
+                expect(selected?.buildId).to(equal("build-rive"))
+                expect(selected?.bundle.url).to(equal("https://cdn.example/rive/index.html"))
+            }
+
             it("selects a compatible succeeded react target when multiple succeeded targets exist") {
                 let flow = makeFlow(targets: [
                     makeTarget(

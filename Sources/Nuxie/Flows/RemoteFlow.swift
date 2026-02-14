@@ -94,15 +94,14 @@ public struct RemoteFlow: Codable {
         target: RemoteFlowTarget,
         supportedCapabilities: Set<String>
     ) -> Bool {
-        let explicitRequiredCapabilities = target.requiredCapabilities ?? []
         let requiredCapabilities: [String]
-        if explicitRequiredCapabilities.isEmpty {
+        if let explicitRequiredCapabilities = target.requiredCapabilities {
+            requiredCapabilities = explicitRequiredCapabilities
+        } else {
             requiredCapabilities =
                 Self.defaultRequiredCapabilitiesByBackend[
                     target.compilerBackend.lowercased()
                 ] ?? []
-        } else {
-            requiredCapabilities = explicitRequiredCapabilities
         }
 
         guard !requiredCapabilities.isEmpty else {
