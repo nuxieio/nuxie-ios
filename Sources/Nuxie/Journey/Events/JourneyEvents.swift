@@ -19,6 +19,8 @@ public class JourneyEvents {
     public static let flowPurchased = "$flow_purchased"
     public static let flowTimedOut = "$flow_timed_out"
     public static let flowErrored = "$flow_errored"
+    public static let flowArtifactLoadSucceeded = "$flow_artifact_load_succeeded"
+    public static let flowArtifactLoadFailed = "$flow_artifact_load_failed"
 
     public static let customerUpdated = "$customer_updated"
     public static let eventSent = "$event_sent"
@@ -206,6 +208,80 @@ public class JourneyEvents {
         ]
         if let errorMessage {
             properties["error_message"] = errorMessage
+        }
+        return properties
+    }
+
+    public static func flowArtifactLoadSucceededProperties(
+        flowId: String,
+        targetCompilerBackend: String,
+        targetBuildId: String?,
+        targetSelectionReason: String,
+        adapterCompilerBackend: String,
+        adapterFallback: Bool,
+        artifactSource: String,
+        artifactContentHash: String
+    ) -> [String: Any] {
+        return flowArtifactLoadBaseProperties(
+            flowId: flowId,
+            targetCompilerBackend: targetCompilerBackend,
+            targetBuildId: targetBuildId,
+            targetSelectionReason: targetSelectionReason,
+            adapterCompilerBackend: adapterCompilerBackend,
+            adapterFallback: adapterFallback,
+            artifactSource: artifactSource,
+            artifactContentHash: artifactContentHash
+        )
+    }
+
+    public static func flowArtifactLoadFailedProperties(
+        flowId: String,
+        targetCompilerBackend: String,
+        targetBuildId: String?,
+        targetSelectionReason: String,
+        adapterCompilerBackend: String,
+        adapterFallback: Bool,
+        artifactSource: String,
+        artifactContentHash: String,
+        errorMessage: String?
+    ) -> [String: Any] {
+        var properties = flowArtifactLoadBaseProperties(
+            flowId: flowId,
+            targetCompilerBackend: targetCompilerBackend,
+            targetBuildId: targetBuildId,
+            targetSelectionReason: targetSelectionReason,
+            adapterCompilerBackend: adapterCompilerBackend,
+            adapterFallback: adapterFallback,
+            artifactSource: artifactSource,
+            artifactContentHash: artifactContentHash
+        )
+        if let errorMessage {
+            properties["error_message"] = errorMessage
+        }
+        return properties
+    }
+
+    private static func flowArtifactLoadBaseProperties(
+        flowId: String,
+        targetCompilerBackend: String,
+        targetBuildId: String?,
+        targetSelectionReason: String,
+        adapterCompilerBackend: String,
+        adapterFallback: Bool,
+        artifactSource: String,
+        artifactContentHash: String
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "flow_id": flowId,
+            "target_backend": targetCompilerBackend,
+            "target_reason": targetSelectionReason,
+            "adapter_backend": adapterCompilerBackend,
+            "adapter_fallback": adapterFallback,
+            "artifact_source": artifactSource,
+            "artifact_content_hash": artifactContentHash,
+        ]
+        if let targetBuildId {
+            properties["target_build_id"] = targetBuildId
         }
         return properties
     }

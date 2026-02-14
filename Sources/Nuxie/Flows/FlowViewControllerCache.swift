@@ -46,6 +46,7 @@ final class FlowViewControllerCache {
 
         let rendererInput = resolveRendererInput(for: flow)
         cached.updateFlowIfNeeded(rendererInput.flow)
+        cached.updateArtifactTelemetryContext(rendererInput.telemetryContext)
         return cached
     }
     
@@ -57,6 +58,7 @@ final class FlowViewControllerCache {
             archiveService: flowArchiver,
             fontStore: fontStore
         )
+        viewController.updateArtifactTelemetryContext(rendererInput.telemetryContext)
         cache[flow.id] = viewController
         return viewController
     }
@@ -87,8 +89,13 @@ final class FlowViewControllerCache {
 
     private func resolveRendererInput(
         for flow: Flow
-    ) -> (adapter: any FlowRendererAdapter, flow: Flow) {
-        let selectedCompilerBackend = flow.remoteFlow.selectedTarget?.compilerBackend
+    ) -> (
+        adapter: any FlowRendererAdapter,
+        flow: Flow,
+        telemetryContext: FlowArtifactTelemetryContext
+    ) {
+        let targetSelection = flow.remoteFlow.selectedTargetResult
+        let selectedCompilerBackend = targetSelection.selectedCompilerBackend
         let resolution = rendererAdapterRegistry.resolve(for: selectedCompilerBackend)
 
         let normalizedFlow: Flow
@@ -98,9 +105,18 @@ final class FlowViewControllerCache {
             normalizedFlow = flow
         }
 
+        let telemetryContext = FlowArtifactTelemetryContext(
+            targetCompilerBackend: selectedCompilerBackend ?? "legacy",
+            targetBuildId: targetSelection.selectedBuildId,
+            targetSelectionReason: targetSelection.reason.rawValue,
+            adapterCompilerBackend: resolution.resolvedCompilerBackend,
+            adapterFallback: resolution.didFallback
+        )
+
         return (
             adapter: resolution.adapter,
-            flow: resolution.adapter.prepareFlowForRendering(normalizedFlow)
+            flow: resolution.adapter.prepareFlowForRendering(normalizedFlow),
+            telemetryContext: telemetryContext
         )
     }
 
