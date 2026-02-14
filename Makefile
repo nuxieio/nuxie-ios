@@ -1,4 +1,4 @@
-.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-e2e-parity test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
@@ -12,6 +12,7 @@ SCHEME ?= $(SCHEME_UNIT)
 DERIVED_DATA := DerivedData
 TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1
 XCODEBUILD_TEST_FLAGS ?=
+PARITY_E2E_TEST_FLAGS ?= -only-testing:NuxieE2ETests/FlowRuntimeE2ETests
 
 # Default target
 help:
@@ -23,6 +24,7 @@ help:
 	@echo "  test-macos-unit  - Run unit tests on macOS"
 	@echo "  test-integration - Run integration tests"
 	@echo "  test-e2e         - Run end-to-end tests"
+	@echo "  test-e2e-parity  - Run Flow runtime parity E2E in react and rive modes"
 	@echo "  test-all         - Run unit + integration + e2e tests"
 	@echo "  build-macos      - Build macOS framework target"
 	@echo "  coverage         - Run tests with code coverage (Swift Package Manager)"
@@ -83,6 +85,18 @@ test-integration: test-xcode
 
 test-e2e: SCHEME = $(SCHEME_E2E)
 test-e2e: test-xcode
+
+test-e2e-parity:
+	@echo "Running Flow runtime parity E2E (react)..."
+	@NUXIE_E2E_ENABLE_VIEWMODELS=1 \
+	NUXIE_E2E_ENABLE_NAVIGATION=1 \
+	NUXIE_E2E_PARITY_RENDERER=react \
+	$(MAKE) --no-print-directory test-e2e XCODEBUILD_TEST_FLAGS='$(PARITY_E2E_TEST_FLAGS)'
+	@echo "Running Flow runtime parity E2E (rive)..."
+	@NUXIE_E2E_ENABLE_VIEWMODELS=1 \
+	NUXIE_E2E_ENABLE_NAVIGATION=1 \
+	NUXIE_E2E_PARITY_RENDERER=rive \
+	$(MAKE) --no-print-directory test-e2e XCODEBUILD_TEST_FLAGS='$(PARITY_E2E_TEST_FLAGS)'
 
 test-all: test-unit test-integration test-e2e
 
