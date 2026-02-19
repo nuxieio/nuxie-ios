@@ -51,6 +51,7 @@ final class FlowJourneyRunner {
     private(set) var isRuntimeReady = false
 
     private var interactionsById: [String: [Interaction]] = [:]
+    private let globalInteractionsKey = "__global__"
 
     private var actionQueue: [ActionRequest] = []
     private var activeRequest: ActionRequest?
@@ -239,6 +240,7 @@ final class FlowJourneyRunner {
         if let screenId {
             interactions.append(contentsOf: interactionsById[screenId] ?? [])
         }
+        interactions.append(contentsOf: interactionsById[globalInteractionsKey] ?? [])
 
         if interactions.isEmpty { return nil }
 
@@ -327,38 +329,13 @@ final class FlowJourneyRunner {
         )
     }
 
-    private func entryScreenId(from interactions: [Interaction]) -> String? {
-        for interaction in interactions {
-            for action in interaction.actions {
-                if case .navigate(let navigateAction) = action, !navigateAction.screenId.isEmpty {
-                    return navigateAction.screenId
-                }
-            }
-        }
-        return nil
-    }
-
     private func runEntryActionsIfNeeded() async -> RunOutcome? {
-        guard let entryInteractions = interactionsById["start"], !entryInteractions.isEmpty else { return nil }
+        guard let globalInteractions = interactionsById[globalInteractionsKey], !globalInteractions.isEmpty else { return nil }
 
-        let entryScreenId = entryScreenId(from: entryInteractions)
-        var properties: [String: Any] = [:]
-        if let entryScreenId {
-            properties["entry_screen_id"] = entryScreenId
-        }
-        let event = makeSystemEvent(
-            name: SystemEventNames.flowEntered,
-            properties: properties
-        )
-
-        for interaction in entryInteractions {
+        var queued = false
+        for interaction in globalInteractions {
             if interaction.enabled == false { continue }
-            guard case .event(let eventName, let filter) = interaction.trigger else { continue }
-            guard eventName == SystemEventNames.flowEntered else { continue }
-            if let filter {
-                let ok = await evalConditionIR(filter, event: event)
-                if !ok { continue }
-            }
+            guard case .start = interaction.trigger else { continue }
             enqueueActions(
                 interaction.actions,
                 context: TriggerContext(
@@ -368,8 +345,10 @@ final class FlowJourneyRunner {
                     instanceId: nil
                 )
             )
+            queued = true
         }
 
+        if !queued { return nil }
         return await processQueue(resumeContext: nil)
     }
 
@@ -1346,7 +1325,11 @@ final class FlowJourneyRunner {
         screenId: String?,
         instanceId: String?
     ) async -> RunOutcome? {
-        let interactions = (screenId != nil) ? (interactionsById[screenId!] ?? []) : []
+        var interactions: [Interaction] = []
+        if let screenId {
+            interactions.append(contentsOf: interactionsById[screenId] ?? [])
+        }
+        interactions.append(contentsOf: interactionsById[globalInteractionsKey] ?? [])
         if interactions.isEmpty { return nil }
 
         for interaction in interactions {
@@ -1355,7 +1338,7 @@ final class FlowJourneyRunner {
             if !matchesViewModelPath(triggerPath: triggerPath, inputPath: path) { continue }
 
             if let debounceMs, debounceMs > 0 {
-                let key = triggerPath.normalizedPath
+                let key = didSetDebounceKey(interactionId: interaction.id, path: triggerPath)
                 debounceTasks[key]?.cancel()
                 debounceTasks[key] = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(debounceMs) * 1_000_000)
@@ -1385,6 +1368,10 @@ final class FlowJourneyRunner {
         }
 
         return await processQueue(resumeContext: nil)
+    }
+
+    private func didSetDebounceKey(interactionId: String, path: VmPathRef) -> String {
+        return "\(interactionId):\(path.normalizedPath)"
     }
 
     private func scheduleTriggerReset(path: VmPathRef, screenId: String?, instanceId: String?) {
@@ -1604,6 +1591,8 @@ final class FlowJourneyRunner {
             return name == inputName
         case (.didSet(let path, _), .didSet(let inputPath, _)):
             return matchesViewModelPath(triggerPath: path, inputPath: inputPath)
+        case (.start, .start):
+            return true
         default:
             return false
         }
