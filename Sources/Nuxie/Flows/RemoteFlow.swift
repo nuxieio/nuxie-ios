@@ -414,6 +414,7 @@ public enum InteractionTrigger: Codable {
     case hover
     case press
     case drag(direction: DragDirection?, threshold: Double?)
+    case start(config: [String: AnyCodable]?)
     case event(eventName: String, filter: IREnvelope?)
     case manual(label: String?)
     case didSet(path: VmPathRef, debounceMs: Int?)
@@ -435,6 +436,7 @@ public enum InteractionTrigger: Codable {
         case delayMs
         case eventName
         case filter
+        case config
         case label
         case path
         case debounceMs
@@ -445,6 +447,7 @@ public enum InteractionTrigger: Codable {
         case hover
         case press
         case drag
+        case start
         case event
         case manual
         case didSet = "did_set"
@@ -464,6 +467,8 @@ public enum InteractionTrigger: Codable {
             let direction = try container.decodeIfPresent(DragDirection.self, forKey: .direction)
             let threshold = try container.decodeIfPresent(Double.self, forKey: .threshold)
             self = .drag(direction: direction, threshold: threshold)
+        case .start:
+            self = .start(config: try container.decodeIfPresent([String: AnyCodable].self, forKey: .config))
         case .event:
             let eventName = try container.decode(String.self, forKey: .eventName)
             let filter = try container.decodeIfPresent(IREnvelope.self, forKey: .filter)
@@ -499,6 +504,9 @@ public enum InteractionTrigger: Codable {
             try container.encode(TriggerType.drag, forKey: .type)
             try container.encodeIfPresent(direction, forKey: .direction)
             try container.encodeIfPresent(threshold, forKey: .threshold)
+        case .start(let config):
+            try container.encode(TriggerType.start, forKey: .type)
+            try container.encodeIfPresent(config, forKey: .config)
         case .event(let eventName, let filter):
             try container.encode(TriggerType.event, forKey: .type)
             try container.encode(eventName, forKey: .eventName)

@@ -3,7 +3,6 @@ import Foundation
 enum SystemEventNames {
     static let screenShown = "$screen_shown"
     static let screenDismissed = "$screen_dismissed"
-    static let flowEntered = "$flow_entered"
     static let purchaseCompleted = "$purchase_completed"
     static let purchaseFailed = "$purchase_failed"
     static let purchaseCancelled = "$purchase_cancelled"

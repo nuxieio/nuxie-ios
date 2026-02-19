@@ -41,10 +41,10 @@ final class FlowJourneyRunnerTests: AsyncSpec {
         ) -> RemoteFlow {
             var interactions = interactionsByScreen
             if let entryActions, !entryActions.isEmpty {
-                interactions["start"] = [
+                interactions["__global__"] = [
                     Interaction(
                         id: "start",
-                        trigger: .event(eventName: SystemEventNames.flowEntered, filter: nil),
+                        trigger: .start(config: nil),
                         actions: entryActions,
                         enabled: true
                     )
@@ -112,6 +112,105 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 expect(paused).to(beTrue())
                 expect(journey.flowState.pendingAction?.kind).to(equal(.delay))
+            }
+
+            it("dispatches global event interactions") {
+                let flowId = "flow-global-event"
+                let interaction = Interaction(
+                    id: "int-global",
+                    trigger: .event(eventName: "promo_ready", filter: nil),
+                    actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["__global__": [interaction]],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.currentScreenId = "screen-1"
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.dispatchTrigger(
+                    trigger: .event(eventName: "promo_ready", filter: nil),
+                    screenId: "screen-1",
+                    componentId: nil,
+                    instanceId: nil,
+                    event: nil
+                )
+
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
+                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
+                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
+            }
+
+            it("dispatches global did_set interactions") {
+                let flowId = "flow-global-did-set"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "pulse": ViewModelProperty(
+                            type: .trigger,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(0),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let interaction = Interaction(
+                    id: "int-global-did-set",
+                    trigger: .didSet(path: .ids(VmPathIds(pathIds: [0, 1])), debounceMs: nil),
+                    actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["__global__": [interaction]],
+                    viewModels: [viewModel],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-1", defaultInstanceId: nil),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.currentScreenId = "screen-1"
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleDidSet(
+                    path: .ids(VmPathIds(pathIds: [0, 1])),
+                    value: 1,
+                    source: "runtime",
+                    screenId: "screen-1",
+                    instanceId: nil
+                )
+
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
+                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
+                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
             }
 
             it("applies set_view_model on screen shown and emits patch") {
