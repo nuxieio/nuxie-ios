@@ -1338,7 +1338,7 @@ final class FlowJourneyRunner {
             if !matchesViewModelPath(triggerPath: triggerPath, inputPath: path) { continue }
 
             if let debounceMs, debounceMs > 0 {
-                let key = triggerPath.normalizedPath
+                let key = didSetDebounceKey(interactionId: interaction.id, path: triggerPath)
                 debounceTasks[key]?.cancel()
                 debounceTasks[key] = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(debounceMs) * 1_000_000)
@@ -1368,6 +1368,10 @@ final class FlowJourneyRunner {
         }
 
         return await processQueue(resumeContext: nil)
+    }
+
+    private func didSetDebounceKey(interactionId: String, path: VmPathRef) -> String {
+        return "\(interactionId):\(path.normalizedPath)"
     }
 
     private func scheduleTriggerReset(path: VmPathRef, screenId: String?, instanceId: String?) {

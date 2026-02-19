@@ -213,6 +213,85 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
             }
 
+            it("isolates debounced did_set dispatch per interaction across screen and global scopes") {
+                let flowId = "flow-did-set-debounce-scope"
+                let path = VmPathRef.ids(VmPathIds(pathIds: [0, 1]))
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "pulse": ViewModelProperty(
+                            type: .trigger,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(0),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+
+                let screenInteraction = Interaction(
+                    id: "int-screen-did-set",
+                    trigger: .didSet(path: path, debounceMs: 5),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "screen_did_set",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+
+                let globalInteraction = Interaction(
+                    id: "int-global-did-set",
+                    trigger: .didSet(path: path, debounceMs: 5),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "global_did_set",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: [
+                        "screen-1": [screenInteraction],
+                        "__global__": [globalInteraction]
+                    ],
+                    viewModels: [viewModel],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil)
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.currentScreenId = "screen-1"
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                _ = await runner.handleDidSet(
+                    path: path,
+                    value: 1,
+                    source: "runtime",
+                    screenId: "screen-1",
+                    instanceId: nil
+                )
+
+                await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("screen_did_set"))
+                await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("global_did_set"))
+            }
+
             it("applies set_view_model on screen shown and emits patch") {
                 let flowId = "flow-vm"
                 let viewModel = ViewModel(
