@@ -123,6 +123,11 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     public override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
     }
+
+    public override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        sendRuntimeSafeAreaInsets()
+    }
     #endif
 
     // MARK: - Public Methods
@@ -266,7 +271,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
         }
 
         NSLayoutConstraint.activate([
-            flowWebView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            flowWebView.topAnchor.constraint(equalTo: view.topAnchor),
             flowWebView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             flowWebView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             flowWebView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
@@ -320,6 +325,7 @@ extension FlowViewController {
             runtimeReady = true
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
             flushPendingRuntimeMessages()
+            sendRuntimeSafeAreaInsets()
         case "runtime/screen_changed", "action/did_set", "action/event":
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
         case "action/purchase":
@@ -383,6 +389,21 @@ private extension FlowViewController {
                 completion: nil
             )
         }
+    }
+
+    func sendRuntimeSafeAreaInsets() {
+        #if canImport(UIKit)
+        let insets = view.safeAreaInsets
+        sendRuntimeMessage(
+            type: "system/safe_area_insets",
+            payload: [
+                "top": Double(insets.top),
+                "bottom": Double(insets.bottom),
+                "left": Double(insets.left),
+                "right": Double(insets.right)
+            ]
+        )
+        #endif
     }
 }
 
