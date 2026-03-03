@@ -397,10 +397,10 @@ private extension FlowViewController {
         sendRuntimeMessage(
             type: "system/safe_area_insets",
             payload: [
-                "top": insets.top,
-                "bottom": insets.bottom,
-                "left": insets.left,
-                "right": insets.right
+                "top": Double(insets.top),
+                "bottom": Double(insets.bottom),
+                "left": Double(insets.left),
+                "right": Double(insets.right)
             ]
         )
         #endif
