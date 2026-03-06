@@ -73,7 +73,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
             flowId,
             from: journey,
             runtimeDelegate: runtimeDelegate,
-            colorSchemeMode: .system
+            colorSchemeMode: .light
         )
     }
 
@@ -82,7 +82,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         _ flowId: String,
         from journey: Journey?,
         runtimeDelegate: FlowRuntimeDelegate?,
-        colorSchemeMode: FlowColorSchemeMode = .system
+        colorSchemeMode: FlowColorSchemeMode = .light
     ) async throws -> FlowViewController {
         LogInfo("FlowPresentationService: Presenting flow \(flowId)")
         

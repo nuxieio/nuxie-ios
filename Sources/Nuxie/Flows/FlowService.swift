@@ -178,13 +178,13 @@ final class FlowService: FlowServiceProtocol {
     /// Get view controller for flow by ID - fetches flow first then creates view controller
     @MainActor
     func viewController(for flowId: String) async throws -> FlowViewController {
-        try await viewController(for: flowId, colorSchemeMode: .system)
+        try await viewController(for: flowId, colorSchemeMode: .light)
     }
 
     @MainActor
     func viewController(
         for flowId: String,
-        colorSchemeMode: FlowColorSchemeMode = .system
+        colorSchemeMode: FlowColorSchemeMode = .light
     ) async throws -> FlowViewController {
         // Fetch the flow data first
         let flow = try await fetchFlow(id: flowId)
@@ -200,7 +200,7 @@ final class FlowService: FlowServiceProtocol {
         try await viewController(
             for: flowId,
             runtimeDelegate: runtimeDelegate,
-            colorSchemeMode: .system
+            colorSchemeMode: .light
         )
     }
 
@@ -208,7 +208,7 @@ final class FlowService: FlowServiceProtocol {
     func viewController(
         for flowId: String,
         runtimeDelegate: FlowRuntimeDelegate?,
-        colorSchemeMode: FlowColorSchemeMode = .system
+        colorSchemeMode: FlowColorSchemeMode = .light
     ) async throws -> FlowViewController {
         let controller = try await viewController(
             for: flowId,

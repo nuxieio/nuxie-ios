@@ -17,22 +17,6 @@ extension FlowViewController {
         errorView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 
-    func platformResolvedFlowColorScheme(
-        for mode: FlowColorSchemeMode,
-        previousTraitCollection: Any? = nil
-    ) -> ResolvedFlowColorScheme {
-        switch mode {
-        case .light:
-            return .light
-        case .dark:
-            return .dark
-        case .system:
-            let appearance = view.effectiveAppearance
-            let matched = appearance.bestMatch(from: [.darkAqua, .aqua])
-            return matched == .darkAqua ? .dark : .light
-        }
-    }
-
     func platformSetupLoadingView() {
         loadingView = NSView()
         loadingView.wantsLayer = true

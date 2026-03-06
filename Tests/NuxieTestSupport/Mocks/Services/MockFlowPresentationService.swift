@@ -37,7 +37,7 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
             flowId,
             from: journey,
             runtimeDelegate: runtimeDelegate,
-            colorSchemeMode: .system
+            colorSchemeMode: .light
         )
     }
 

@@ -649,7 +649,7 @@ public final class NuxieSDK {
   @MainActor
   public func getFlowViewController(
     with flowId: String,
-    colorSchemeMode: FlowColorSchemeMode = .system
+    colorSchemeMode: FlowColorSchemeMode = .light
   ) async throws -> FlowViewController {
     guard isSetup else {
       throw NuxieError.notConfigured
@@ -668,7 +668,7 @@ public final class NuxieSDK {
   @MainActor
   public func showFlow(
     with flowId: String,
-    colorSchemeMode: FlowColorSchemeMode = .system
+    colorSchemeMode: FlowColorSchemeMode = .light
   ) async throws {
     guard isSetup else {
       throw NuxieError.notConfigured

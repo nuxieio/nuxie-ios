@@ -55,7 +55,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
 
-    public var colorSchemeMode: FlowColorSchemeMode = .system {
+    public var colorSchemeMode: FlowColorSchemeMode = .light {
         didSet {
             applyColorSchemeMode()
             sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
@@ -136,18 +136,6 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     public override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         sendRuntimeSafeAreaInsets()
-    }
-
-    public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        guard colorSchemeMode == .system else { return }
-        let previousResolvedMode = platformResolvedFlowColorScheme(
-            for: .system,
-            previousTraitCollection: previousTraitCollection
-        )
-        let nextResolvedMode = resolvedFlowColorScheme()
-        guard previousResolvedMode != nextResolvedMode else { return }
-        sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
     }
     #endif
 
@@ -404,14 +392,9 @@ private extension FlowViewController {
         lastSentColorSchemePayload = nil
     }
 
-    func resolvedFlowColorScheme() -> ResolvedFlowColorScheme {
-        platformResolvedFlowColorScheme(for: colorSchemeMode, previousTraitCollection: nil)
-    }
-
     func currentColorSchemePayload() -> [String: String] {
         [
-            "preferredMode": colorSchemeMode.rawValue,
-            "resolvedMode": resolvedFlowColorScheme().rawValue,
+            "mode": colorSchemeMode.rawValue,
         ]
     }
 

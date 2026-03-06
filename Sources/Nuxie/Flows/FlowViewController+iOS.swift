@@ -13,21 +13,6 @@ extension FlowViewController {
         errorView?.backgroundColor = .systemBackground
     }
 
-    func platformResolvedFlowColorScheme(
-        for mode: FlowColorSchemeMode,
-        previousTraitCollection: UITraitCollection?
-    ) -> ResolvedFlowColorScheme {
-        switch mode {
-        case .light:
-            return .light
-        case .dark:
-            return .dark
-        case .system:
-            let traitCollection = previousTraitCollection ?? self.traitCollection
-            return traitCollection.userInterfaceStyle == .dark ? .dark : .light
-        }
-    }
-
     func platformSetupLoadingView() {
         // Container view
         loadingView = UIView()

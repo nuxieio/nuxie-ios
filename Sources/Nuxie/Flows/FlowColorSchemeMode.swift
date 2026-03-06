@@ -9,12 +9,6 @@ import AppKit
 public enum FlowColorSchemeMode: String, CaseIterable, Codable {
     case light
     case dark
-    case system
-}
-
-enum ResolvedFlowColorScheme: String {
-    case light
-    case dark
 }
 
 #if canImport(UIKit)
@@ -25,8 +19,6 @@ extension FlowColorSchemeMode {
             return .light
         case .dark:
             return .dark
-        case .system:
-            return .unspecified
         }
     }
 }
@@ -40,8 +32,6 @@ extension FlowColorSchemeMode {
             return NSAppearance(named: .aqua)
         case .dark:
             return NSAppearance(named: .darkAqua)
-        case .system:
-            return nil
         }
     }
 }

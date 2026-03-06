@@ -128,8 +128,7 @@ final class FlowViewControllerBridgeSpec: QuickSpec {
                 }
 
                 expect(colorSchemeMessage?["payload"] as? [String: String]).to(equal([
-                    "preferredMode": "dark",
-                    "resolvedMode": "dark",
+                    "mode": "dark",
                 ]))
             }
         }
