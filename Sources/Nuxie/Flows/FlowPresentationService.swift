@@ -6,6 +6,15 @@ protocol FlowPresentationServiceProtocol: AnyObject {
     /// Present a flow by ID in a dedicated window
     @discardableResult
     @MainActor func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController
+
+    /// Present a flow by ID in a dedicated window
+    @discardableResult
+    @MainActor func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController
     
     /// Dismiss the currently presented flow
     @MainActor func dismissCurrentFlow() async
@@ -53,9 +62,28 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     var isFlowPresented: Bool {
         currentWindow?.isPresenting ?? false
     }
-    
+
     @discardableResult
-    func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+    func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?
+    ) async throws -> FlowViewController {
+        try await presentFlow(
+            flowId,
+            from: journey,
+            runtimeDelegate: runtimeDelegate,
+            colorSchemeMode: .system
+        )
+    }
+
+    @discardableResult
+    func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode = .system
+    ) async throws -> FlowViewController {
         LogInfo("FlowPresentationService: Presenting flow \(flowId)")
         
         // Check if we're within the grace period
@@ -81,7 +109,11 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         }
         
         // 2. Get flow view controller from FlowService
-        let flowViewController = try await flowService.viewController(for: flowId, runtimeDelegate: runtimeDelegate)
+        let flowViewController = try await flowService.viewController(
+            for: flowId,
+            runtimeDelegate: runtimeDelegate,
+            colorSchemeMode: colorSchemeMode
+        )
         
         // 3. Create presentation window
         guard let window = windowProvider.createPresentationWindow() else {

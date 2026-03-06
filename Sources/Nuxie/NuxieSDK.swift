@@ -647,26 +647,40 @@ public final class NuxieSDK {
   /// - Returns: A FlowViewController configured for the flow
   /// - Throws: NuxieError if SDK not configured or flow not found
   @MainActor
-  public func getFlowViewController(with flowId: String) async throws -> FlowViewController {
+  public func getFlowViewController(
+    with flowId: String,
+    colorSchemeMode: FlowColorSchemeMode = .system
+  ) async throws -> FlowViewController {
     guard isSetup else {
       throw NuxieError.notConfigured
     }
     
     let flowService = container.flowService()
-    return try await flowService.viewController(for: flowId)
+    return try await flowService.viewController(
+      for: flowId,
+      colorSchemeMode: colorSchemeMode
+    )
   }
   
   /// Present a flow by ID in a dedicated window
   /// - Parameter flowId: The ID of the flow to present
   /// - Throws: NuxieError if SDK not configured or flow presentation fails
   @MainActor
-  public func showFlow(with flowId: String) async throws {
+  public func showFlow(
+    with flowId: String,
+    colorSchemeMode: FlowColorSchemeMode = .system
+  ) async throws {
     guard isSetup else {
       throw NuxieError.notConfigured
     }
     
     let flowPresentationService = container.flowPresentationService()
-    try await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
+    try await flowPresentationService.presentFlow(
+      flowId,
+      from: nil,
+      runtimeDelegate: nil,
+      colorSchemeMode: colorSchemeMode
+    )
   }
 
   // MARK: - Profile Management

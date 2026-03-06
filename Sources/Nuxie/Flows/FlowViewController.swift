@@ -55,6 +55,13 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
 
+    public var colorSchemeMode: FlowColorSchemeMode = .system {
+        didSet {
+            applyColorSchemeMode()
+            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
+        }
+    }
+
     // UI Components
     internal var flowWebView: FlowWebView!
     #if canImport(UIKit)
@@ -75,6 +82,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     private var runtimeReady = false
     private var pendingRuntimeMessages: [(type: String, payload: [String: Any], replyTo: String?)] = []
     private var didInvokeClose = false
+    private var lastSentColorSchemePayload: [String: String]?
 
     // MARK: - Computed Properties
 
@@ -116,6 +124,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     public override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
+        applyColorSchemeMode()
         viewModel.loadFlow()
     }
 
@@ -127,6 +136,18 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     public override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         sendRuntimeSafeAreaInsets()
+    }
+
+    public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard colorSchemeMode == .system else { return }
+        let previousResolvedMode = platformResolvedFlowColorScheme(
+            for: .system,
+            previousTraitCollection: previousTraitCollection
+        )
+        let nextResolvedMode = resolvedFlowColorScheme()
+        guard previousResolvedMode != nextResolvedMode else { return }
+        sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
     }
     #endif
 
@@ -326,6 +347,7 @@ extension FlowViewController {
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
             flushPendingRuntimeMessages()
             sendRuntimeSafeAreaInsets()
+            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
         case "runtime/screen_changed", "action/did_set", "action/event":
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
         case "action/purchase":
@@ -375,6 +397,32 @@ private extension FlowViewController {
         guard !didInvokeClose else { return }
         didInvokeClose = true
         onClose?(reason)
+    }
+
+    func applyColorSchemeMode() {
+        platformApplyColorSchemeMode(colorSchemeMode)
+        lastSentColorSchemePayload = nil
+    }
+
+    func resolvedFlowColorScheme() -> ResolvedFlowColorScheme {
+        platformResolvedFlowColorScheme(for: colorSchemeMode, previousTraitCollection: nil)
+    }
+
+    func currentColorSchemePayload() -> [String: String] {
+        [
+            "preferredMode": colorSchemeMode.rawValue,
+            "resolvedMode": resolvedFlowColorScheme().rawValue,
+        ]
+    }
+
+    func sendCurrentColorSchemeToRuntimeIfNeeded(force: Bool) {
+        guard runtimeReady else { return }
+        let payload = currentColorSchemePayload()
+        if !force && payload == lastSentColorSchemePayload {
+            return
+        }
+        lastSentColorSchemePayload = payload
+        sendRuntimeMessage(type: "runtime/color_scheme", payload: payload)
     }
 
     func flushPendingRuntimeMessages() {

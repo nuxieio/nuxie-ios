@@ -33,6 +33,22 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
     @discardableResult
     @MainActor
     public func presentFlow(_ flowId: String, from journey: Journey?, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
+        try await presentFlow(
+            flowId,
+            from: journey,
+            runtimeDelegate: runtimeDelegate,
+            colorSchemeMode: .system
+        )
+    }
+
+    @discardableResult
+    @MainActor
+    public func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController {
         LogDebug("[MockFlowPresentationService] presentFlow called with flowId: \(flowId), journey: \(journey?.id ?? "nil")")
         presentFlowCallCount += 1
         
@@ -58,6 +74,7 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
             ?? defaultMockViewController
             ?? MockFlowViewController(mockFlowId: flowId)
         controller.runtimeDelegate = runtimeDelegate
+        controller.colorSchemeMode = colorSchemeMode
         return controller
     }
     

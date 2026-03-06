@@ -7,6 +7,32 @@ extension FlowViewController {
         view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     }
 
+    func platformApplyColorSchemeMode(_ mode: FlowColorSchemeMode) {
+        view.appearance = mode.appearance
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        loadingView?.wantsLayer = true
+        loadingView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        errorView?.wantsLayer = true
+        errorView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
+
+    func platformResolvedFlowColorScheme(
+        for mode: FlowColorSchemeMode,
+        previousTraitCollection: Any? = nil
+    ) -> ResolvedFlowColorScheme {
+        switch mode {
+        case .light:
+            return .light
+        case .dark:
+            return .dark
+        case .system:
+            let appearance = view.effectiveAppearance
+            let matched = appearance.bestMatch(from: [.darkAqua, .aqua])
+            return matched == .darkAqua ? .dark : .light
+        }
+    }
+
     func platformSetupLoadingView() {
         loadingView = NSView()
         loadingView.wantsLayer = true

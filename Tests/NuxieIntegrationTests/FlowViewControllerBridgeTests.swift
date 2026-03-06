@@ -109,6 +109,29 @@ final class FlowViewControllerBridgeSpec: QuickSpec {
                 }
                 expect(true).to(beTrue())
             }
+
+            it("sends the configured color scheme to the runtime when ready") {
+                let vc = FlowViewController(flow: FlowViewControllerBridgeSpec().makeFlow(), archiveService: FlowArchiver())
+                vc.colorSchemeMode = .dark
+                _ = vc.view
+                FlowViewControllerBridgeSpec().injectBootstrap(vc.flowWebView)
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    vc.flowWebView.evaluateJavaScript("window.webkit.messageHandlers.bridge.postMessage({ type: 'runtime/ready', payload: { version: '1.0' } })") { _, _ in
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                    }
+                }
+
+                let messages = FlowViewControllerBridgeSpec().getMessages(vc.flowWebView)
+                let colorSchemeMessage = messages.first { message in
+                    (message["type"] as? String) == "runtime/color_scheme"
+                }
+
+                expect(colorSchemeMessage?["payload"] as? [String: String]).to(equal([
+                    "preferredMode": "dark",
+                    "resolvedMode": "dark",
+                ]))
+            }
         }
     }
 }
