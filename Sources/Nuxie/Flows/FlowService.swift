@@ -191,7 +191,9 @@ final class FlowService: FlowServiceProtocol {
 
         // Then get or create the view controller
         let controller = viewController(for: flow)
-        controller.colorSchemeMode = colorSchemeMode
+        if controller.colorSchemeMode != colorSchemeMode {
+            controller.colorSchemeMode = colorSchemeMode
+        }
         return controller
     }
 

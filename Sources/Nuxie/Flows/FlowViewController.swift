@@ -57,6 +57,8 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     public var colorSchemeMode: FlowColorSchemeMode = .light {
         didSet {
+            guard oldValue != colorSchemeMode else { return }
+            guard isViewLoaded else { return }
             applyColorSchemeMode()
             sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
         }

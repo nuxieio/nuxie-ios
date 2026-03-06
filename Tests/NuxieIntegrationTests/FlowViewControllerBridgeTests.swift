@@ -110,6 +110,14 @@ final class FlowViewControllerBridgeSpec: QuickSpec {
                 expect(true).to(beTrue())
             }
 
+            it("does not load the view when reapplying the same color scheme before presentation") {
+                let vc = FlowViewController(flow: FlowViewControllerBridgeSpec().makeFlow(), archiveService: FlowArchiver())
+
+                vc.colorSchemeMode = .light
+
+                expect(vc.isViewLoaded).to(beFalse())
+            }
+
             it("sends the configured color scheme to the runtime when ready") {
                 let vc = FlowViewController(flow: FlowViewControllerBridgeSpec().makeFlow(), archiveService: FlowArchiver())
                 vc.colorSchemeMode = .dark
