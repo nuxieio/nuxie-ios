@@ -55,6 +55,15 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
 
+    public var colorSchemeMode: FlowColorSchemeMode = .light {
+        didSet {
+            guard oldValue != colorSchemeMode else { return }
+            guard isViewLoaded else { return }
+            applyColorSchemeMode()
+            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
+        }
+    }
+
     // UI Components
     internal var flowWebView: FlowWebView!
     #if canImport(UIKit)
@@ -75,6 +84,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     private var runtimeReady = false
     private var pendingRuntimeMessages: [(type: String, payload: [String: Any], replyTo: String?)] = []
     private var didInvokeClose = false
+    private var lastSentColorSchemePayload: [String: String]?
 
     // MARK: - Computed Properties
 
@@ -116,6 +126,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     public override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
+        applyColorSchemeMode()
         viewModel.loadFlow()
     }
 
@@ -326,6 +337,7 @@ extension FlowViewController {
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
             flushPendingRuntimeMessages()
             sendRuntimeSafeAreaInsets()
+            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
         case "runtime/screen_changed", "action/did_set", "action/event":
             runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
         case "action/purchase":
@@ -375,6 +387,27 @@ private extension FlowViewController {
         guard !didInvokeClose else { return }
         didInvokeClose = true
         onClose?(reason)
+    }
+
+    func applyColorSchemeMode() {
+        platformApplyColorSchemeMode(colorSchemeMode)
+        lastSentColorSchemePayload = nil
+    }
+
+    func currentColorSchemePayload() -> [String: String] {
+        [
+            "mode": colorSchemeMode.rawValue,
+        ]
+    }
+
+    func sendCurrentColorSchemeToRuntimeIfNeeded(force: Bool) {
+        guard runtimeReady else { return }
+        let payload = currentColorSchemePayload()
+        if !force && payload == lastSentColorSchemePayload {
+            return
+        }
+        lastSentColorSchemePayload = payload
+        sendRuntimeMessage(type: "runtime/color_scheme", payload: payload)
     }
 
     func flushPendingRuntimeMessages() {

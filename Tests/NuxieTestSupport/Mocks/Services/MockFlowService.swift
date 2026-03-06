@@ -70,8 +70,32 @@ public class MockFlowService: FlowServiceProtocol {
     }
 
     @MainActor
+    public func viewController(
+        for flowId: String,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController {
+        let controller = try await viewController(for: flowId)
+        controller.colorSchemeMode = colorSchemeMode
+        return controller
+    }
+
+    @MainActor
     public func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
         let controller = try await viewController(for: flowId)
+        controller.runtimeDelegate = runtimeDelegate
+        return controller
+    }
+
+    @MainActor
+    public func viewController(
+        for flowId: String,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController {
+        let controller = try await viewController(
+            for: flowId,
+            colorSchemeMode: colorSchemeMode
+        )
         controller.runtimeDelegate = runtimeDelegate
         return controller
     }

@@ -6,6 +6,13 @@ extension FlowViewController {
         view.backgroundColor = .systemBackground
     }
 
+    func platformApplyColorSchemeMode(_ mode: FlowColorSchemeMode) {
+        overrideUserInterfaceStyle = mode.userInterfaceStyle
+        view.backgroundColor = .systemBackground
+        loadingView?.backgroundColor = .systemBackground
+        errorView?.backgroundColor = .systemBackground
+    }
+
     func platformSetupLoadingView() {
         // Container view
         loadingView = UIView()

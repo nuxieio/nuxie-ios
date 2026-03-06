@@ -16,9 +16,24 @@ protocol FlowServiceProtocol: AnyObject {
     @MainActor
     func viewController(for flowId: String) async throws -> FlowViewController
 
+    /// Get a view controller for a flow by ID
+    @MainActor
+    func viewController(
+        for flowId: String,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController
+
     /// Get a view controller for a flow by ID with a runtime delegate
     @MainActor
     func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController
+
+    /// Get a view controller for a flow by ID with a runtime delegate
+    @MainActor
+    func viewController(
+        for flowId: String,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController
     
     /// Clear all cached data (flows and WebArchives)
     func clearCache() async
@@ -163,16 +178,44 @@ final class FlowService: FlowServiceProtocol {
     /// Get view controller for flow by ID - fetches flow first then creates view controller
     @MainActor
     func viewController(for flowId: String) async throws -> FlowViewController {
+        try await viewController(for: flowId, colorSchemeMode: .light)
+    }
+
+    @MainActor
+    func viewController(
+        for flowId: String,
+        colorSchemeMode: FlowColorSchemeMode = .light
+    ) async throws -> FlowViewController {
         // Fetch the flow data first
         let flow = try await fetchFlow(id: flowId)
-        
+
         // Then get or create the view controller
-        return viewController(for: flow)
+        let controller = viewController(for: flow)
+        if controller.colorSchemeMode != colorSchemeMode {
+            controller.colorSchemeMode = colorSchemeMode
+        }
+        return controller
     }
 
     @MainActor
     func viewController(for flowId: String, runtimeDelegate: FlowRuntimeDelegate?) async throws -> FlowViewController {
-        let controller = try await viewController(for: flowId)
+        try await viewController(
+            for: flowId,
+            runtimeDelegate: runtimeDelegate,
+            colorSchemeMode: .light
+        )
+    }
+
+    @MainActor
+    func viewController(
+        for flowId: String,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode = .light
+    ) async throws -> FlowViewController {
+        let controller = try await viewController(
+            for: flowId,
+            colorSchemeMode: colorSchemeMode
+        )
         controller.runtimeDelegate = runtimeDelegate
         return controller
     }
