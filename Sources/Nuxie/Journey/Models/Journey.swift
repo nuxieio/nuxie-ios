@@ -18,6 +18,22 @@ public struct FlowPendingAction: Codable {
     public let condition: IREnvelope?
     public let maxTimeMs: Int?
     public let startedAt: Date
+    public let resumeActions: [InteractionAction]?
+
+    func withResumeActions(_ actions: [InteractionAction]) -> FlowPendingAction {
+        FlowPendingAction(
+            interactionId: interactionId,
+            screenId: screenId,
+            componentId: componentId,
+            actionIndex: actionIndex,
+            kind: kind,
+            resumeAt: resumeAt,
+            condition: condition,
+            maxTimeMs: maxTimeMs,
+            startedAt: startedAt,
+            resumeActions: actions
+        )
+    }
 }
 
 public struct FlowJourneyState: Codable {
