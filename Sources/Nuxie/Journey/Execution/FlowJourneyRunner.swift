@@ -2,6 +2,8 @@ import Foundation
 import FactoryKit
 
 final class FlowJourneyRunner {
+    private static let currentDeviceTimezoneToken = "__current_device__"
+
     struct TriggerContext {
         let screenId: String?
         let componentId: String?
@@ -281,14 +283,6 @@ final class FlowJourneyRunner {
         isPaused = false
         journey.flowState.pendingAction = nil
 
-        guard let actions = resolveActions(
-            interactionId: pending.interactionId,
-            screenId: pending.screenId,
-            componentId: pending.componentId
-        ) else {
-            return nil
-        }
-
         let context = TriggerContext(
             screenId: pending.screenId,
             componentId: pending.componentId,
@@ -296,11 +290,23 @@ final class FlowJourneyRunner {
             instanceId: nil
         )
 
-        activeRequest = ActionRequest(actions: actions, context: context)
-        if pending.kind == .delay {
-            activeIndex = pending.actionIndex + 1
+        if let resumeActions = pending.resumeActions {
+            activeRequest = ActionRequest(actions: resumeActions, context: context)
+            activeIndex = 0
         } else {
-            activeIndex = pending.actionIndex
+            guard let actions = resolveActions(
+                interactionId: pending.interactionId,
+                screenId: pending.screenId,
+                componentId: pending.componentId
+            ) else {
+                return nil
+            }
+            activeRequest = ActionRequest(actions: actions, context: context)
+            if pending.kind == .delay {
+                activeIndex = pending.actionIndex + 1
+            } else {
+                activeIndex = pending.actionIndex
+            }
         }
 
         let resumeContext = ResumeContext(pending: pending, reason: reason, event: event)
@@ -392,9 +398,14 @@ final class FlowJourneyRunner {
                     activeIndex = 0
                     break
                 case .pause(let pending):
+                    let resumablePending = attachResumeActions(
+                        to: pending,
+                        from: request.actions,
+                        pausedIndex: activeIndex
+                    )
                     isPaused = true
-                    journey.flowState.pendingAction = pending
-                    return .paused(pending)
+                    journey.flowState.pendingAction = resumablePending
+                    return .paused(resumablePending)
                 case .exit(let reason):
                     return .exited(reason)
                 }
@@ -594,7 +605,7 @@ final class FlowJourneyRunner {
         resumeContext: ResumeContext?
     ) async -> ActionResult {
         let now = dateProvider.now()
-        let tz = TimeZone(identifier: action.timezone) ?? .current
+        let tz = resolveTimeWindowTimezone(action.timezone)
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = tz
 
@@ -625,7 +636,7 @@ final class FlowJourneyRunner {
         let endMin = eh * 60 + em
 
         if startMin == endMin {
-            return .continue
+            return await runNestedActions(action.successActions ?? [], context: context)
         }
 
         let inWindow =
@@ -634,7 +645,7 @@ final class FlowJourneyRunner {
             : (curMin >= startMin || curMin < endMin)
 
         if inWindow {
-            return .continue
+            return await runNestedActions(action.successActions ?? [], context: context)
         }
 
         let nextOpen = calculateNextWindowOpen(
@@ -652,6 +663,13 @@ final class FlowJourneyRunner {
             condition: nil,
             maxTimeMs: nil
         ))
+    }
+
+    private func resolveTimeWindowTimezone(_ rawTimezone: String) -> TimeZone {
+        if rawTimezone == Self.currentDeviceTimezoneToken {
+            return .current
+        }
+        return TimeZone(identifier: rawTimezone) ?? .current
     }
 
     private func handleWaitUntil(
@@ -1311,12 +1329,46 @@ final class FlowJourneyRunner {
             switch result {
             case .continue:
                 continue
-            case .stopSequence, .pause, .exit:
+            case .stopSequence, .exit:
                 return result
+            case .pause(let pending):
+                return .pause(
+                    attachResumeActions(
+                        to: pending,
+                        from: actions,
+                        pausedIndex: index
+                    )
+                )
             }
         }
 
         return .continue
+    }
+
+    private func buildResumeActions(
+        from actions: [InteractionAction],
+        pausedIndex: Int,
+        pendingKind: FlowPendingActionKind
+    ) -> [InteractionAction] {
+        let resumeIndex = pendingKind == .delay ? pausedIndex + 1 : pausedIndex
+        guard resumeIndex > 0 else { return actions }
+        guard resumeIndex < actions.count else { return [] }
+        return Array(actions.dropFirst(resumeIndex))
+    }
+
+    private func attachResumeActions(
+        to pending: FlowPendingAction,
+        from actions: [InteractionAction],
+        pausedIndex: Int
+    ) -> FlowPendingAction {
+        guard pending.resumeActions == nil else { return pending }
+        return pending.withResumeActions(
+            buildResumeActions(
+                from: actions,
+                pausedIndex: pausedIndex,
+                pendingKind: pending.kind
+            )
+        )
     }
 
     private func dispatchDidSetTrigger(
@@ -1431,7 +1483,8 @@ final class FlowJourneyRunner {
             resumeAt: resumeAt,
             condition: condition,
             maxTimeMs: maxTimeMs,
-            startedAt: startedAt ?? dateProvider.now()
+            startedAt: startedAt ?? dateProvider.now(),
+            resumeActions: nil
         )
     }
 
