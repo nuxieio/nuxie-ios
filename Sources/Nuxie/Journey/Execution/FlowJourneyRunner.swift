@@ -2,6 +2,8 @@ import Foundation
 import FactoryKit
 
 final class FlowJourneyRunner {
+    private static let currentDeviceTimezoneToken = "__current_device__"
+
     struct TriggerContext {
         let screenId: String?
         let componentId: String?
@@ -594,7 +596,7 @@ final class FlowJourneyRunner {
         resumeContext: ResumeContext?
     ) async -> ActionResult {
         let now = dateProvider.now()
-        let tz = TimeZone(identifier: action.timezone) ?? .current
+        let tz = resolveTimeWindowTimezone(action.timezone)
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = tz
 
@@ -625,7 +627,7 @@ final class FlowJourneyRunner {
         let endMin = eh * 60 + em
 
         if startMin == endMin {
-            return .continue
+            return await runNestedActions(action.successActions ?? [], context: context)
         }
 
         let inWindow =
@@ -634,7 +636,7 @@ final class FlowJourneyRunner {
             : (curMin >= startMin || curMin < endMin)
 
         if inWindow {
-            return .continue
+            return await runNestedActions(action.successActions ?? [], context: context)
         }
 
         let nextOpen = calculateNextWindowOpen(
@@ -652,6 +654,13 @@ final class FlowJourneyRunner {
             condition: nil,
             maxTimeMs: nil
         ))
+    }
+
+    private func resolveTimeWindowTimezone(_ rawTimezone: String) -> TimeZone {
+        if rawTimezone == Self.currentDeviceTimezoneToken {
+            return .current
+        }
+        return TimeZone(identifier: rawTimezone) ?? .current
     }
 
     private func handleWaitUntil(

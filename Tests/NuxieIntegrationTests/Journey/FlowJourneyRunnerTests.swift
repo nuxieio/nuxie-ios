@@ -717,6 +717,47 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(journey.flowState.pendingAction).to(beNil())
             }
 
+            it("uses the current device timezone token for time_window") {
+                let flowId = "flow-time-window-device"
+                let action = TimeWindowAction(
+                    startTime: "09:00",
+                    endTime: "11:00",
+                    timezone: "__current_device__",
+                    daysOfWeek: nil,
+                    successActions: [
+                        .navigate(NavigateAction(screenId: "screen-2", transition: nil))
+                    ]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.timeWindow(action)],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = .current
+                let date = calendar.date(from: DateComponents(year: 2024, month: 1, day: 1, hour: 10, minute: 0))!
+                mocks.dateProvider.setCurrentDate(date)
+
+                _ = await runner.handleRuntimeReady()
+
+                expect(journey.flowState.pendingAction).to(beNil())
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
+                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
+                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
+            }
+
             it("resumes wait_until when event condition is satisfied") {
                 let flowId = "flow-wait"
                 let viewModel = ViewModel(

@@ -757,19 +757,22 @@ public struct TimeWindowAction: Codable {
     public let endTime: String
     public let timezone: String
     public let daysOfWeek: [Int]?
+    public let successActions: [InteractionAction]?
 
     public init(
         type: String = "time_window",
         startTime: String,
         endTime: String,
         timezone: String,
-        daysOfWeek: [Int]? = nil
+        daysOfWeek: [Int]? = nil,
+        successActions: [InteractionAction]? = nil
     ) {
         self.type = type
         self.startTime = startTime
         self.endTime = endTime
         self.timezone = timezone
         self.daysOfWeek = daysOfWeek
+        self.successActions = successActions
     }
 }
 
