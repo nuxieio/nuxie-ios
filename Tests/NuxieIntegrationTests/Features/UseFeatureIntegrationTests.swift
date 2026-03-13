@@ -3,6 +3,9 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+#if SWIFT_PACKAGE
+@testable import NuxieTestSupport
+#endif
 
 final class UseFeatureIntegrationTests: AsyncSpec {
     override class func spec() {

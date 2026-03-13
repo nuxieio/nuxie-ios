@@ -2,6 +2,9 @@ import Quick
 import Nimble
 import WebKit
 @testable import Nuxie
+#if SWIFT_PACKAGE
+@testable import NuxieTestSupport
+#endif
 
 final class FlowWebViewBridgeSpec: QuickSpec {
     final class DummyDelegate: FlowMessageHandlerDelegate {

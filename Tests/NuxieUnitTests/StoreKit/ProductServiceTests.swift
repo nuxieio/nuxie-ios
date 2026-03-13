@@ -3,6 +3,9 @@ import Quick
 import Nimble
 import StoreKit
 @testable import Nuxie
+#if SWIFT_PACKAGE
+@testable import NuxieTestSupport
+#endif
 
 final class ProductServiceSpec: AsyncSpec {
     override class func spec() {

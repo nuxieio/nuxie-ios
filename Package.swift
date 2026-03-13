@@ -40,46 +40,47 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "NuxieUnitTests",
+            name: "NuxieTestSupport",
             dependencies: [
                 "Nuxie",
                 "Quick",
                 "Nimble",
                 .product(name: "FactoryKit", package: "Factory"),
             ],
-            path: "Tests",
-            sources: [
-                "NuxieUnitTests",
+            path: "Tests/NuxieTestSupport"
+        ),
+        .testTarget(
+            name: "NuxieUnitTests",
+            dependencies: [
+                "Nuxie",
                 "NuxieTestSupport",
-            ]
+                "Quick",
+                "Nimble",
+                .product(name: "FactoryKit", package: "Factory"),
+            ],
+            path: "Tests/NuxieUnitTests"
         ),
         .testTarget(
             name: "NuxieIntegrationTests",
             dependencies: [
                 "Nuxie",
+                "NuxieTestSupport",
                 "Quick",
                 "Nimble",
                 .product(name: "FactoryKit", package: "Factory"),
             ],
-            path: "Tests",
-            sources: [
-                "NuxieIntegrationTests",
-                "NuxieTestSupport",
-            ]
+            path: "Tests/NuxieIntegrationTests"
         ),
         .testTarget(
             name: "NuxieE2ETests",
             dependencies: [
                 "Nuxie",
+                "NuxieTestSupport",
                 "Quick",
                 "Nimble",
                 .product(name: "FactoryKit", package: "Factory"),
             ],
-            path: "Tests",
-            sources: [
-                "NuxieE2ETests",
-                "NuxieTestSupport",
-            ]
+            path: "Tests/NuxieE2ETests"
         ),
         .target(
             name: "NuxieRevenueCat",

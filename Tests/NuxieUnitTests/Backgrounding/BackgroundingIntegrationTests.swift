@@ -3,6 +3,9 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+#if SWIFT_PACKAGE
+@testable import NuxieTestSupport
+#endif
 
 /// Comprehensive integration tests for backgrounding behavior
 /// Tests how services behave when the app enters background and returns to foreground

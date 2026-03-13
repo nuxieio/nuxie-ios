@@ -42,7 +42,7 @@ public class MockFlowService: FlowServiceProtocol {
         if let error = failureError {
             throw error
         }
-        throw FlowError.flowNotFound(id)
+        throw MockFlowServiceError.flowNotFound(id)
     }
     
     @MainActor
@@ -52,7 +52,7 @@ public class MockFlowService: FlowServiceProtocol {
         
         // Check if we should fail
         if shouldFailFlowDisplay {
-            throw failureError ?? FlowError.flowNotFound(flowId)
+            throw failureError ?? MockFlowServiceError.flowNotFound(flowId)
         }
         
         // Return specific mock view controller if available
@@ -130,7 +130,7 @@ public class MockFlowService: FlowServiceProtocol {
     }
 }
 
-public enum FlowError: Error {
+public enum MockFlowServiceError: Error {
     case flowNotFound(String)
     case presentationFailed(String)
 }
