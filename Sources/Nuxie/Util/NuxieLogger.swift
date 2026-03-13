@@ -68,9 +68,13 @@ internal final class NuxieLogger {
 
   // MARK: - Private Implementation
 
+  internal func shouldLog(level: LogLevel) -> Bool {
+    level >= logLevel
+  }
+
   internal func log(level: LogLevel, message: String, file: String, function: String, line: Int) {
     // Check if we should log at this level
-    guard level.rawValue >= logLevel.rawValue else { return }
+    guard shouldLog(level: level) else { return }
 
     let fileName = URL(fileURLWithPath: file).lastPathComponent
     let formattedMessage = "[Nuxie] [\(level.description)] [\(fileName):\(line)] \(message)"
@@ -119,6 +123,17 @@ internal final class NuxieLogger {
 // MARK: - LogLevel Extensions
 
 extension LogLevel {
+  fileprivate var severity: Int {
+    switch self {
+    case .verbose: return 0
+    case .debug: return 1
+    case .info: return 2
+    case .warning: return 3
+    case .error: return 4
+    case .none: return 5
+    }
+  }
+
   fileprivate var description: String {
     switch self {
     case .verbose: return "VERBOSE"
@@ -140,6 +155,12 @@ extension LogLevel {
     case .error: return .error
     case .none: return .fault
     }
+  }
+}
+
+extension LogLevel: Comparable {
+  public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
+    lhs.severity < rhs.severity
   }
 }
 
