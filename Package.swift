@@ -39,7 +39,7 @@ let package = Package(
                 .linkedFramework("WebKit")
             ]
         ),
-        .target(
+        .testTarget(
             name: "NuxieTestSupport",
             dependencies: [
                 "Nuxie",
