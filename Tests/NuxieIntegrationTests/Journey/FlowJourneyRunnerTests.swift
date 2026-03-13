@@ -807,6 +807,56 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
             }
 
+            it("resumes nested time_window actions and continues outer actions") {
+                let flowId = "flow-time-window-delayed-outer"
+                let action = TimeWindowAction(
+                    startTime: "09:00",
+                    endTime: "11:00",
+                    timezone: "UTC",
+                    daysOfWeek: nil,
+                    successActions: [
+                        .delay(DelayAction(durationMs: 1_000)),
+                        .sendEvent(SendEventAction(
+                            eventName: "inside_window",
+                            properties: nil
+                        )),
+                    ]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .timeWindow(action),
+                        .sendEvent(SendEventAction(
+                            eventName: "after_window",
+                            properties: nil
+                        )),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+                let date = calendar.date(from: DateComponents(year: 2024, month: 1, day: 1, hour: 10, minute: 0))!
+                mocks.dateProvider.setCurrentDate(date)
+
+                let outcome = await runner.handleRuntimeReady()
+                if case .paused(let pending) = outcome {
+                    expect(pending.kind).to(equal(.delay))
+                } else {
+                    fail("Expected nested time_window delay to pause")
+                }
+
+                _ = await runner.resumePendingAction(reason: .timer, event: nil)
+
+                expect(journey.flowState.pendingAction).to(beNil())
+                let trackedEvents = mocks.eventService.trackedEvents.map(\.name)
+                expect(trackedEvents).to(contain("inside_window"))
+                expect(trackedEvents).to(contain("after_window"))
+            }
+
             it("resumes wait_until when event condition is satisfied") {
                 let flowId = "flow-wait"
                 let viewModel = ViewModel(

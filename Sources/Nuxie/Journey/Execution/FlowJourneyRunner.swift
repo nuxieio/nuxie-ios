@@ -1361,14 +1361,20 @@ final class FlowJourneyRunner {
         from actions: [InteractionAction],
         pausedIndex: Int
     ) -> FlowPendingAction {
-        guard pending.resumeActions == nil else { return pending }
-        return pending.withResumeActions(
-            buildResumeActions(
+        let trailingActions =
+            pausedIndex + 1 >= actions.count
+            ? []
+            : Array(actions.dropFirst(pausedIndex + 1))
+        let resumeActions =
+            pending.resumeActions.map { existing in
+                trailingActions.isEmpty ? existing : existing + trailingActions
+            }
+            ?? buildResumeActions(
                 from: actions,
                 pausedIndex: pausedIndex,
                 pendingKind: pending.kind
             )
-        )
+        return pending.withResumeActions(resumeActions)
     }
 
     private func dispatchDidSetTrigger(
