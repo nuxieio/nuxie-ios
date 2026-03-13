@@ -3,6 +3,7 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 /// Comprehensive integration tests for the identity system
 /// Tests the full flow of identify(), reset(), and identity state management across services

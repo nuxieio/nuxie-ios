@@ -3,6 +3,7 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 /// Comprehensive tests for AppLifecyclePlugin
 /// Tests app lifecycle event tracking: $app_installed, $app_updated, $app_opened, $app_backgrounded

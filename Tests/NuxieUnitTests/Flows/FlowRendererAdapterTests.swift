@@ -2,6 +2,7 @@ import Foundation
 import Quick
 import Nimble
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FlowRendererAdapterTests: QuickSpec {
     override class func spec() {

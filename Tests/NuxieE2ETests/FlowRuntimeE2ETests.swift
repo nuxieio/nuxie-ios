@@ -5,6 +5,7 @@ import UIKit
 import WebKit
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FlowRuntimeE2ESpec: QuickSpec {
     override class func spec() {

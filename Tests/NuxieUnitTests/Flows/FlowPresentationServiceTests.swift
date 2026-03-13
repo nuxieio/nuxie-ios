@@ -3,6 +3,7 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FlowPresentationServiceTests: AsyncSpec {
     override class func spec() {
@@ -184,7 +185,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
                 it("should propagate flow service errors") {
                     // Setup flow service to fail
                     mockFlowService.shouldFailFlowDisplay = true
-                    mockFlowService.failureError = FlowError.flowNotFound("missing-flow")
+                    mockFlowService.failureError = MockFlowServiceError.flowNotFound("missing-flow")
                     
                     // Act & Assert
                     await expect {

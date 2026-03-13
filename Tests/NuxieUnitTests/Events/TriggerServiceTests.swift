@@ -4,6 +4,7 @@ import Nimble
 import Quick
 
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class TriggerServiceTests: AsyncSpec {
     override class func spec() {

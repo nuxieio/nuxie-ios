@@ -3,6 +3,7 @@ import Nimble
 import Quick
 
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 private struct IdentityServiceDiskModel: Codable {
   let distinctId: String?

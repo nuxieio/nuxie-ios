@@ -2,6 +2,7 @@ import Quick
 import Nimble
 import WebKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FlowViewControllerBridgeSpec: QuickSpec {
     private func makeFlow(products: [FlowProduct] = []) -> Flow {

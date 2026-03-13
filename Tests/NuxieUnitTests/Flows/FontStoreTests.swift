@@ -1,6 +1,7 @@
 import Quick
 import Nimble
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FontStoreSpec: QuickSpec {
     override class func spec() {

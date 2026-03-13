@@ -4,6 +4,7 @@ import Nimble
 import Quick
 
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class TrackWithResponseTests: AsyncSpec {
 

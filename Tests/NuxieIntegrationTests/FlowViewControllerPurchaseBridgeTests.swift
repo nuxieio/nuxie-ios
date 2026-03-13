@@ -4,6 +4,7 @@ import SafariServices
 import WebKit
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
     override class func spec() {

@@ -3,6 +3,7 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 /// Comprehensive integration tests for backgrounding behavior
 /// Tests how services behave when the app enters background and returns to foreground

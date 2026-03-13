@@ -3,6 +3,7 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+@testable import NuxieTestSupport
 
 final class FlowViewModelTelemetryTests: AsyncSpec {
     override class func spec() {
