@@ -46,9 +46,19 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
             throw sendBatchError ?? URLError(.badServerResponse)
         }
         
-        // Update response with actual batch size
+        let hasCustomResponse =
+            sendBatchResponse.processed != 0 ||
+            sendBatchResponse.failed != 0 ||
+            sendBatchResponse.total != 0 ||
+            sendBatchResponse.errors != nil ||
+            sendBatchResponse.status != "success"
+
+        if hasCustomResponse {
+            return sendBatchResponse
+        }
+
         return BatchResponse(
-            status: sendBatchResponse.status,
+            status: "success",
             processed: events.count,
             failed: 0,
             total: events.count,
@@ -435,8 +445,57 @@ final class NuxieNetworkQueueTests: AsyncSpec {
                     let result = await queue.flush()
                     
                     expect(result).to(beTrue())
-                    // All events removed even on partial success
+                    await expect { await queue.getQueueSize() }.to(equal(1))
+                    await expect { await mockApi.sendBatchCallCount }.to(equal(1))
+                    await expect { await mockApi.lastBatchSent?.map(\.event) }.to(equal(["event_0", "event_1", "event_2"]))
+
+                    await mockApi.setBatchResponse(BatchResponse(
+                        status: "success",
+                        processed: 1,
+                        failed: 0,
+                        total: 1,
+                        errors: nil
+                    ))
+
+                    let retryResult = await queue.flush()
+
+                    expect(retryResult).to(beTrue())
                     await expect { await queue.getQueueSize() }.to(equal(0))
+                    await expect { await mockApi.sendBatchCallCount }.to(equal(2))
+                    await expect { await mockApi.lastBatchSent?.map(\.event) }.to(equal(["event_2"]))
+                }
+
+                it("should back off when a partial batch makes no progress") {
+                    queue = NuxieNetworkQueue(
+                        flushAt: 2,
+                        maxRetries: 3,
+                        baseRetryDelay: 0.1,
+                        apiClient: mockApi
+                    )
+
+                    let events = (0..<2).map { i in
+                        TestEventBuilder(name: "event_\(i)")
+                            .withDistinctId("user123")
+                            .build()
+                    }
+
+                    for event in events {
+                        await queue.enqueue(event)
+                    }
+
+                    await mockApi.setBatchResponse(BatchResponse(
+                        status: "partial",
+                        processed: 0,
+                        failed: 2,
+                        total: 2,
+                        errors: nil
+                    ))
+
+                    let result = await queue.flush()
+
+                    expect(result).to(beTrue())
+                    await expect { await queue.getQueueSize() }.to(equal(2))
+                    await expect { await mockApi.sendBatchCallCount }.to(equal(1))
                 }
             }
             

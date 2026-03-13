@@ -264,10 +264,32 @@ public actor NuxieNetworkQueue {
     ///   - batch: Original batch of events
     ///   - response: Batch response with error details
     private func handleBatchPartialSuccess(_ batch: [NuxieEvent], response: BatchResponse) async {
-        // Remove only successfully processed events
-        // Since we don't have per-event status, we'll assume all were processed if failed < total
-        let batchIds = Set(batch.map { $0.id })
-        eventQueue.removeAll { batchIds.contains($0.id) }
+        let failedIndices = Set((response.errors ?? []).map(\.index))
+        let canIdentifyFailedEvents = !failedIndices.isEmpty
+        var removedAnyEvents = false
+
+        if canIdentifyFailedEvents {
+            let successfulIds = Set(
+                batch.enumerated().compactMap { index, event in
+                    failedIndices.contains(index) ? nil : event.id
+                }
+            )
+            removedAnyEvents = !successfulIds.isEmpty
+            eventQueue.removeAll { successfulIds.contains($0.id) }
+        } else {
+            LogWarning("Partial batch response did not include per-event error indexes; retaining entire batch for retry")
+        }
+
+        if removedAnyEvents {
+            // Partial delivery made progress, so clear any existing backoff.
+            retryCount = 0
+            nextRetryDate = nil
+        } else {
+            retryCount += 1
+            let backoffDelay = baseRetryDelay * pow(2, Double(max(retryCount - 1, 0)))
+            nextRetryDate = Date().addingTimeInterval(backoffDelay)
+            LogWarning("Partial batch made no progress, retrying in \(backoffDelay)s")
+        }
         
         // Mark as not flushing
         isCurrentlyFlushing = false
