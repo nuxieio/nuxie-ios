@@ -2,7 +2,9 @@ import Foundation
 import Quick
 import Nimble
 @testable import Nuxie
+#if SWIFT_PACKAGE
 @testable import NuxieTestSupport
+#endif
 
 // MARK: - Mock API Client
 

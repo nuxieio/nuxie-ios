@@ -1,6 +1,8 @@
 import Foundation
 @testable import Nuxie
+#if SWIFT_PACKAGE
 @testable import NuxieTestSupport
+#endif
 
 public actor MockTriggerService: TriggerServiceProtocol {
     private var updatesToEmit: [TriggerUpdate] = []

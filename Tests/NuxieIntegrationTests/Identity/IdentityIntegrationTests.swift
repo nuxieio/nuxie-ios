@@ -3,7 +3,9 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+#if SWIFT_PACKAGE
 @testable import NuxieTestSupport
+#endif
 
 /// Comprehensive integration tests for the identity system
 /// Tests the full flow of identify(), reset(), and identity state management across services

@@ -2,7 +2,9 @@ import Foundation
 import Quick
 import Nimble
 @testable import Nuxie
+#if SWIFT_PACKAGE
 @testable import NuxieTestSupport
+#endif
 
 final class RemoteFlowTargetSelectionTests: QuickSpec {
     override class func spec() {
