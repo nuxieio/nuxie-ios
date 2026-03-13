@@ -10,6 +10,7 @@ final class FeatureServiceTests: AsyncSpec {
             var mockFactory: MockFactory!
             var mockProfileService: MockProfileService!
             var mockIdentityService: MockIdentityService!
+            var mockApi: MockNuxieApi!
 
             beforeEach {
                 mockFactory = MockFactory.shared
@@ -18,6 +19,7 @@ final class FeatureServiceTests: AsyncSpec {
                 featureService = FeatureService()
                 mockProfileService = mockFactory.profileService
                 mockIdentityService = mockFactory.identityService
+                mockApi = mockFactory.nuxieApi
                 mockIdentityService.setDistinctId("customer-123")
             }
 
@@ -61,7 +63,7 @@ final class FeatureServiceTests: AsyncSpec {
             }
 
             it("exposes purchase-synced access even when no profile is cached") {
-                let featureId = "team_members"
+                let featureId = "plan:team_members"
 
                 await featureService.updateFromPurchase([
                     PurchaseFeature(
@@ -81,6 +83,43 @@ final class FeatureServiceTests: AsyncSpec {
                 expect(cached?.unlimited).to(beTrue())
                 expect(allCached[featureId]?.allowed).to(beTrue())
                 expect(allCached[featureId]?.unlimited).to(beTrue())
+            }
+
+            it("recomputes metered cache overrides for lower required balances") {
+                let featureId = "ai_generations"
+
+                await mockApi.setCheckFeatureResponse(
+                    FeatureCheckResult(
+                        customerId: "customer-123",
+                        featureId: featureId,
+                        requiredBalance: 10,
+                        code: "insufficient_balance",
+                        allowed: false,
+                        unlimited: false,
+                        balance: 5,
+                        type: .metered,
+                        preview: nil
+                    )
+                )
+
+                let first = try await featureService.checkWithCache(
+                    featureId: featureId,
+                    requiredBalance: 10,
+                    entityId: nil,
+                    forceRefresh: true
+                )
+
+                let second = try await featureService.checkWithCache(
+                    featureId: featureId,
+                    requiredBalance: 1,
+                    entityId: nil,
+                    forceRefresh: false
+                )
+
+                expect(first.allowed).to(beFalse())
+                expect(first.balance).to(equal(5))
+                expect(second.allowed).to(beTrue())
+                expect(second.balance).to(equal(5))
             }
         }
     }
