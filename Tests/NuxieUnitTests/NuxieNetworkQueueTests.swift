@@ -409,8 +409,8 @@ final class NuxieNetworkQueueTests: AsyncSpec {
                         await queue.enqueue(event)
                     }
                     
-                    // Configure permanent error (400 Bad Request)
-                    await mockApi.setFailure(true, error: URLError(.init(rawValue: 400)))
+                    // Configure the same HTTP 400 error shape that NuxieApi throws
+                    await mockApi.setFailure(true, error: NuxieNetworkError.httpError(statusCode: 400, message: "Bad Request"))
                     
                     let result = await queue.flush()
                     

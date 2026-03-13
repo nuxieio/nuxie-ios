@@ -314,14 +314,11 @@ public actor NuxieNetworkQueue {
         isCurrentlyFlushing = false
         
         // Check if this is a permanent failure (4xx errors)
-        if let urlError = error as? URLError {
-            if urlError.code.rawValue >= 400 && urlError.code.rawValue < 500 {
-                // Permanent failure - drop events
-                let batchIds = Set(batch.map { $0.id })
-                eventQueue.removeAll { batchIds.contains($0.id) }
-                LogWarning("Permanent failure (4xx), dropped \(batch.count) events: \(error)")
-                return
-            }
+        if isPermanentBatchFailure(error) {
+            let batchIds = Set(batch.map { $0.id })
+            eventQueue.removeAll { batchIds.contains($0.id) }
+            LogWarning("Permanent failure (4xx), dropped \(batch.count) events: \(error)")
+            return
         }
         
         // Temporary failure - implement retry with exponential backoff
@@ -344,6 +341,19 @@ public actor NuxieNetworkQueue {
             
             LogError("Max retries exceeded, dropped \(batch.count) events: \(error)")
         }
+    }
+
+    private func isPermanentBatchFailure(_ error: Error) -> Bool {
+        if let networkError = error as? NuxieNetworkError,
+           case .httpError(let statusCode, _) = networkError {
+            return (400..<500).contains(statusCode)
+        }
+
+        if let urlError = error as? URLError {
+            return (400..<500).contains(urlError.code.rawValue)
+        }
+
+        return false
     }
     
     // MARK: - Task Management
