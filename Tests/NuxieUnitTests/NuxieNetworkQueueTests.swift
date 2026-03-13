@@ -419,6 +419,38 @@ final class NuxieNetworkQueueTests: AsyncSpec {
                     // Events should be dropped
                     await expect { await queue.getQueueSize() }.to(equal(0))
                 }
+
+                it("should reset retry state after dropping a permanent error") {
+                    queue = NuxieNetworkQueue(
+                        flushAt: 20,
+                        maxRetries: 1,
+                        baseRetryDelay: 0,
+                        apiClient: mockApi
+                    )
+
+                    let firstEvent = TestEventBuilder(name: "temp_then_permanent")
+                        .withDistinctId("user123")
+                        .build()
+
+                    await queue.enqueue(firstEvent)
+                    await mockApi.setFailure(true, error: URLError(.notConnectedToInternet))
+                    _ = await queue.flush()
+                    await expect { await queue.getQueueSize() }.to(equal(1))
+
+                    await mockApi.setFailure(true, error: NuxieNetworkError.httpError(statusCode: 400, message: "Bad Request"))
+                    _ = await queue.flush()
+                    await expect { await queue.getQueueSize() }.to(equal(0))
+
+                    let secondEvent = TestEventBuilder(name: "fresh_retry_budget")
+                        .withDistinctId("user123")
+                        .build()
+
+                    await queue.enqueue(secondEvent)
+                    await mockApi.setFailure(true, error: URLError(.notConnectedToInternet))
+                    _ = await queue.flush()
+
+                    await expect { await queue.getQueueSize() }.to(equal(1))
+                }
                 
                 it("should handle partial batch success") {
                     let events = (0..<3).map { i in

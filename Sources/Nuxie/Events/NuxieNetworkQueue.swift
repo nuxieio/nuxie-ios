@@ -317,6 +317,8 @@ public actor NuxieNetworkQueue {
         if isPermanentBatchFailure(error) {
             let batchIds = Set(batch.map { $0.id })
             eventQueue.removeAll { batchIds.contains($0.id) }
+            retryCount = 0
+            nextRetryDate = nil
             LogWarning("Permanent failure (4xx), dropped \(batch.count) events: \(error)")
             return
         }
