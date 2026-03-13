@@ -464,6 +464,39 @@ final class NuxieNetworkQueueTests: AsyncSpec {
                     await expect { await mockApi.sendBatchCallCount }.to(equal(2))
                     await expect { await mockApi.lastBatchSent?.map(\.event) }.to(equal(["event_2"]))
                 }
+
+                it("should back off when a partial batch makes no progress") {
+                    queue = NuxieNetworkQueue(
+                        flushAt: 2,
+                        maxRetries: 3,
+                        baseRetryDelay: 0.1,
+                        apiClient: mockApi
+                    )
+
+                    let events = (0..<2).map { i in
+                        TestEventBuilder(name: "event_\(i)")
+                            .withDistinctId("user123")
+                            .build()
+                    }
+
+                    for event in events {
+                        await queue.enqueue(event)
+                    }
+
+                    await mockApi.setBatchResponse(BatchResponse(
+                        status: "partial",
+                        processed: 0,
+                        failed: 2,
+                        total: 2,
+                        errors: nil
+                    ))
+
+                    let result = await queue.flush()
+
+                    expect(result).to(beTrue())
+                    await expect { await queue.getQueueSize() }.to(equal(2))
+                    await expect { await mockApi.sendBatchCallCount }.to(equal(1))
+                }
             }
             
             // MARK: - Pause/Resume Tests
