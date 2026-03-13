@@ -76,7 +76,7 @@ public struct FeatureAccess: Sendable {
         )
     }
 
-    private init(allowed: Bool, unlimited: Bool, balance: Int?, type: FeatureType) {
+    init(allowed: Bool, unlimited: Bool, balance: Int?, type: FeatureType) {
         self.allowed = allowed
         self.unlimited = unlimited
         self.balance = balance

@@ -41,10 +41,74 @@ public protocol FeatureServiceProtocol: AnyObject {
 /// Uses ProfileService's cached features as primary source, with real-time API fallback
 internal actor FeatureService: FeatureServiceProtocol {
 
+    private struct FeatureCacheKey: Hashable {
+        let featureId: String
+        let entityId: String?
+    }
+
+    private struct CachedFeatureOverride {
+        let type: FeatureType
+        let unlimited: Bool
+        let balance: Int?
+        let allowed: Bool
+
+        init(result: FeatureCheckResult) {
+            self.type = result.type
+            self.unlimited = result.unlimited
+            self.balance = result.balance
+            self.allowed = result.allowed
+        }
+
+        init(purchase: PurchaseFeature) {
+            self.type = purchase.type
+            self.unlimited = purchase.unlimited
+            self.balance = purchase.balance
+            self.allowed = purchase.allowed
+        }
+
+        func access(requiredBalance: Int?) -> FeatureAccess {
+            switch type {
+            case .boolean:
+                return FeatureAccess(
+                    allowed: allowed,
+                    unlimited: unlimited,
+                    balance: balance,
+                    type: type
+                )
+            case .metered, .creditSystem:
+                if unlimited {
+                    return FeatureAccess(
+                        allowed: true,
+                        unlimited: true,
+                        balance: balance,
+                        type: type
+                    )
+                }
+
+                if let balance {
+                    return FeatureAccess(
+                        allowed: balance >= (requiredBalance ?? 1),
+                        unlimited: false,
+                        balance: balance,
+                        type: type
+                    )
+                }
+
+                return FeatureAccess(
+                    allowed: allowed,
+                    unlimited: unlimited,
+                    balance: nil,
+                    type: type
+                )
+            }
+        }
+    }
+
     // MARK: - Properties
 
-    // In-memory cache for real-time check results: (featureId:entityId) -> (result, cachedAt)
-    private var realTimeCache: [String: (result: FeatureCheckResult, cachedAt: Date)] = [:]
+    // In-memory cache for fresh feature access overrides from real-time checks and purchase syncs.
+    // These values are newer than the profile snapshot and should win until they expire.
+    private var realTimeCache: [FeatureCacheKey: (override: CachedFeatureOverride, cachedAt: Date)] = [:]
 
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -65,11 +129,27 @@ internal actor FeatureService: FeatureServiceProtocol {
     // MARK: - Public Methods
 
     /// Get cached feature access (instant, non-blocking)
-    /// First checks profile cache, then real-time cache
+    /// First checks fresh overrides, then falls back to the profile snapshot.
     func getCached(featureId: String, entityId: String?) async -> FeatureAccess? {
+        await getCached(featureId: featureId, requiredBalance: nil, entityId: entityId)
+    }
+
+    private func getCached(
+        featureId: String,
+        requiredBalance: Int?,
+        entityId: String?
+    ) async -> FeatureAccess? {
+        let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
+        if let cached = realTimeCache[cacheKey] {
+            let age = dateProvider.timeIntervalSince(cached.cachedAt)
+            if age < realTimeCacheTTL {
+                return cached.override.access(requiredBalance: requiredBalance)
+            }
+        }
+
         let distinctId = identityService.getDistinctId()
 
-        // 1. Try profile cache first (features from profile response)
+        // Fall back to the profile cache (features from profile response)
         if let profile = await profileService.getCachedProfile(distinctId: distinctId),
            let features = profile.features,
            let feature = features.first(where: { $0.id == featureId }) {
@@ -96,30 +176,26 @@ internal actor FeatureService: FeatureServiceProtocol {
             return FeatureAccess(from: feature)
         }
 
-        // 2. Try real-time cache
-        let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
-        if let cached = realTimeCache[cacheKey] {
-            let age = dateProvider.timeIntervalSince(cached.cachedAt)
-            if age < realTimeCacheTTL {
-                return FeatureAccess(from: cached.result)
-            }
-        }
-
         return nil
     }
 
     /// Get all cached features from profile
     func getAllCached() async -> [String: FeatureAccess] {
         let distinctId = identityService.getDistinctId()
-
-        guard let profile = await profileService.getCachedProfile(distinctId: distinctId),
-              let features = profile.features else {
-            return [:]
+        var result: [String: FeatureAccess] = [:]
+        if let profile = await profileService.getCachedProfile(distinctId: distinctId),
+           let features = profile.features {
+            for feature in features {
+                result[feature.id] = FeatureAccess(from: feature)
+            }
         }
 
-        var result: [String: FeatureAccess] = [:]
-        for feature in features {
-            result[feature.id] = FeatureAccess(from: feature)
+        let now = dateProvider.now()
+        for (cacheKey, cached) in realTimeCache {
+            guard cacheKey.entityId == nil else { continue }
+            let age = now.timeIntervalSince(cached.cachedAt)
+            guard age < realTimeCacheTTL else { continue }
+            result[cacheKey.featureId] = cached.override.access(requiredBalance: nil)
         }
         return result
     }
@@ -141,7 +217,7 @@ internal actor FeatureService: FeatureServiceProtocol {
 
         // Cache the result
         let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
-        realTimeCache[cacheKey] = (result: result, cachedAt: dateProvider.now())
+        realTimeCache[cacheKey] = (override: CachedFeatureOverride(result: result), cachedAt: dateProvider.now())
 
         // Update FeatureInfo for SwiftUI reactivity
         await notifyFeatureInfoUpdate(featureId: featureId, access: FeatureAccess(from: result))
@@ -158,7 +234,11 @@ internal actor FeatureService: FeatureServiceProtocol {
     ) async throws -> FeatureAccess {
         if !forceRefresh {
             // Try cache first
-            if let cached = await getCached(featureId: featureId, entityId: entityId) {
+            if let cached = await getCached(
+                featureId: featureId,
+                requiredBalance: requiredBalance,
+                entityId: entityId
+            ) {
                 // For boolean features, cache is good enough
                 if cached.type == .boolean {
                     return cached
@@ -204,11 +284,8 @@ internal actor FeatureService: FeatureServiceProtocol {
 
     // MARK: - Private Methods
 
-    private func makeCacheKey(featureId: String, entityId: String?) -> String {
-        if let entityId = entityId {
-            return "\(featureId):\(entityId)"
-        }
-        return featureId
+    private func makeCacheKey(featureId: String, entityId: String?) -> FeatureCacheKey {
+        FeatureCacheKey(featureId: featureId, entityId: entityId)
     }
 
     /// Update FeatureInfo with current cached features (for SwiftUI reactivity)
@@ -235,13 +312,18 @@ internal actor FeatureService: FeatureServiceProtocol {
 
         // Update FeatureInfo for SwiftUI reactivity
         var accessMap: [String: FeatureAccess] = [:]
+        let cachedAt = dateProvider.now()
         for purchaseFeature in features {
-            accessMap[purchaseFeature.id] = purchaseFeature.toFeatureAccess
+            let access = purchaseFeature.toFeatureAccess
+            accessMap[purchaseFeature.id] = access
+            let cacheKey = makeCacheKey(featureId: purchaseFeature.id, entityId: nil)
+            realTimeCache[cacheKey] = (override: CachedFeatureOverride(purchase: purchaseFeature), cachedAt: cachedAt)
         }
 
+        let updates = accessMap
         let info = featureInfo
         await MainActor.run {
-            info.update(accessMap)
+            info.update(updates)
         }
 
         LogInfo("Feature cache updated from purchase")

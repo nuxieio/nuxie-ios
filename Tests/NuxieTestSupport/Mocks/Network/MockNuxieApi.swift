@@ -19,6 +19,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
         total: 0,
         errors: nil
     )
+    public var checkFeatureResponse: FeatureCheckResult?
     public var trackEventResponse: EventResponse?
 
     // Call tracking
@@ -104,6 +105,10 @@ public actor MockNuxieApi: NuxieApiProtocol {
     
     public func setShouldFailProfile(_ shouldFail: Bool) {
         self.shouldFailProfile = shouldFail
+    }
+
+    public func setCheckFeatureResponse(_ response: FeatureCheckResult?) {
+        self.checkFeatureResponse = response
     }
     
     // MARK: - NuxieApiProtocol Implementation
@@ -237,6 +242,10 @@ public actor MockNuxieApi: NuxieApiProtocol {
         requiredBalance: Int?,
         entityId: String?
     ) async throws -> FeatureCheckResult {
+        if let checkFeatureResponse {
+            return checkFeatureResponse
+        }
+
         return FeatureCheckResult(
             customerId: customerId,
             featureId: featureId,
@@ -278,6 +287,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
         lastTimeoutUsed = nil
         sentEvents.removeAll()
         lastTrackEventCall = nil
+        checkFeatureResponse = nil
 
         // Reset profileResponse to default
         setupDefaultProfileResponse()
