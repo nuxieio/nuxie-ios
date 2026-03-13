@@ -43,8 +43,9 @@ internal actor FeatureService: FeatureServiceProtocol {
 
     // MARK: - Properties
 
-    // In-memory cache for real-time check results: (featureId:entityId) -> (result, cachedAt)
-    private var realTimeCache: [String: (result: FeatureCheckResult, cachedAt: Date)] = [:]
+    // In-memory cache for fresh feature access overrides from real-time checks and purchase syncs.
+    // These values are newer than the profile snapshot and should win until they expire.
+    private var realTimeCache: [String: (access: FeatureAccess, cachedAt: Date)] = [:]
 
     @Injected(\.nuxieApi) private var api: NuxieApiProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -65,11 +66,19 @@ internal actor FeatureService: FeatureServiceProtocol {
     // MARK: - Public Methods
 
     /// Get cached feature access (instant, non-blocking)
-    /// First checks profile cache, then real-time cache
+    /// First checks fresh overrides, then falls back to the profile snapshot.
     func getCached(featureId: String, entityId: String?) async -> FeatureAccess? {
+        let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
+        if let cached = realTimeCache[cacheKey] {
+            let age = dateProvider.timeIntervalSince(cached.cachedAt)
+            if age < realTimeCacheTTL {
+                return cached.access
+            }
+        }
+
         let distinctId = identityService.getDistinctId()
 
-        // 1. Try profile cache first (features from profile response)
+        // Fall back to the profile cache (features from profile response)
         if let profile = await profileService.getCachedProfile(distinctId: distinctId),
            let features = profile.features,
            let feature = features.first(where: { $0.id == featureId }) {
@@ -96,30 +105,26 @@ internal actor FeatureService: FeatureServiceProtocol {
             return FeatureAccess(from: feature)
         }
 
-        // 2. Try real-time cache
-        let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
-        if let cached = realTimeCache[cacheKey] {
-            let age = dateProvider.timeIntervalSince(cached.cachedAt)
-            if age < realTimeCacheTTL {
-                return FeatureAccess(from: cached.result)
-            }
-        }
-
         return nil
     }
 
     /// Get all cached features from profile
     func getAllCached() async -> [String: FeatureAccess] {
         let distinctId = identityService.getDistinctId()
-
-        guard let profile = await profileService.getCachedProfile(distinctId: distinctId),
-              let features = profile.features else {
-            return [:]
+        var result: [String: FeatureAccess] = [:]
+        if let profile = await profileService.getCachedProfile(distinctId: distinctId),
+           let features = profile.features {
+            for feature in features {
+                result[feature.id] = FeatureAccess(from: feature)
+            }
         }
 
-        var result: [String: FeatureAccess] = [:]
-        for feature in features {
-            result[feature.id] = FeatureAccess(from: feature)
+        let now = dateProvider.now()
+        for (cacheKey, cached) in realTimeCache {
+            guard !cacheKey.contains(":") else { continue }
+            let age = now.timeIntervalSince(cached.cachedAt)
+            guard age < realTimeCacheTTL else { continue }
+            result[cacheKey] = cached.access
         }
         return result
     }
@@ -141,7 +146,7 @@ internal actor FeatureService: FeatureServiceProtocol {
 
         // Cache the result
         let cacheKey = makeCacheKey(featureId: featureId, entityId: entityId)
-        realTimeCache[cacheKey] = (result: result, cachedAt: dateProvider.now())
+        realTimeCache[cacheKey] = (access: FeatureAccess(from: result), cachedAt: dateProvider.now())
 
         // Update FeatureInfo for SwiftUI reactivity
         await notifyFeatureInfoUpdate(featureId: featureId, access: FeatureAccess(from: result))
@@ -235,13 +240,17 @@ internal actor FeatureService: FeatureServiceProtocol {
 
         // Update FeatureInfo for SwiftUI reactivity
         var accessMap: [String: FeatureAccess] = [:]
+        let cachedAt = dateProvider.now()
         for purchaseFeature in features {
-            accessMap[purchaseFeature.id] = purchaseFeature.toFeatureAccess
+            let access = purchaseFeature.toFeatureAccess
+            accessMap[purchaseFeature.id] = access
+            realTimeCache[purchaseFeature.id] = (access: access, cachedAt: cachedAt)
         }
 
+        let updates = accessMap
         let info = featureInfo
         await MainActor.run {
-            info.update(accessMap)
+            info.update(updates)
         }
 
         LogInfo("Feature cache updated from purchase")
