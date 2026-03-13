@@ -173,7 +173,7 @@ internal actor ProfileService: ProfileServiceProtocol {
 
     func fetchProfile(distinctId: String) async throws -> ProfileResponse {
         // Check memory cache first
-        if let cached = cachedProfile {
+        if let cached = cachedProfileForDistinctId(distinctId) {
             let age = dateProvider.timeIntervalSince(cached.cachedAt)
             
             // Return immediately if fresh
@@ -231,7 +231,7 @@ internal actor ProfileService: ProfileServiceProtocol {
     private func refreshProfile(distinctId: String) async throws -> ProfileResponse {
         do {
             let locale = effectiveLocale
-            let previousProfile = cachedProfile?.response
+            let previousProfile = cachedProfileForDistinctId(distinctId)?.response
             let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
             LogInfo("Network fetch succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
@@ -247,7 +247,7 @@ internal actor ProfileService: ProfileServiceProtocol {
     private func refreshInBackground(distinctId: String) async {
         do {
             let locale = effectiveLocale
-            let previousProfile = cachedProfile?.response
+            let previousProfile = cachedProfileForDistinctId(distinctId)?.response
             let fresh = try await api.fetchProfile(for: distinctId, locale: locale)
             LogInfo("Background refresh succeeded; updating cache (locale: \(locale))")
             await updateCache(profile: fresh, distinctId: distinctId)
@@ -303,7 +303,7 @@ internal actor ProfileService: ProfileServiceProtocol {
 
     func getCachedProfile(distinctId: String) async -> ProfileResponse? {
         // Return from memory if available and not too stale
-        if let cached = cachedProfile {
+        if let cached = cachedProfileForDistinctId(distinctId) {
             let age = dateProvider.timeIntervalSince(cached.cachedAt)
             if age < staleCacheAge {
                 return cached.response
@@ -452,6 +452,13 @@ internal actor ProfileService: ProfileServiceProtocol {
             // No cache for new user, fetch fresh
             await refreshInBackground(distinctId: newDistinctId)
         }
+    }
+
+    private func cachedProfileForDistinctId(_ distinctId: String) -> CachedProfile? {
+        guard let cached = cachedProfile, cached.distinctId == distinctId else {
+            return nil
+        }
+        return cached
     }
     
     private func handleProfileUpdate(
