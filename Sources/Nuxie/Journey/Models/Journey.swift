@@ -128,8 +128,8 @@ public class Journey: Codable {
             self.conversionWindow = ConversionWindowDefaults.defaultWindow(for: campaign.campaignType)
         }
 
-        // Set conversion anchor (default to journey start)
-        self.conversionAnchor = ConversionAnchor(rawValue: campaign.conversionAnchor ?? "") ?? .journeyStart
+        // Set conversion anchor (default to last flow shown)
+        self.conversionAnchor = ConversionAnchor(rawValue: campaign.conversionAnchor ?? "") ?? .lastFlowShown
         self.conversionAnchorAt = now
     }
 
