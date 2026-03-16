@@ -144,8 +144,8 @@ public class Journey: Codable {
             self.conversionWindow = ConversionWindowDefaults.defaultWindow(for: campaign.campaignType)
         }
 
-        // Set conversion anchor (default to journey start)
-        self.conversionAnchor = ConversionAnchor(rawValue: campaign.conversionAnchor ?? "") ?? .journeyStart
+        // Set conversion anchor (default to last flow shown)
+        self.conversionAnchor = ConversionAnchor(rawValue: campaign.conversionAnchor ?? "") ?? .lastFlowShown
         self.conversionAnchorAt = now
     }
 
@@ -199,6 +199,12 @@ public class Journey: Codable {
         self.exitReason = .cancelled
         self.completedAt = now
         self.updatedAt = now
+    }
+
+    public func markFlowShown(at date: Date) {
+        guard conversionAnchor == .lastFlowShown else { return }
+        conversionAnchorAt = date
+        updatedAt = date
     }
 
     /// Update context value

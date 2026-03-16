@@ -82,24 +82,15 @@ public struct ExitPolicy: Codable {
 
 // MARK: - Conversion Window Configuration
 
-/// Default conversion windows by campaign type
+/// Default conversion window for campaigns.
 public struct ConversionWindowDefaults {
-    /// Default window for paywall campaigns (21 days)
-    public static let paywallWindow: TimeInterval = 21 * 24 * 60 * 60
-    
-    /// Default window for onboarding campaigns (10 days)
-    public static let onboardingWindow: TimeInterval = 10 * 24 * 60 * 60
-    
-    /// Get default window based on campaign type
+    /// Default window for deferred conversions (14 days)
+    public static let defaultWindowValue: TimeInterval = 14 * 24 * 60 * 60
+
+    /// Get the default window for any campaign type.
     public static func defaultWindow(for campaignType: String?) -> TimeInterval {
-        switch campaignType?.lowercased() {
-        case "paywall":
-            return paywallWindow
-        case "onboarding":
-            return onboardingWindow
-        default:
-            return paywallWindow // Default to paywall window
-        }
+        _ = campaignType
+        return defaultWindowValue
     }
 }
 
@@ -107,10 +98,10 @@ public struct ConversionWindowDefaults {
 
 /// Types of conversion anchors supported
 public enum ConversionAnchor: String, Codable {
-    /// Anchor to journey start (default)
+    /// Anchor to journey start
     case journeyStart = "journey_start"
     
-    /// Anchor to last flow shown (Phase 3)
+    /// Anchor to last flow shown (default)
     case lastFlowShown = "last_flow_shown"
     
     /// Anchor to last flow interaction (Phase 3)

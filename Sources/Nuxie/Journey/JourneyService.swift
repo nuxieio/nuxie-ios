@@ -326,9 +326,11 @@ public actor JourneyService: JourneyServiceProtocol {
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
 
       await evaluateGoalIfNeeded(journey, campaign: campaign)
-      if let reason = await exitDecision(journey, campaign) {
-        completeJourney(journey, reason: reason)
-        continue
+      if !(await shouldDeferExitDecision()) {
+        if let reason = await exitDecision(journey, campaign) {
+          completeJourney(journey, reason: reason)
+          continue
+        }
       }
 
       if let pending = journey.flowState.pendingAction, pending.kind == .waitUntil {
@@ -363,8 +365,10 @@ public actor JourneyService: JourneyServiceProtocol {
     for journey in journeys {
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
       await evaluateGoalIfNeeded(journey, campaign: campaign)
-      if let reason = await exitDecision(journey, campaign) {
-        completeJourney(journey, reason: reason)
+      if !(await shouldDeferExitDecision()) {
+        if let reason = await exitDecision(journey, campaign) {
+          completeJourney(journey, reason: reason)
+        }
       }
     }
   }
@@ -586,8 +590,26 @@ public actor JourneyService: JourneyServiceProtocol {
     let outcome = await runner.dispatchEventTrigger(event)
     handleOutcome(outcome, journey: journey)
 
-    if !runner.hasPendingWork() {
-      completeJourney(journey, reason: .completed)
+    if journey.status.isLive,
+       let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) {
+      await evaluateGoalIfNeeded(journey, campaign: campaign)
+      if let reason = await exitDecision(journey, campaign) {
+        completeJourney(journey, reason: reason)
+        return
+      }
+    }
+
+    if journey.status.isLive, !runner.hasPendingWork() {
+      let exitReason: JourneyExitReason
+      switch reason {
+      case .userDismissed:
+        exitReason = .dismissed
+      case .error:
+        exitReason = .error
+      case .purchaseCompleted, .timeout:
+        exitReason = .completed
+      }
+      completeJourney(journey, reason: exitReason)
     }
   }
 
@@ -860,6 +882,10 @@ public actor JourneyService: JourneyServiceProtocol {
     }
 
     return nil
+  }
+
+  private func shouldDeferExitDecision() async -> Bool {
+    await flowPresentationService.isFlowPresented
   }
 
   // MARK: - Reentry Policy

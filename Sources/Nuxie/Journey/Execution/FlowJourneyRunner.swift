@@ -1496,8 +1496,12 @@ final class FlowJourneyRunner {
 
     private func mapExitReason(_ reason: String?) -> JourneyExitReason {
         switch reason {
+        case "dismissed":
+            return .dismissed
         case "goal_met":
             return .goalMet
+        case "trigger_unmatched":
+            return .triggerUnmatched
         case "expired":
             return .expired
         case "error":

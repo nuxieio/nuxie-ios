@@ -50,6 +50,9 @@ public enum JourneyStatus: String, Codable {
 public enum JourneyExitReason: String, Codable {
     /// Journey reached an exit node naturally
     case completed = "completed"
+
+    /// User dismissed the flow before a natural terminal exit
+    case dismissed = "dismissed"
     
     /// Campaign goal was achieved
     case goalMet = "goal_met"
