@@ -38,6 +38,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     @Injected(\.flowService) private var flowService: FlowServiceProtocol
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.triggerBroker) private var triggerBroker: TriggerBrokerProtocol
+    @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     private let windowProvider: WindowProviderProtocol
     
     // MARK: - State
@@ -137,6 +138,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         await window.present(flowViewController)
 
         if let journey = journey {
+            journey.markFlowShown(at: dateProvider.now())
             eventService.track(
                 JourneyEvents.flowShown,
                 properties: JourneyEvents.flowShownProperties(flowId: flowId, journey: journey),

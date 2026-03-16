@@ -48,6 +48,33 @@ final class JourneyDefaultsTests: QuickSpec {
 
                 expect(journey.conversionAnchor).to(equal(.journeyStart))
             }
+
+            it("refreshes the anchor when a last_flow_shown journey is presented") {
+                let journey = Journey(
+                    campaign: makeCampaign(),
+                    distinctId: "user-1"
+                )
+                let shownAt = Date(timeIntervalSince1970: 1_700_000_300)
+
+                journey.markFlowShown(at: shownAt)
+
+                expect(journey.conversionAnchorAt).to(equal(shownAt))
+                expect(journey.updatedAt).to(equal(shownAt))
+            }
+
+            it("leaves non-last_flow_shown anchors unchanged when a flow is presented") {
+                let journey = Journey(
+                    campaign: makeCampaign(conversionAnchor: "journey_start"),
+                    distinctId: "user-1"
+                )
+                let createdAt = journey.conversionAnchorAt
+                let shownAt = Date(timeIntervalSince1970: 1_700_000_300)
+
+                journey.markFlowShown(at: shownAt)
+
+                expect(journey.conversionAnchorAt).to(equal(createdAt))
+                expect(journey.updatedAt).to(equal(createdAt))
+            }
         }
     }
 }

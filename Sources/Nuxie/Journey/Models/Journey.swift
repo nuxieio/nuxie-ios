@@ -185,6 +185,12 @@ public class Journey: Codable {
         self.updatedAt = now
     }
 
+    public func markFlowShown(at date: Date) {
+        guard conversionAnchor == .lastFlowShown else { return }
+        conversionAnchorAt = date
+        updatedAt = date
+    }
+
     /// Update context value
     public func setContext(_ key: String, value: Any) {
         let dateProvider = Container.shared.dateProvider()
