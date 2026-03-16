@@ -1,0 +1,128 @@
+import Foundation
+import Quick
+import Nimble
+import FactoryKit
+@testable import Nuxie
+
+private final class NoOpFeatureService: FeatureServiceProtocol {
+    func getCached(featureId: String, entityId: String?) async -> FeatureAccess? { nil }
+    func getAllCached() async -> [String: FeatureAccess] { [:] }
+    func check(featureId: String, requiredBalance: Int?, entityId: String?) async throws -> FeatureCheckResult {
+        throw NuxieError.featureNotFound(featureId)
+    }
+    func checkWithCache(
+        featureId: String,
+        requiredBalance: Int?,
+        entityId: String?,
+        forceRefresh: Bool
+    ) async throws -> FeatureAccess {
+        .notFound
+    }
+    func clearCache() async {}
+    func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {}
+    func syncFeatureInfo() async {}
+    func updateFromPurchase(_ features: [PurchaseFeature]) async {}
+}
+
+final class GoalEvaluatorTests: AsyncSpec {
+    override class func spec() {
+        var eventService: MockEventService!
+        var dateProvider: MockDateProvider!
+
+        beforeEach {
+            let eventServiceInstance = MockEventService()
+            let dateProviderInstance = MockDateProvider(initialDate: Date(timeIntervalSince1970: 20))
+
+            eventService = eventServiceInstance
+            dateProvider = dateProviderInstance
+
+            Container.shared.eventService.register { eventServiceInstance }
+            Container.shared.segmentService.register { MockSegmentService() }
+            Container.shared.identityService.register { MockIdentityService() }
+            Container.shared.featureService.register { NoOpFeatureService() }
+            Container.shared.irRuntime.register { IRRuntime() }
+            Container.shared.dateProvider.register { dateProviderInstance }
+        }
+
+        describe("GoalEvaluator") {
+            it("uses event-time semantics for event-only attribute goals after the window ends") {
+                let anchor = Date(timeIntervalSince1970: 10)
+                let purchaseAt = Date(timeIntervalSince1970: 11)
+                let restoreAt = Date(timeIntervalSince1970: 11.5)
+                dateProvider.setCurrentDate(Date(timeIntervalSince1970: 20))
+
+                await eventService.route(
+                    TestEventBuilder(name: "$purchase_completed")
+                        .withDistinctId("user_1")
+                        .withTimestamp(purchaseAt)
+                        .withProperties(["journey_id": "journey_1"])
+                        .build()
+                )
+                await eventService.route(
+                    TestEventBuilder(name: "$restore_completed")
+                        .withDistinctId("user_1")
+                        .withTimestamp(restoreAt)
+                        .withProperties(["journey_id": "journey_1"])
+                        .build()
+                )
+
+                let goal = GoalConfig(
+                    kind: .attribute,
+                    attributeExpr: IREnvelope(
+                        ir_version: 1,
+                        engine_min: nil,
+                        compiled_at: nil,
+                        expr: .and([
+                            .eventsExists(
+                                name: "$purchase_completed",
+                                since: nil,
+                                until: nil,
+                                within: nil,
+                                where_: .pred(
+                                    op: "eq",
+                                    key: "journey_id",
+                                    value: .journeyId
+                                )
+                            ),
+                            .eventsExists(
+                                name: "$restore_completed",
+                                since: nil,
+                                until: nil,
+                                within: nil,
+                                where_: .pred(
+                                    op: "eq",
+                                    key: "journey_id",
+                                    value: .journeyId
+                                )
+                            ),
+                        ])
+                    ),
+                    window: 2
+                )
+
+                let campaign = Campaign(
+                    id: "camp_1",
+                    name: "Campaign",
+                    flowId: "flow_1",
+                    flowNumber: 1,
+                    flowName: nil,
+                    reentry: .everyTime,
+                    publishedAt: "2026-01-01T00:00:00Z",
+                    trigger: .event(EventTriggerConfig(eventName: "app_opened", condition: nil)),
+                    goal: goal,
+                    exitPolicy: nil,
+                    conversionAnchor: nil,
+                    campaignType: nil
+                )
+                let journey = Journey(id: "journey_1", campaign: campaign, distinctId: "user_1")
+                journey.conversionAnchorAt = anchor
+                journey.conversionWindow = 2
+
+                let result = await GoalEvaluator().isGoalMet(journey: journey, campaign: campaign)
+
+                expect(result.met).to(beTrue())
+                expect(result.at).to(equal(restoreAt))
+            }
+        }
+    }
+}
