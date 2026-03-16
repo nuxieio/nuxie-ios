@@ -587,7 +587,16 @@ public actor JourneyService: JourneyServiceProtocol {
     handleOutcome(outcome, journey: journey)
 
     if !runner.hasPendingWork() {
-      completeJourney(journey, reason: .completed)
+      let exitReason: JourneyExitReason
+      switch reason {
+      case .userDismissed:
+        exitReason = .dismissed
+      case .error:
+        exitReason = .error
+      case .purchaseCompleted, .timeout:
+        exitReason = .completed
+      }
+      completeJourney(journey, reason: exitReason)
     }
   }
 
