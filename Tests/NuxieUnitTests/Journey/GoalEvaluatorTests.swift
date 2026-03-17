@@ -124,6 +124,74 @@ final class GoalEvaluatorTests: AsyncSpec {
                 expect(result.at).to(equal(restoreAt))
             }
 
+            it("matches contains predicates in event-only attribute goals") {
+                let anchor = Date(timeIntervalSince1970: 10)
+                let purchaseAt = Date(timeIntervalSince1970: 11)
+                dateProvider.setCurrentDate(Date(timeIntervalSince1970: 20))
+
+                await eventService.route(
+                    TestEventBuilder(name: "$purchase_completed")
+                        .withDistinctId("user_1")
+                        .withTimestamp(purchaseAt)
+                        .withProperties([
+                            "journey_id": "journey_1",
+                            "product_name": "Annual Pro"
+                        ])
+                        .build()
+                )
+
+                let goal = GoalConfig(
+                    kind: .attribute,
+                    attributeExpr: IREnvelope(
+                        ir_version: 1,
+                        engine_min: nil,
+                        compiled_at: nil,
+                        expr: .eventsExists(
+                            name: "$purchase_completed",
+                            since: nil,
+                            until: nil,
+                            within: nil,
+                            where_: .predAnd([
+                                .pred(
+                                    op: "eq",
+                                    key: "journey_id",
+                                    value: .journeyId
+                                ),
+                                .pred(
+                                    op: "contains",
+                                    key: "product_name",
+                                    value: .string("annual")
+                                ),
+                            ])
+                        )
+                    ),
+                    window: 2
+                )
+
+                let campaign = Campaign(
+                    id: "camp_1",
+                    name: "Campaign",
+                    flowId: "flow_1",
+                    flowNumber: 1,
+                    flowName: nil,
+                    reentry: .everyTime,
+                    publishedAt: "2026-01-01T00:00:00Z",
+                    trigger: .event(EventTriggerConfig(eventName: "app_opened", condition: nil)),
+                    goal: goal,
+                    exitPolicy: nil,
+                    conversionAnchor: nil,
+                    campaignType: nil
+                )
+                let journey = Journey(id: "journey_1", campaign: campaign, distinctId: "user_1")
+                journey.conversionAnchorAt = anchor
+                journey.conversionWindow = 2
+
+                let result = await GoalEvaluator().isGoalMet(journey: journey, campaign: campaign)
+
+                expect(result.met).to(beTrue())
+                expect(result.at).to(equal(purchaseAt))
+            }
+
             it("does not load event history for non-event attribute goals") {
                 let now = Date(timeIntervalSince1970: 50)
                 dateProvider.setCurrentDate(now)
