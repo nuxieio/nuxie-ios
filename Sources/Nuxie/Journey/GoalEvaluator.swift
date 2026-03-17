@@ -13,6 +13,14 @@ public protocol GoalEvaluatorProtocol {
   func isGoalMet(journey: Journey, campaign: Campaign) async -> (met: Bool, at: Date?)
 }
 
+private final class EventHistoryCache {
+  var events: [StoredEvent]?
+
+  init(events: [StoredEvent]? = nil) {
+    self.events = events
+  }
+}
+
 // MARK: - Goal Evaluator Implementation
 
 /// Service for evaluating journey goals against user behavior
@@ -282,13 +290,15 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     _ expr: IRExpr,
     journey: Journey,
     anchor: Date,
-    allEvents: [StoredEvent]? = nil
+    eventCache: EventHistoryCache = EventHistoryCache()
   ) async -> (met: Bool, at: Date?)? {
-    let cachedEvents: [StoredEvent]
-    if let allEvents {
-      cachedEvents = allEvents
-    } else {
-      cachedEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+    func getCachedEvents() async -> [StoredEvent] {
+      if let cachedEvents = eventCache.events {
+        return cachedEvents
+      }
+      let loadedEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+      eventCache.events = loadedEvents
+      return loadedEvents
     }
 
     switch expr {
@@ -299,7 +309,7 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
           arg,
           journey: journey,
           anchor: anchor,
-          allEvents: cachedEvents
+          eventCache: eventCache
         ) else {
           return nil
         }
@@ -319,7 +329,7 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
           arg,
           journey: journey,
           anchor: anchor,
-          allEvents: cachedEvents
+          eventCache: eventCache
         ) else {
           return nil
         }
@@ -347,7 +357,7 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
         filter: filter,
         journey: journey,
         anchor: anchor,
-        allEvents: cachedEvents
+        allEvents: await getCachedEvents()
       )
       if let lastEventTime {
         return (true, lastEventTime)

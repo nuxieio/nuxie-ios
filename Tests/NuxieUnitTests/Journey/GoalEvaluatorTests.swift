@@ -123,6 +123,46 @@ final class GoalEvaluatorTests: AsyncSpec {
                 expect(result.met).to(beTrue())
                 expect(result.at).to(equal(restoreAt))
             }
+
+            it("does not load event history for non-event attribute goals") {
+                let now = Date(timeIntervalSince1970: 50)
+                dateProvider.setCurrentDate(now)
+
+                let goal = GoalConfig(
+                    kind: .attribute,
+                    attributeExpr: IREnvelope(
+                        ir_version: 1,
+                        engine_min: nil,
+                        compiled_at: nil,
+                        expr: .user(op: "eq", key: "plan", value: .string("pro"))
+                    ),
+                    window: 10
+                )
+
+                let campaign = Campaign(
+                    id: "camp_1",
+                    name: "Campaign",
+                    flowId: "flow_1",
+                    flowNumber: 1,
+                    flowName: nil,
+                    reentry: .everyTime,
+                    publishedAt: "2026-01-01T00:00:00Z",
+                    trigger: .event(EventTriggerConfig(eventName: "app_opened", condition: nil)),
+                    goal: goal,
+                    exitPolicy: nil,
+                    conversionAnchor: nil,
+                    campaignType: nil
+                )
+                let journey = Journey(id: "journey_1", campaign: campaign, distinctId: "user_1")
+                journey.conversionAnchorAt = now
+                journey.conversionWindow = 10
+
+                let result = await GoalEvaluator().isGoalMet(journey: journey, campaign: campaign)
+
+                expect(result.met).to(beTrue())
+                expect(result.at).to(equal(now))
+                expect(eventService.getEventsForUserCallCount).to(equal(0))
+            }
         }
     }
 }
