@@ -13,6 +13,14 @@ public protocol GoalEvaluatorProtocol {
   func isGoalMet(journey: Journey, campaign: Campaign) async -> (met: Bool, at: Date?)
 }
 
+private final class EventHistoryCache {
+  var events: [StoredEvent]?
+
+  init(events: [StoredEvent]? = nil) {
+    self.events = events
+  }
+}
+
 // MARK: - Goal Evaluator Implementation
 
 /// Service for evaluating journey goals against user behavior
@@ -86,78 +94,19 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
       return (true, convertedAt)
     }
 
-    // Calculate window boundaries
-    let windowEnd = journey.conversionWindow > 0
-      ? anchor.addingTimeInterval(journey.conversionWindow)
-      : nil
-
-    // If no event filter, use simple query for better performance
-    guard let eventFilter = goal.eventFilter else {
-      // No filter - just check for event existence
-      let lastEventTime = await eventService.getLastEventTime(
-        name: eventName,
-        distinctId: journey.distinctId,
-        since: anchor,
-        until: windowEnd
-      )
-
-      LogDebug("[GoalEvaluator] Last event time for '\(eventName)' within window: \(String(describing: lastEventTime))")
-      LogDebug("[GoalEvaluator] Window: anchor=\(anchor), end=\(String(describing: windowEnd))")
-
-      guard let lastTime = lastEventTime else {
-        LogDebug("[GoalEvaluator] No qualifying event found within window, returning false")
-        return (false, nil)
-      }
-
-      LogDebug("[GoalEvaluator] Goal met! Returning true with time \(lastTime)")
-      return (true, lastTime)
+    let lastEventTime = await findLastMatchingEventTime(
+      name: eventName,
+      filter: goal.eventFilter,
+      journey: journey,
+      anchor: anchor
+    )
+    guard let lastEventTime else {
+      LogDebug("[GoalEvaluator] No qualifying event found within window, returning false")
+      return (false, nil)
     }
 
-    // Event filter present - need to evaluate filter against each matching event
-    LogDebug("[GoalEvaluator] Evaluating event filter for '\(eventName)' events")
-
-    // Get all events for user and filter manually
-    let allEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
-
-    // Filter events by name and time window, sorted newest first
-    let matchingEvents = allEvents
-      .filter { $0.name == eventName }
-      .filter { event in
-        if event.timestamp < anchor { return false }
-        if let end = windowEnd, event.timestamp > end { return false }
-        return true
-      }
-      .sorted { $0.timestamp > $1.timestamp }
-
-    LogDebug("[GoalEvaluator] Found \(matchingEvents.count) events within window")
-
-    // Evaluate filter against each event (starting with most recent)
-    for storedEvent in matchingEvents {
-      // Convert stored event to NuxieEvent for IR evaluation
-      let nuxieEvent = NuxieEvent(
-        name: storedEvent.name,
-        distinctId: storedEvent.distinctId,
-        properties: storedEvent.getPropertiesDict(),
-        timestamp: storedEvent.timestamp
-      )
-
-      // Build IR config with event context and journey ID
-      let config = IRRuntime.Config(
-        event: nuxieEvent,
-        journeyId: journey.id
-      )
-
-      let filterMatches = await irRuntime.eval(eventFilter, config)
-
-      if filterMatches {
-        LogDebug("[GoalEvaluator] Event filter matched for event at \(storedEvent.timestamp)")
-        LogDebug("[GoalEvaluator] Goal met! Returning true with time \(storedEvent.timestamp)")
-        return (true, storedEvent.timestamp)
-      }
-    }
-
-    LogDebug("[GoalEvaluator] No events matched the filter, returning false")
-    return (false, nil)
+    LogDebug("[GoalEvaluator] Goal met! Returning true with time \(lastEventTime)")
+    return (true, lastEventTime)
   }
 
   private func evaluateSegmentEnterGoal(_ goal: GoalConfig, journey: Journey, anchor: Date) async
@@ -227,6 +176,17 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     LogDebug("[GoalEvaluator] Evaluating attribute goal for journey \(journey.id)")
     LogDebug("[GoalEvaluator] Journey anchor: \(anchor), window: \(journey.conversionWindow)")
 
+    if let eventOnlyResult = await evaluateEventOnlyAttributeExpr(
+      attributeExpr.expr,
+      journey: journey,
+      anchor: anchor
+    ) {
+      if eventOnlyResult.met {
+        LogDebug("[GoalEvaluator] Event-only attribute goal met at \(String(describing: eventOnlyResult.at))")
+      }
+      return eventOnlyResult
+    }
+
     // Check if we're within the conversion window for attribute goals
     let now = dateProvider.now()
     if journey.conversionWindow > 0 {
@@ -263,5 +223,149 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
 
     LogDebug("[GoalEvaluator] Attribute goal not met, returning false")
     return (false, nil)
+  }
+
+  private func windowEnd(for journey: Journey, anchor: Date) -> Date? {
+    journey.conversionWindow > 0 ? anchor.addingTimeInterval(journey.conversionWindow) : nil
+  }
+
+  private func findLastMatchingEventTime(
+    name: String,
+    filter: IREnvelope?,
+    journey: Journey,
+    anchor: Date,
+    allEvents: [StoredEvent]? = nil
+  ) async -> Date? {
+    let windowEnd = windowEnd(for: journey, anchor: anchor)
+
+    guard let filter else {
+      return await eventService.getLastEventTime(
+        name: name,
+        distinctId: journey.distinctId,
+        since: anchor,
+        until: windowEnd
+      )
+    }
+
+    let candidateEvents: [StoredEvent]
+    if let allEvents {
+      candidateEvents = allEvents
+    } else {
+      candidateEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+    }
+
+    let matchingEvents = candidateEvents
+      .filter { $0.name == name }
+      .filter { event in
+        if event.timestamp < anchor { return false }
+        if let end = windowEnd, event.timestamp > end { return false }
+        return true
+      }
+      .sorted { $0.timestamp > $1.timestamp }
+
+    for storedEvent in matchingEvents {
+      let nuxieEvent = NuxieEvent(
+        name: storedEvent.name,
+        distinctId: storedEvent.distinctId,
+        properties: storedEvent.getPropertiesDict(),
+        timestamp: storedEvent.timestamp
+      )
+
+      let config = IRRuntime.Config(
+        event: nuxieEvent,
+        journeyId: journey.id
+      )
+
+      let filterMatches = await irRuntime.eval(filter, config)
+
+      if filterMatches {
+        return storedEvent.timestamp
+      }
+    }
+
+    return nil
+  }
+
+  private func evaluateEventOnlyAttributeExpr(
+    _ expr: IRExpr,
+    journey: Journey,
+    anchor: Date,
+    eventCache: EventHistoryCache = EventHistoryCache()
+  ) async -> (met: Bool, at: Date?)? {
+    func getCachedEvents() async -> [StoredEvent] {
+      if let cachedEvents = eventCache.events {
+        return cachedEvents
+      }
+      let loadedEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+      eventCache.events = loadedEvents
+      return loadedEvents
+    }
+
+    switch expr {
+    case .and(let args):
+      var times: [Date] = []
+      for arg in args {
+        guard let result = await evaluateEventOnlyAttributeExpr(
+          arg,
+          journey: journey,
+          anchor: anchor,
+          eventCache: eventCache
+        ) else {
+          return nil
+        }
+        guard result.met else {
+          return (false, nil)
+        }
+        if let at = result.at {
+          times.append(at)
+        }
+      }
+      return (true, times.max())
+
+    case .or(let args):
+      var times: [Date] = []
+      for arg in args {
+        guard let result = await evaluateEventOnlyAttributeExpr(
+          arg,
+          journey: journey,
+          anchor: anchor,
+          eventCache: eventCache
+        ) else {
+          return nil
+        }
+        if let at = result.at, result.met {
+          times.append(at)
+        }
+      }
+      if let firstMetAt = times.min() {
+        return (true, firstMetAt)
+      }
+      return (false, nil)
+
+    case .eventsExists(let name, let since, let until, let within, let where_):
+      guard since == nil, until == nil, within == nil else {
+        return nil
+      }
+      let filter = IREnvelope(
+        ir_version: 1,
+        engine_min: nil,
+        compiled_at: nil,
+        expr: where_ ?? .bool(true)
+      )
+      let lastEventTime = await findLastMatchingEventTime(
+        name: name,
+        filter: filter,
+        journey: journey,
+        anchor: anchor,
+        allEvents: await getCachedEvents()
+      )
+      if let lastEventTime {
+        return (true, lastEventTime)
+      }
+      return (false, nil)
+
+    default:
+      return nil
+    }
   }
 }

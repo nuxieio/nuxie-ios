@@ -316,7 +316,7 @@ public final class IRInterpreter {
             let compareValue = try await evalValue(value)
             return Comparer.compare(.lte, eventValue, compareValue.toAny())
             
-        case "icontains":
+        case "icontains", "contains":
             guard let value = value else { return false }
             let compareValue = try await evalValue(value)
             let needle = Coercion.asString(compareValue.toAny()) ?? ""

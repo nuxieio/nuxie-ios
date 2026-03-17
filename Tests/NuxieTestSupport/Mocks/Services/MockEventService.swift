@@ -8,6 +8,7 @@ public class MockEventService: EventServiceProtocol {
     private var _routedEvents: [NuxieEvent] = []
     private var _trackedEvents: [(name: String, properties: [String: Any]?)] = []
     private var _eventHandlers: [(String, (NuxieEvent) -> Void)] = []
+    private var _getEventsForUserCallCount = 0
     
     public private(set) var routedEvents: [NuxieEvent] {
         get { lock.withLock { _routedEvents } }
@@ -20,6 +21,9 @@ public class MockEventService: EventServiceProtocol {
     public private(set) var eventHandlers: [(String, (NuxieEvent) -> Void)] {
         get { lock.withLock { _eventHandlers } }
         set { lock.withLock { _eventHandlers = newValue } }
+    }
+    public var getEventsForUserCallCount: Int {
+        lock.withLock { _getEventsForUserCallCount }
     }
     
     // Test helper: track last event times
@@ -97,7 +101,10 @@ public class MockEventService: EventServiceProtocol {
     }
     
     public func getEventsForUser(_ distinctId: String, limit: Int) async -> [StoredEvent] {
-        let events = lock.withLock { _routedEvents }
+        let events = lock.withLock {
+            _getEventsForUserCallCount += 1
+            return _routedEvents
+        }
         let userEvents = events.filter { $0.distinctId == distinctId }
         return userEvents.suffix(limit).compactMap { event in
             try? StoredEvent(
