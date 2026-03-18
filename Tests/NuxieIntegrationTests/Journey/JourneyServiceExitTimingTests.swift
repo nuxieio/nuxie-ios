@@ -15,16 +15,22 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
         let flowId = "flow-exit-timing"
         let campaignId = "camp-exit-timing"
 
-        func makeCampaign(goal: GoalConfig?, exitPolicy: ExitPolicy?) -> Campaign {
+        func makeCampaign(
+            id: String = campaignId,
+            flowId: String = flowId,
+            trigger: CampaignTrigger = .event(EventTriggerConfig(eventName: "paywall_trigger", condition: nil)),
+            goal: GoalConfig?,
+            exitPolicy: ExitPolicy?
+        ) -> Campaign {
             Campaign(
-                id: campaignId,
+                id: id,
                 name: "Exit Timing Campaign",
                 flowId: flowId,
                 flowNumber: 1,
                 flowName: nil,
                 reentry: .everyTime,
                 publishedAt: Date().ISO8601Format(),
-                trigger: .event(EventTriggerConfig(eventName: "paywall_trigger", condition: nil)),
+                trigger: trigger,
                 goal: goal,
                 exitPolicy: exitPolicy,
                 conversionAnchor: nil,
@@ -32,7 +38,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             )
         }
 
-        func makeFlow(interactions: [String: [Interaction]] = [:]) -> Flow {
+        func makeFlow(flowId: String = flowId, interactions: [String: [Interaction]] = [:]) -> Flow {
             let remoteFlow = RemoteFlow(
                 id: flowId,
                 bundle: FlowBundleRef(
@@ -60,12 +66,18 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
         }
 
         func primeProfile(campaign: Campaign, flow: Flow) async {
+            await primeProfile(campaigns: [campaign], flows: [flow])
+        }
+
+        func primeProfile(campaigns: [Campaign], flows: [Flow]) async {
             mocks.identityService.setDistinctId(distinctId)
-            mocks.flowService.mockFlows[flowId] = flow
+            for flow in flows {
+                mocks.flowService.mockFlows[flow.remoteFlow.id] = flow
+            }
             mocks.profileService.setProfileResponse(
                 ResponseBuilders.buildProfileResponse(
-                    campaigns: [campaign],
-                    flows: [flow.remoteFlow]
+                    campaigns: campaigns,
+                    flows: flows.map(\.remoteFlow)
                 )
             )
             _ = try? await mocks.profileService.fetchProfile(distinctId: distinctId)
@@ -178,6 +190,74 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     journeyStore.getCompletions(for: distinctId).last?.exitReason
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
                 expect(journeyStore.getCompletions(for: distinctId).last?.exitReason).toNot(equal(.dismissed))
+            }
+
+            it("starts matching campaigns from scoped notification outcomes") {
+                let notificationCampaign = makeCampaign(
+                    id: "camp-notifications",
+                    flowId: "flow-notifications",
+                    trigger: .event(EventTriggerConfig(eventName: SystemEventNames.notificationsEnabled, condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let notificationFlow = makeFlow(flowId: "flow-notifications")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, notificationCampaign],
+                    flows: [primaryFlow, notificationFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId).sorted()
+                }.toEventually(equal([campaignId, "camp-notifications"].sorted()), timeout: .seconds(2))
+            }
+
+            it("resumes wait_until work on scoped notification outcomes") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-notifications",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
             }
         }
     }

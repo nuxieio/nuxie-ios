@@ -10,7 +10,17 @@ public protocol GoalEvaluatorProtocol {
   ///   - journey: The journey to evaluate
   ///   - campaign: The campaign containing the flow
   /// - Returns: Tuple of (met: whether goal was met, at: when it was met)
-  func isGoalMet(journey: Journey, campaign: Campaign) async -> (met: Bool, at: Date?)
+  func isGoalMet(
+    journey: Journey,
+    campaign: Campaign,
+    transientEvents: [StoredEvent]
+  ) async -> (met: Bool, at: Date?)
+}
+
+public extension GoalEvaluatorProtocol {
+  func isGoalMet(journey: Journey, campaign: Campaign) async -> (met: Bool, at: Date?) {
+    await isGoalMet(journey: journey, campaign: campaign, transientEvents: [])
+  }
 }
 
 private final class EventHistoryCache {
@@ -37,16 +47,16 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
 
   // MARK: - Initialization
 
-  public init() {
-    LogDebug(
-      "GoalEvaluator deps: event=\(type(of: eventService)), id=\(type(of: identityService)), seg=\(type(of: segmentService))"
-    )
-  }
+  public init() {}
 
   // MARK: - Public Methods
 
   /// Check if a journey's goal has been met
-  public func isGoalMet(journey: Journey, campaign: Campaign) async -> (met: Bool, at: Date?) {
+  public func isGoalMet(
+    journey: Journey,
+    campaign: Campaign,
+    transientEvents: [StoredEvent]
+  ) async -> (met: Bool, at: Date?) {
     guard let goal = journey.goalSnapshot else {
       // No goal configured - never met
       return (false, nil)
@@ -57,7 +67,7 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     // Evaluate based on goal type
     switch goal.kind {
     case .event:
-      return await evaluateEventGoal(goal, journey: journey, anchor: anchor)
+      return await evaluateEventGoal(goal, journey: journey, anchor: anchor, transientEvents: transientEvents)
 
     case .segmentEnter:
       return await evaluateSegmentEnterGoal(goal, journey: journey, anchor: anchor)
@@ -66,13 +76,18 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
       return await evaluateSegmentLeaveGoal(goal, journey: journey, anchor: anchor)
 
     case .attribute:
-      return await evaluateAttributeGoal(goal, journey: journey, anchor: anchor)
+      return await evaluateAttributeGoal(goal, journey: journey, anchor: anchor, transientEvents: transientEvents)
     }
   }
 
   // MARK: - Private Methods
 
-  private func evaluateEventGoal(_ goal: GoalConfig, journey: Journey, anchor: Date) async -> (
+  private func evaluateEventGoal(
+    _ goal: GoalConfig,
+    journey: Journey,
+    anchor: Date,
+    transientEvents: [StoredEvent] = []
+  ) async -> (
     met: Bool, at: Date?
   ) {
     guard let eventName = goal.eventName else {
@@ -98,7 +113,8 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
       name: eventName,
       filter: goal.eventFilter,
       journey: journey,
-      anchor: anchor
+      anchor: anchor,
+      additionalEvents: transientEvents
     )
     guard let lastEventTime else {
       LogDebug("[GoalEvaluator] No qualifying event found within window, returning false")
@@ -165,7 +181,12 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     return (false, nil)
   }
 
-  private func evaluateAttributeGoal(_ goal: GoalConfig, journey: Journey, anchor: Date) async -> (
+  private func evaluateAttributeGoal(
+    _ goal: GoalConfig,
+    journey: Journey,
+    anchor: Date,
+    transientEvents: [StoredEvent] = []
+  ) async -> (
     met: Bool, at: Date?
   ) {
     guard let attributeExpr = goal.attributeExpr else {
@@ -179,7 +200,8 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     if let eventOnlyResult = await evaluateEventOnlyAttributeExpr(
       attributeExpr.expr,
       journey: journey,
-      anchor: anchor
+      anchor: anchor,
+      transientEvents: transientEvents
     ) {
       if eventOnlyResult.met {
         LogDebug("[GoalEvaluator] Event-only attribute goal met at \(String(describing: eventOnlyResult.at))")
@@ -234,24 +256,31 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     filter: IREnvelope?,
     journey: Journey,
     anchor: Date,
-    allEvents: [StoredEvent]? = nil
+    allEvents: [StoredEvent]? = nil,
+    additionalEvents: [StoredEvent] = []
   ) async -> Date? {
     let windowEnd = windowEnd(for: journey, anchor: anchor)
+    let baseEvents: [StoredEvent]
+    if let allEvents {
+      baseEvents = allEvents
+    } else {
+      baseEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+    }
+    let candidateEvents = mergeEvents(
+      primary: baseEvents,
+      secondary: additionalEvents
+    )
 
     guard let filter else {
-      return await eventService.getLastEventTime(
-        name: name,
-        distinctId: journey.distinctId,
-        since: anchor,
-        until: windowEnd
-      )
-    }
-
-    let candidateEvents: [StoredEvent]
-    if let allEvents {
-      candidateEvents = allEvents
-    } else {
-      candidateEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+      return candidateEvents
+        .filter { $0.name == name }
+        .filter { event in
+          if event.timestamp < anchor { return false }
+          if let end = windowEnd, event.timestamp > end { return false }
+          return true
+        }
+        .map(\.timestamp)
+        .max()
     }
 
     let matchingEvents = candidateEvents
@@ -290,13 +319,17 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     _ expr: IRExpr,
     journey: Journey,
     anchor: Date,
-    eventCache: EventHistoryCache = EventHistoryCache()
+    eventCache: EventHistoryCache = EventHistoryCache(),
+    transientEvents: [StoredEvent] = []
   ) async -> (met: Bool, at: Date?)? {
     func getCachedEvents() async -> [StoredEvent] {
       if let cachedEvents = eventCache.events {
         return cachedEvents
       }
-      let loadedEvents = await eventService.getEventsForUser(journey.distinctId, limit: 1000)
+      let loadedEvents = mergeEvents(
+        primary: await eventService.getEventsForUser(journey.distinctId, limit: 1000),
+        secondary: transientEvents
+      )
       eventCache.events = loadedEvents
       return loadedEvents
     }
@@ -309,7 +342,8 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
           arg,
           journey: journey,
           anchor: anchor,
-          eventCache: eventCache
+          eventCache: eventCache,
+          transientEvents: transientEvents
         ) else {
           return nil
         }
@@ -329,7 +363,8 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
           arg,
           journey: journey,
           anchor: anchor,
-          eventCache: eventCache
+          eventCache: eventCache,
+          transientEvents: transientEvents
         ) else {
           return nil
         }
@@ -367,5 +402,17 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     default:
       return nil
     }
+  }
+
+  private func mergeEvents(primary: [StoredEvent], secondary: [StoredEvent]) -> [StoredEvent] {
+    guard !secondary.isEmpty else { return primary }
+    var seen = Set<String>()
+    var merged: [StoredEvent] = []
+    for event in primary + secondary {
+      if seen.insert(event.id).inserted {
+        merged.append(event)
+      }
+    }
+    return merged
   }
 }

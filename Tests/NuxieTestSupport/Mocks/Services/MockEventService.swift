@@ -43,7 +43,7 @@ public class MockEventService: EventServiceProtocol {
         
         // Create a simple NuxieEvent for mock purposes (without enrichment)
         let nuxieEvent = TestEventBuilder(name: event)
-            .withDistinctId("test-distinct-id")
+            .withDistinctId(Container.shared.identityService().getDistinctId())
             .withProperties(properties ?? [:])
             .build()
         
@@ -334,7 +334,8 @@ public class MockEventService: EventServiceProtocol {
         _ event: String,
         properties: [String: Any]?,
         userProperties: [String: Any]?,
-        userPropertiesSetOnce: [String: Any]?
+        userPropertiesSetOnce: [String: Any]?,
+        persistToHistory: Bool
     ) async throws -> (NuxieEvent, EventResponse) {
         lock.withLock {
             _trackForTriggerCalls.append((event: event, properties: properties))
@@ -352,7 +353,9 @@ public class MockEventService: EventServiceProtocol {
             .withProperties(properties ?? [:])
             .build()
 
-        await route(nuxieEvent)
+        if persistToHistory {
+            await route(nuxieEvent)
+        }
 
         let response = result ?? EventResponse(
             status: "ok",

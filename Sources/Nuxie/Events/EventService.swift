@@ -86,7 +86,8 @@ public protocol EventServiceProtocol {
     _ event: String,
     properties: [String: Any]?,
     userProperties: [String: Any]?,
-    userPropertiesSetOnce: [String: Any]?
+    userPropertiesSetOnce: [String: Any]?,
+    persistToHistory: Bool
   ) async throws -> (NuxieEvent, EventResponse)
 
   /// Track an event synchronously and wait for server response
@@ -218,6 +219,23 @@ public protocol EventServiceProtocol {
   func restarted(
     name: String, inactiveFor: TimeInterval, within: TimeInterval, where predicate: IRPredicate?
   ) async -> Bool
+}
+
+public extension EventServiceProtocol {
+  func trackForTrigger(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    userProperties: [String: Any]? = nil,
+    userPropertiesSetOnce: [String: Any]? = nil
+  ) async throws -> (NuxieEvent, EventResponse) {
+    try await trackForTrigger(
+      event,
+      properties: properties,
+      userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce,
+      persistToHistory: true
+    )
+  }
 }
 
 /// Dual-purpose event service that handles local storage and network queuing
@@ -428,7 +446,8 @@ public class EventService: EventServiceProtocol {
     _ event: String,
     properties: [String: Any]? = nil,
     userProperties: [String: Any]? = nil,
-    userPropertiesSetOnce: [String: Any]? = nil
+    userPropertiesSetOnce: [String: Any]? = nil,
+    persistToHistory: Bool = true
   ) async throws -> (NuxieEvent, EventResponse) {
     guard !event.isEmpty else {
       throw NuxieError.invalidConfiguration("Event name cannot be empty")
@@ -453,14 +472,16 @@ public class EventService: EventServiceProtocol {
 
     finalProperties = await enrich(finalProperties)
 
-    do {
-      try await eventStore.storeEvent(
-        name: event,
-        properties: finalProperties,
-        distinctId: distinctId
-      )
-    } catch {
-      LogWarning("Failed to store event locally: \(error)")
+    if persistToHistory {
+      do {
+        try await eventStore.storeEvent(
+          name: event,
+          properties: finalProperties,
+          distinctId: distinctId
+        )
+      } catch {
+        LogWarning("Failed to store event locally: \(error)")
+      }
     }
 
     let response = try await apiClient.trackEvent(
