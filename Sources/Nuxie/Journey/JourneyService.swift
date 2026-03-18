@@ -304,7 +304,8 @@ public actor JourneyService: JourneyServiceProtocol {
     await processActiveJourneys(
       for: event,
       campaigns: campaigns,
-      transientEventsByJourneyId: [:]
+      transientEventsByJourneyId: [:],
+      restrictedToJourneyIds: nil
     )
     return results
   }
@@ -601,8 +602,8 @@ public actor JourneyService: JourneyServiceProtocol {
     )
 
     let cachedCampaigns = await getAllCampaigns(for: journey.distinctId)
+    let transientEvent = makeStoredEvent(from: localScopedEvent)
     if let cachedCampaigns {
-      let transientEvent = makeStoredEvent(from: localScopedEvent)
       let activeJourneyIds = await getActiveJourneys(for: localScopedEvent.distinctId).map(\.id)
       let transientEventsByJourneyId = Dictionary(
         uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
@@ -610,7 +611,8 @@ public actor JourneyService: JourneyServiceProtocol {
       await processActiveJourneys(
         for: localScopedEvent,
         campaigns: cachedCampaigns,
-        transientEventsByJourneyId: transientEventsByJourneyId
+        transientEventsByJourneyId: transientEventsByJourneyId,
+        restrictedToJourneyIds: nil
       )
     }
 
@@ -650,7 +652,22 @@ public actor JourneyService: JourneyServiceProtocol {
       await getAllCampaigns(for: scopedEvent.distinctId)
     }
     if let campaigns {
-      _ = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let startedJourneyIds = Set(results.compactMap { result -> String? in
+        guard case .started(let startedJourney) = result else { return nil }
+        return startedJourney.id
+      })
+      if !startedJourneyIds.isEmpty {
+        let transientEventsByJourneyId = Dictionary(
+          uniqueKeysWithValues: startedJourneyIds.map { ($0, [transientEvent]) }
+        )
+        await processActiveJourneys(
+          for: scopedEvent,
+          campaigns: campaigns,
+          transientEventsByJourneyId: transientEventsByJourneyId,
+          restrictedToJourneyIds: startedJourneyIds
+        )
+      }
     }
     await handleScopedGatePlan(response?.gatePlan())
   }
@@ -909,12 +926,16 @@ public actor JourneyService: JourneyServiceProtocol {
   private func processActiveJourneys(
     for event: NuxieEvent,
     campaigns: [Campaign],
-    transientEventsByJourneyId: [String: [StoredEvent]]
+    transientEventsByJourneyId: [String: [StoredEvent]],
+    restrictedToJourneyIds: Set<String>? = nil
   ) async {
     let journeys = await getActiveJourneys(for: event.distinctId)
     let eventJourneyId = event.properties["journey_id"] as? String
 
     for journey in journeys {
+      if let restrictedToJourneyIds, !restrictedToJourneyIds.contains(journey.id) {
+        continue
+      }
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
 
       if eventJourneyId == journey.id, let runner = flowRunners[journey.id] {

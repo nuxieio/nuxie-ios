@@ -335,6 +335,47 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal([campaignId, "camp-notifications"].sorted()), timeout: .seconds(2))
             }
 
+            it("replays scoped notification outcomes into newly started journeys") {
+                let notificationCampaign = makeCampaign(
+                    id: "camp-notifications-replay",
+                    flowId: "flow-notifications-replay",
+                    trigger: .event(EventTriggerConfig(eventName: SystemEventNames.notificationsEnabled, condition: nil)),
+                    goal: GoalConfig(
+                        kind: .event,
+                        eventName: SystemEventNames.notificationsEnabled,
+                        eventFilter: nil,
+                        window: 60
+                    ),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let notificationFlow = makeFlow(flowId: "flow-notifications-replay")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, notificationCampaign],
+                    flows: [primaryFlow, notificationFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-notifications-replay"
+                    }?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on scoped notification outcomes") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
