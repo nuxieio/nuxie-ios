@@ -464,9 +464,9 @@ private extension FlowViewController {
 
     func isNotificationAuthorizationGranted(_ status: UNAuthorizationStatus) -> Bool {
         switch status {
-        case .authorized, .provisional:
+        case .authorized:
             return true
-        case .notDetermined, .denied:
+        case .provisional, .notDetermined, .denied:
             return false
         @unknown default:
             if #available(iOS 14.0, macOS 11.0, *) {

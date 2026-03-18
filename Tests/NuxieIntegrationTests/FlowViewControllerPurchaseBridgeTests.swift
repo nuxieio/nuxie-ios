@@ -230,6 +230,24 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedOptions).to(equal([.alert, .badge, .sound]))
             }
 
+            it("requests notification authorization again when status is provisional") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .provisional
+                authHandler.requestResult = .success(true)
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.notificationAuthorizationHandler = authHandler
+                _ = vc.view
+
+                vc.performRequestNotifications()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.notificationsEnabled]))
+                expect(authHandler.requestedOptions).to(equal([.alert, .badge, .sound]))
+            }
+
             it("presents in-app Safari for open_link target") {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 let window = UIWindow(frame: UIScreen.main.bounds)
