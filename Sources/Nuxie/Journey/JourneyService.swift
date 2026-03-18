@@ -622,7 +622,6 @@ public actor JourneyService: JourneyServiceProtocol {
     }
 
     _ = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
-    await handleScopedGatePlan(response?.gatePlan())
     let transientEvent = makeStoredEvent(from: scopedEvent)
     let activeJourneyIds = await getActiveJourneys(for: scopedEvent.distinctId).map(\.id)
     let transientEventsByJourneyId = Dictionary(
@@ -633,6 +632,7 @@ public actor JourneyService: JourneyServiceProtocol {
       campaigns: campaigns,
       transientEventsByJourneyId: transientEventsByJourneyId
     )
+    await handleScopedGatePlan(response?.gatePlan())
   }
 
   // MARK: - Helpers
@@ -947,6 +947,7 @@ public actor JourneyService: JourneyServiceProtocol {
         if hasAccess(cached, requiredBalance: plan.requiredBalance) {
           return
         }
+        return
       } else {
         if let cached = await currentFeatureAccess(featureId: featureId),
            hasAccess(cached, requiredBalance: plan.requiredBalance) {

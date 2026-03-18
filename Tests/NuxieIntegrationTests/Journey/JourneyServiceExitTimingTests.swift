@@ -4,6 +4,81 @@ import Nimble
 import FactoryKit
 @testable import Nuxie
 
+private final class OrderingRecorder {
+    private let lock = NSLock()
+    private var _events: [String] = []
+
+    func append(_ event: String) {
+        lock.withLock {
+            _events.append(event)
+        }
+    }
+
+    func clear() {
+        lock.withLock {
+            _events.removeAll()
+        }
+    }
+
+    var events: [String] {
+        lock.withLock { _events }
+    }
+}
+
+private final class OrderingJourneyStore: MockJourneyStore {
+    private let recorder: OrderingRecorder
+
+    init(recorder: OrderingRecorder) {
+        self.recorder = recorder
+        super.init()
+    }
+
+    override func recordCompletion(_ record: JourneyCompletionRecord) throws {
+        try super.recordCompletion(record)
+        recorder.append("complete:\(record.campaignId)")
+    }
+}
+
+private final class OrderingFlowPresentationService: MockFlowPresentationService {
+    private let recorder: OrderingRecorder
+
+    init(recorder: OrderingRecorder) {
+        self.recorder = recorder
+        super.init()
+    }
+
+    @discardableResult
+    @MainActor
+    override func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?
+    ) async throws -> FlowViewController {
+        recorder.append("present:\(flowId)")
+        return try await super.presentFlow(
+            flowId,
+            from: journey,
+            runtimeDelegate: runtimeDelegate
+        )
+    }
+
+    @discardableResult
+    @MainActor
+    override func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?,
+        colorSchemeMode: FlowColorSchemeMode
+    ) async throws -> FlowViewController {
+        return try await super.presentFlow(
+            flowId,
+            from: journey,
+            runtimeDelegate: runtimeDelegate,
+            colorSchemeMode: colorSchemeMode
+        )
+    }
+}
+
 final class JourneyServiceExitTimingTests: AsyncSpec {
     override class func spec() {
         var mocks: MockFactory!
@@ -14,6 +89,40 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
         let distinctId = "user_1"
         let flowId = "flow-exit-timing"
         let campaignId = "camp-exit-timing"
+
+        func makeGatePlanResponse(
+            decision: String,
+            flowId: String? = nil,
+            featureId: String? = nil,
+            policy: String? = nil,
+            requiredBalance: Int? = nil
+        ) -> EventResponse {
+            var gatePayload: [String: Any] = ["decision": decision]
+            if let flowId {
+                gatePayload["flowId"] = flowId
+            }
+            if let featureId {
+                gatePayload["featureId"] = featureId
+            }
+            if let policy {
+                gatePayload["policy"] = policy
+            }
+            if let requiredBalance {
+                gatePayload["requiredBalance"] = requiredBalance
+            }
+
+            return EventResponse(
+                status: "ok",
+                payload: ["gate": AnyCodable(gatePayload)],
+                customer: nil,
+                event: nil,
+                message: nil,
+                featuresMatched: nil,
+                usage: nil,
+                journey: nil,
+                execution: nil
+            )
+        }
 
         func makeCampaign(
             id: String = campaignId,
@@ -313,6 +422,89 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         $0.campaignId == "camp-secondary"
                     })?.convertedAt
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
+            it("processes active journeys before presenting scoped gate flows") {
+                let ordering = OrderingRecorder()
+                let orderingStore = OrderingJourneyStore(recorder: ordering)
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: ordering)
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: orderingStore)
+                journeyStore = orderingStore
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-notifications",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "show_flow",
+                    flowId: "gate-flow"
+                )
+
+                ordering.clear()
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    ordering.events
+                }.toEventually(equal(["complete:\(campaignId)", "present:gate-flow"]), timeout: .seconds(2))
+            }
+
+            it("does not present scoped require_feature cache-only flows on deny") {
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: OrderingRecorder())
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                let baselinePresentations = orderingPresentationService.presentFlowCallCount
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "require_feature",
+                    flowId: "gate-flow",
+                    featureId: "premium",
+                    policy: "cache_only"
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    orderingPresentationService.presentFlowCallCount
+                }.toEventually(equal(baselinePresentations), timeout: .seconds(2))
+                expect(orderingPresentationService.wasFlowPresented("gate-flow")).to(beFalse())
             }
         }
     }
