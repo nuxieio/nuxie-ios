@@ -324,6 +324,10 @@ public actor JourneyService: JourneyServiceProtocol {
     let journeys = await getActiveJourneys(for: event.distinctId)
     for journey in journeys {
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
+      let eventJourneyId = event.properties["journey_id"] as? String
+      if eventJourneyId == journey.id, let runner = flowRunners[journey.id] {
+        runner.handleNotificationPermissionEvent(event.name)
+      }
 
       await evaluateGoalIfNeeded(journey, campaign: campaign)
       if !(await shouldDeferExitDecision()) {
@@ -498,7 +502,8 @@ public actor JourneyService: JourneyServiceProtocol {
       await handleRestore(controller: controller)
 
     case "action/request_notifications":
-      await MainActor.run {
+      runner.beginNotificationPermissionRequest()
+      _ = await MainActor.run {
         controller.performRequestNotifications(journeyId: journey.id)
       }
 
@@ -616,6 +621,53 @@ public actor JourneyService: JourneyServiceProtocol {
       }
       completeJourney(journey, reason: exitReason)
     }
+  }
+
+  fileprivate func handleScopedNotificationPermissionEvent(
+    journeyId: String,
+    eventName: String,
+    properties: [String: Any]
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) else {
+      return
+    }
+
+    let event: NuxieEvent
+    do {
+      event = try await eventService.trackForTrigger(
+        eventName,
+        properties: properties,
+        userProperties: nil,
+        userPropertiesSetOnce: nil
+      ).0
+    } catch {
+      LogWarning("JourneyService: Failed to track scoped notification event: \(error)")
+      event = NuxieEvent(
+        name: eventName,
+        distinctId: journey.distinctId,
+        properties: properties
+      )
+    }
+
+    if let runner = flowRunners[journey.id] {
+      runner.handleNotificationPermissionEvent(event.name)
+    }
+
+    await evaluateGoalIfNeeded(journey, campaign: campaign)
+    if !(await shouldDeferExitDecision()) {
+      if let reason = await exitDecision(journey, campaign) {
+        completeJourney(journey, reason: reason)
+        return
+      }
+    }
+
+    if let runner = flowRunners[journey.id] {
+      let outcome = await runner.dispatchEventTrigger(event)
+      handleOutcome(outcome, journey: journey)
+    }
+
+    persistJourney(journey)
   }
 
   // MARK: - Helpers
@@ -1091,7 +1143,7 @@ public actor JourneyService: JourneyServiceProtocol {
     let transactionService = Container.shared.transactionService()
     let productService = Container.shared.productService()
 
-    await MainActor.run {
+    _ = await MainActor.run {
       Task { @MainActor in
         do {
           let products = try await productService.fetchProducts(for: [productId])
@@ -1119,7 +1171,7 @@ public actor JourneyService: JourneyServiceProtocol {
   private func handleRestore(controller: FlowViewController) async {
     let transactionService = Container.shared.transactionService()
 
-    await MainActor.run {
+    _ = await MainActor.run {
       Task { @MainActor in
         do {
           try await transactionService.restore()
@@ -1132,7 +1184,7 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 }
 
-private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate {
+private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate, NotificationPermissionEventReceiver {
   private weak var journeyService: JourneyService?
   private let journeyId: String
 
@@ -1171,6 +1223,21 @@ private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate {
         journeyId: journeyId,
         reason: reason,
         controller: controller
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didResolveNotificationPermissionEvent eventName: String,
+    properties: [String : Any],
+    journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleScopedNotificationPermissionEvent(
+        journeyId: journeyId,
+        eventName: eventName,
+        properties: properties
       )
     }
   }

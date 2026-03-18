@@ -608,6 +608,11 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(controller.requestNotificationJourneyIds).to(equal([journey.id]))
                 expect(controller.openLinkRequests.map(\.urlString)).to(equal(["https://example.com"]))
                 expect(controller.dismissRequests).to(equal([.userDismissed]))
+                expect(runner.hasPendingWork()).to(beTrue())
+
+                runner.handleNotificationPermissionEvent(SystemEventNames.notificationsEnabled)
+
+                expect(runner.hasPendingWork()).to(beFalse())
             }
 
             it("resumes delayed entry action and continues sequence") {

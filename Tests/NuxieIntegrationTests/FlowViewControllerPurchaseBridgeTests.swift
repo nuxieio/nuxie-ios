@@ -248,6 +248,49 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedOptions).to(equal([.alert, .badge, .sound]))
             }
 
+            it("posts notification outcomes back to standalone flows over the bridge") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .authorized
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.notificationAuthorizationHandler = authHandler
+                _ = vc.view
+                injectBootstrap(vc.flowWebView)
+
+                vc.flowWebView.evaluateJavaScript(
+                    "window.webkit.messageHandlers.bridge.postMessage({ type: 'action/request_notifications', payload: {} })"
+                ) { _, _ in }
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() }
+                }
+
+                let msgs = getMessages(vc.flowWebView)
+                let match = msgs.first { ($0["type"] as? String) == "action/event" }
+                expect(match).toNot(beNil())
+                let payload = match?["payload"] as? [String: Any]
+                expect(payload?["name"] as? String).to(equal(SystemEventNames.notificationsEnabled))
+            }
+
+            it("routes journey-scoped notification outcomes through the runtime delegate") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .authorized
+                let delegate = NotificationPermissionEventReceiverSpy()
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.notificationAuthorizationHandler = authHandler
+                vc.runtimeDelegate = delegate
+                _ = vc.view
+
+                vc.performRequestNotifications(journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(delegate.events.map(\.name)).to(equal([SystemEventNames.notificationsEnabled]))
+                expect(delegate.events.first?.journeyId).to(equal("journey-1"))
+                expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+            }
+
             it("presents in-app Safari for open_link target") {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 let window = UIWindow(frame: UIScreen.main.bounds)
@@ -301,5 +344,33 @@ private final class NotificationSpyFlowViewController: FlowViewController {
 
     override func emitSystemEvent(_ name: String, properties: [String: Any]) {
         emittedEvents.append(EmittedEvent(name: name, properties: properties))
+    }
+}
+
+private final class NotificationPermissionEventReceiverSpy: FlowRuntimeDelegate, NotificationPermissionEventReceiver {
+    struct Event {
+        let name: String
+        let properties: [String: Any]
+        let journeyId: String
+    }
+
+    private(set) var events: [Event] = []
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didReceiveRuntimeMessage type: String,
+        payload: [String : Any],
+        id: String?
+    ) {}
+
+    func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {}
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didResolveNotificationPermissionEvent eventName: String,
+        properties: [String : Any],
+        journeyId: String
+    ) {
+        events.append(Event(name: eventName, properties: properties, journeyId: journeyId))
     }
 }

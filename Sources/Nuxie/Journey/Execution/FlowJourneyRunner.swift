@@ -60,6 +60,7 @@ final class FlowJourneyRunner {
     private var activeIndex: Int = 0
     private var isProcessing = false
     private var isPaused = false
+    private var pendingNotificationPermissionRequests = 0
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private var didWarnConverters = false
@@ -321,10 +322,27 @@ final class FlowJourneyRunner {
     }
 
     func hasPendingWork() -> Bool {
+        if pendingNotificationPermissionRequests > 0 { return true }
         if journey.flowState.pendingAction != nil { return true }
         if activeRequest != nil { return true }
         if !actionQueue.isEmpty { return true }
         return false
+    }
+
+    func beginNotificationPermissionRequest() {
+        pendingNotificationPermissionRequests += 1
+    }
+
+    func handleNotificationPermissionEvent(_ eventName: String) {
+        guard eventName == SystemEventNames.notificationsEnabled
+            || eventName == SystemEventNames.notificationsDenied
+        else {
+            return
+        }
+
+        if pendingNotificationPermissionRequests > 0 {
+            pendingNotificationPermissionRequests -= 1
+        }
     }
 
     private func makeSystemEvent(name: String, properties: [String: Any]) -> NuxieEvent {
@@ -959,6 +977,7 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         guard let controller = viewController else { return .continue }
         let journeyId = journey.id
+        beginNotificationPermissionRequest()
         await MainActor.run {
             controller.performRequestNotifications(journeyId: journeyId)
         }
