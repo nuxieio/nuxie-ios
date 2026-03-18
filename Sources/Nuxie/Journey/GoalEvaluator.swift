@@ -223,7 +223,11 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
 
     // Use centralized IR runtime for evaluation with adapters
     let userAdapter = IRUserPropsAdapter(identityService: identityService)
-    let eventsAdapter = IREventQueriesAdapter(eventService: eventService)
+    let eventsAdapter = IREventQueriesAdapter(
+      eventService: eventService,
+      distinctId: journey.distinctId,
+      additionalEvents: transientEvents
+    )
     let segmentsAdapter = IRSegmentQueriesAdapter(segmentService: segmentService)
     let featuresAdapter = IRFeatureQueriesAdapter(featureService: featureService)
 
@@ -231,7 +235,8 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
       user: userAdapter,
       events: eventsAdapter,
       segments: segmentsAdapter,
-      features: featuresAdapter
+      features: featuresAdapter,
+      journeyId: journey.id
     )
 
     LogDebug("[GoalEvaluator] Evaluating IR expression: \(attributeExpr)")

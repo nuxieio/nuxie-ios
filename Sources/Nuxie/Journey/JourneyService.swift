@@ -587,6 +587,27 @@ public actor JourneyService: JourneyServiceProtocol {
       return
     }
 
+    let localScopedEvent = NuxieEvent(
+      name: eventName,
+      distinctId: journey.distinctId,
+      properties: properties,
+      timestamp: dateProvider.now()
+    )
+
+    let cachedCampaigns = await getAllCampaigns(for: journey.distinctId)
+    if let cachedCampaigns {
+      let transientEvent = makeStoredEvent(from: localScopedEvent)
+      let activeJourneyIds = await getActiveJourneys(for: localScopedEvent.distinctId).map(\.id)
+      let transientEventsByJourneyId = Dictionary(
+        uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
+      )
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: cachedCampaigns,
+        transientEventsByJourneyId: transientEventsByJourneyId
+      )
+    }
+
     let trackedEvent: NuxieEvent
     let response: EventResponse?
     do {
@@ -617,21 +638,14 @@ public actor JourneyService: JourneyServiceProtocol {
       timestamp: trackedEvent.timestamp
     )
 
-    guard let campaigns = await getAllCampaigns(for: scopedEvent.distinctId) else {
-      return
+    let campaigns = if let cachedCampaigns {
+      cachedCampaigns
+    } else {
+      await getAllCampaigns(for: scopedEvent.distinctId)
     }
-
-    _ = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
-    let transientEvent = makeStoredEvent(from: scopedEvent)
-    let activeJourneyIds = await getActiveJourneys(for: scopedEvent.distinctId).map(\.id)
-    let transientEventsByJourneyId = Dictionary(
-      uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
-    )
-    await processActiveJourneys(
-      for: scopedEvent,
-      campaigns: campaigns,
-      transientEventsByJourneyId: transientEventsByJourneyId
-    )
+    if let campaigns {
+      _ = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+    }
     await handleScopedGatePlan(response?.gatePlan())
   }
 

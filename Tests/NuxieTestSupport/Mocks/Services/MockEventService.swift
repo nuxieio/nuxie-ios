@@ -270,6 +270,7 @@ public class MockEventService: EventServiceProtocol {
             _trackForTriggerCalls.removeAll()
             _trackWithResponseResult = nil
             _trackWithResponseError = nil
+            _trackForTriggerDelayNanoseconds = 0
         }
     }
     
@@ -309,6 +310,7 @@ public class MockEventService: EventServiceProtocol {
     private var _trackWithResponseError: Error?
     private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
     private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?)] = []
+    private var _trackForTriggerDelayNanoseconds: UInt64 = 0
     
     public var trackWithResponseResult: EventResponse? {
         get { lock.withLock { _trackWithResponseResult } }
@@ -330,6 +332,11 @@ public class MockEventService: EventServiceProtocol {
         set { lock.withLock { _trackForTriggerCalls = newValue } }
     }
 
+    public var trackForTriggerDelayNanoseconds: UInt64 {
+        get { lock.withLock { _trackForTriggerDelayNanoseconds } }
+        set { lock.withLock { _trackForTriggerDelayNanoseconds = newValue } }
+    }
+
     public func trackForTrigger(
         _ event: String,
         properties: [String: Any]?,
@@ -339,6 +346,11 @@ public class MockEventService: EventServiceProtocol {
     ) async throws -> (NuxieEvent, EventResponse) {
         lock.withLock {
             _trackForTriggerCalls.append((event: event, properties: properties))
+        }
+
+        let delayNanoseconds = lock.withLock { _trackForTriggerDelayNanoseconds }
+        if delayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
         }
 
         let (result, error): (EventResponse?, Error?) = lock.withLock {

@@ -369,6 +369,43 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.completed), timeout: .seconds(2))
             }
 
+            it("resumes wait_until work before scoped notification tracking returns") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-notifications",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+                mocks.eventService.trackForTriggerDelayNanoseconds = 750_000_000
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .milliseconds(250))
+
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+
             it("feeds scoped notification outcomes into all active journeys for goal evaluation") {
                 let notificationGoal = GoalConfig(
                     kind: .event,
@@ -420,6 +457,63 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     (await service.getActiveJourneys(for: distinctId).first {
                         $0.campaignId == "camp-secondary"
+                    })?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
+            it("feeds scoped notification outcomes into mixed attribute goals") {
+                let notificationGoal = GoalConfig(
+                    kind: .attribute,
+                    attributeExpr: IREnvelope(
+                        ir_version: 1,
+                        engine_min: nil,
+                        compiled_at: nil,
+                        expr: .and([
+                            .eventsExists(
+                                name: SystemEventNames.notificationsEnabled,
+                                since: nil,
+                                until: nil,
+                                within: nil,
+                                where_: .pred(
+                                    op: "eq",
+                                    key: "journey_id",
+                                    value: .journeyId
+                                )
+                            ),
+                            .user(op: "eq", key: "plan", value: .string("pro"))
+                        ])
+                    ),
+                    window: 60
+                )
+                let campaign = makeCampaign(
+                    id: "camp-mixed",
+                    flowId: "flow-mixed",
+                    goal: notificationGoal,
+                    exitPolicy: nil
+                )
+
+                await primeProfile(
+                    campaigns: [campaign],
+                    flows: [makeFlow(flowId: "flow-mixed")]
+                )
+                await service.initialize()
+                mocks.identityService.setUserProperty("plan", value: "pro")
+
+                let journey = await startJourney()
+                expect(journey.convertedAt).to(beNil())
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    (await service.getActiveJourneys(for: distinctId).first {
+                        $0.id == journey.id
                     })?.convertedAt
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
             }
