@@ -80,7 +80,20 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     var notificationAuthorizationHandler: NotificationAuthorizationHandling = UserNotificationAuthorizationHandler()
 
     /// Delegate for runtime bridge messages
-    weak var runtimeDelegate: FlowRuntimeDelegate?
+    weak var runtimeDelegate: FlowRuntimeDelegate? {
+        didSet {
+            if let receiver = runtimeDelegate as? NotificationPermissionEventReceiver {
+                notificationPermissionEventReceiver = receiver
+            }
+        }
+    }
+
+    /// Dedicated receiver for native notification permission results.
+    ///
+    /// This is retained separately from `runtimeDelegate` because permission
+    /// responses can arrive after the journey delegate has been removed from the
+    /// active journey maps during identity changes or cancellation.
+    var notificationPermissionEventReceiver: NotificationPermissionEventReceiver?
 
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
@@ -478,9 +491,7 @@ private extension FlowViewController {
         switch status {
         case .authorized:
             return true
-        case .ephemeral:
-            return true
-        case .provisional, .notDetermined, .denied:
+        case .ephemeral, .provisional, .notDetermined, .denied:
             return false
         @unknown default:
             return false
@@ -500,7 +511,7 @@ private extension FlowViewController {
         journeyId: String?
     ) {
         if let journeyId, !journeyId.isEmpty,
-           let receiver = runtimeDelegate as? NotificationPermissionEventReceiver {
+           let receiver = notificationPermissionEventReceiver {
             receiver.flowViewController(
                 self,
                 didResolveNotificationPermissionEvent: eventName,

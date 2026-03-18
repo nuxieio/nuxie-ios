@@ -248,6 +248,24 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedOptions).to(equal([.alert, .badge, .sound]))
             }
 
+            it("requests notification authorization again when status is ephemeral") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .ephemeral
+                authHandler.requestResult = .success(true)
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.notificationAuthorizationHandler = authHandler
+                _ = vc.view
+
+                vc.performRequestNotifications()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.notificationsEnabled]))
+                expect(authHandler.requestedOptions).to(equal([.alert, .badge, .sound]))
+            }
+
             it("posts notification outcomes back to standalone flows over the bridge") {
                 let authHandler = MockNotificationAuthorizationHandler()
                 authHandler.status = .authorized

@@ -582,11 +582,11 @@ public actor JourneyService: JourneyServiceProtocol {
   fileprivate func handleScopedNotificationPermissionEvent(
     journeyId: String,
     eventName: String,
-    properties: [String: Any]
+    properties: [String: Any],
+    distinctId: String
   ) async {
-    guard let journey = inMemoryJourneysById[journeyId] else {
-      return
-    }
+    let journey = inMemoryJourneysById[journeyId]
+    let scopedDistinctId = journey?.distinctId ?? distinctId
 
     let enrichedProperties = await eventService.prepareTriggerProperties(
       properties,
@@ -596,16 +596,20 @@ public actor JourneyService: JourneyServiceProtocol {
 
     let localScopedEvent = NuxieEvent(
       name: eventName,
-      distinctId: journey.distinctId,
+      distinctId: scopedDistinctId,
       properties: enrichedProperties,
       timestamp: dateProvider.now()
     )
 
-    let cachedCampaigns = await getAllCampaigns(for: journey.distinctId)
+    let cachedCampaigns: [Campaign]? = if journey != nil {
+      await getAllCampaigns(for: scopedDistinctId)
+    } else {
+      nil
+    }
     let transientEvent = makeStoredEvent(from: localScopedEvent)
     if let cachedCampaigns {
       let activeJourneyIds = await getActiveJourneys(for: localScopedEvent.distinctId).map(\.id)
-      let transientEventsByJourneyId = Dictionary(
+      let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
         uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
       )
       await processActiveJourneys(
@@ -624,7 +628,8 @@ public actor JourneyService: JourneyServiceProtocol {
         properties: properties,
         userProperties: nil,
         userPropertiesSetOnce: nil,
-        persistToHistory: false
+        persistToHistory: false,
+        distinctIdOverride: scopedDistinctId
       )
       trackedEvent = tracked.0
       response = tracked.1
@@ -632,16 +637,20 @@ public actor JourneyService: JourneyServiceProtocol {
       LogWarning("JourneyService: Failed to track scoped notification event: \(error)")
       trackedEvent = NuxieEvent(
         name: eventName,
-        distinctId: journey.distinctId,
+        distinctId: scopedDistinctId,
         properties: enrichedProperties
       )
       response = nil
     }
 
+    guard journey != nil else {
+      return
+    }
+
     let scopedEvent = NuxieEvent(
       id: trackedEvent.id,
       name: trackedEvent.name,
-      distinctId: journey.distinctId,
+      distinctId: scopedDistinctId,
       properties: trackedEvent.properties,
       timestamp: trackedEvent.timestamp
     )
@@ -658,7 +667,7 @@ public actor JourneyService: JourneyServiceProtocol {
         return startedJourney.id
       })
       if !startedJourneyIds.isEmpty {
-        let transientEventsByJourneyId = Dictionary(
+        let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
           uniqueKeysWithValues: startedJourneyIds.map { ($0, [transientEvent]) }
         )
         await processActiveJourneys(
@@ -732,7 +741,11 @@ public actor JourneyService: JourneyServiceProtocol {
       return controller
     }
 
-    let delegate = FlowRuntimeDelegateAdapter(journeyId: journey.id, journeyService: self)
+    let delegate = FlowRuntimeDelegateAdapter(
+      journeyId: journey.id,
+      distinctId: journey.distinctId,
+      journeyService: self
+    )
     runtimeDelegates[journey.id] = delegate
     let controller = try await flowPresentationService.presentFlow(flowId, from: journey, runtimeDelegate: delegate)
     if let runner = flowRunners[journey.id] {
@@ -1347,9 +1360,11 @@ public actor JourneyService: JourneyServiceProtocol {
 private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate, NotificationPermissionEventReceiver {
   private weak var journeyService: JourneyService?
   private let journeyId: String
+  private let distinctId: String
 
-  init(journeyId: String, journeyService: JourneyService) {
+  init(journeyId: String, distinctId: String, journeyService: JourneyService) {
     self.journeyId = journeyId
+    self.distinctId = distinctId
     self.journeyService = journeyService
   }
 
@@ -1397,7 +1412,8 @@ private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate, Notificatio
       await journeyService?.handleScopedNotificationPermissionEvent(
         journeyId: journeyId,
         eventName: eventName,
-        properties: properties
+        properties: properties,
+        distinctId: distinctId
       )
     }
   }

@@ -376,6 +376,52 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
             }
 
+            it("tracks scoped notification outcomes against the original user across identify races") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.identityService.setDistinctId("user_2")
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    mocks.eventService.trackForTriggerCalls.last?.distinctIdOverride
+                }.toEventually(equal(distinctId), timeout: .seconds(2))
+            }
+
+            it("still tracks scoped notification outcomes after the original journey is cancelled") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                await service.handleUserChange(from: distinctId, to: "user_2")
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    mocks.eventService.trackForTriggerCalls.last?.distinctIdOverride
+                }.toEventually(equal(distinctId), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on scoped notification outcomes") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()

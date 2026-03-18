@@ -309,7 +309,7 @@ public class MockEventService: EventServiceProtocol {
     private var _trackWithResponseResult: EventResponse?
     private var _trackWithResponseError: Error?
     private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
-    private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?)] = []
+    private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?, distinctIdOverride: String?)] = []
     private var _trackForTriggerDelayNanoseconds: UInt64 = 0
     
     public var trackWithResponseResult: EventResponse? {
@@ -327,7 +327,7 @@ public class MockEventService: EventServiceProtocol {
         set { lock.withLock { _trackWithResponseCalls = newValue } }
     }
 
-    public private(set) var trackForTriggerCalls: [(event: String, properties: [String: Any]?)] {
+    public private(set) var trackForTriggerCalls: [(event: String, properties: [String: Any]?, distinctIdOverride: String?)] {
         get { lock.withLock { _trackForTriggerCalls } }
         set { lock.withLock { _trackForTriggerCalls = newValue } }
     }
@@ -342,10 +342,11 @@ public class MockEventService: EventServiceProtocol {
         properties: [String: Any]?,
         userProperties: [String: Any]?,
         userPropertiesSetOnce: [String: Any]?,
-        persistToHistory: Bool
+        persistToHistory: Bool,
+        distinctIdOverride: String?
     ) async throws -> (NuxieEvent, EventResponse) {
         lock.withLock {
-            _trackForTriggerCalls.append((event: event, properties: properties))
+            _trackForTriggerCalls.append((event: event, properties: properties, distinctIdOverride: distinctIdOverride))
         }
 
         let delayNanoseconds = lock.withLock { _trackForTriggerDelayNanoseconds }
@@ -367,7 +368,7 @@ public class MockEventService: EventServiceProtocol {
         )
 
         let nuxieEvent = TestEventBuilder(name: event)
-            .withDistinctId("test-distinct-id")
+            .withDistinctId(distinctIdOverride ?? "test-distinct-id")
             .withProperties(enrichedProperties)
             .build()
 

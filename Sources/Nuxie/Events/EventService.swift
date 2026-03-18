@@ -100,7 +100,8 @@ public protocol EventServiceProtocol {
     properties: [String: Any]?,
     userProperties: [String: Any]?,
     userPropertiesSetOnce: [String: Any]?,
-    persistToHistory: Bool
+    persistToHistory: Bool,
+    distinctIdOverride: String?
   ) async throws -> (NuxieEvent, EventResponse)
 
   /// Track an event synchronously and wait for server response
@@ -257,7 +258,8 @@ public extension EventServiceProtocol {
       properties: properties,
       userProperties: userProperties,
       userPropertiesSetOnce: userPropertiesSetOnce,
-      persistToHistory: true
+      persistToHistory: true,
+      distinctIdOverride: nil
     )
   }
 }
@@ -463,7 +465,8 @@ public class EventService: EventServiceProtocol {
     properties: [String: Any]? = nil,
     userProperties: [String: Any]? = nil,
     userPropertiesSetOnce: [String: Any]? = nil,
-    persistToHistory: Bool = true
+    persistToHistory: Bool = true,
+    distinctIdOverride: String? = nil
   ) async throws -> (NuxieEvent, EventResponse) {
     guard !event.isEmpty else {
       throw NuxieError.invalidConfiguration("Event name cannot be empty")
@@ -473,7 +476,7 @@ public class EventService: EventServiceProtocol {
 
     _ = await flushEvents()
 
-    let distinctId = identityService.getDistinctId()
+    let distinctId = distinctIdOverride ?? identityService.getDistinctId()
 
     let finalProperties = await buildTriggerProperties(
       properties,
