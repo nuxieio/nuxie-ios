@@ -260,6 +260,35 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
     additionalEvents: [StoredEvent] = []
   ) async -> Date? {
     let windowEnd = windowEnd(for: journey, anchor: anchor)
+    if filter == nil {
+      let persistedLastEventTime = await eventService.getLastEventTime(
+        name: name,
+        distinctId: journey.distinctId,
+        since: anchor,
+        until: windowEnd
+      )
+      let transientLastEventTime = additionalEvents
+        .filter { $0.name == name }
+        .filter { event in
+          if event.timestamp < anchor { return false }
+          if let end = windowEnd, event.timestamp > end { return false }
+          return true
+        }
+        .map(\.timestamp)
+        .max()
+
+      switch (persistedLastEventTime, transientLastEventTime) {
+      case let (.some(persisted), .some(transient)):
+        return max(persisted, transient)
+      case let (.some(persisted), nil):
+        return persisted
+      case let (nil, .some(transient)):
+        return transient
+      case (nil, nil):
+        return nil
+      }
+    }
+
     let baseEvents: [StoredEvent]
     if let allEvents {
       baseEvents = allEvents
@@ -271,17 +300,7 @@ public actor GoalEvaluator: GoalEvaluatorProtocol {
       secondary: additionalEvents
     )
 
-    guard let filter else {
-      return candidateEvents
-        .filter { $0.name == name }
-        .filter { event in
-          if event.timestamp < anchor { return false }
-          if let end = windowEnd, event.timestamp > end { return false }
-          return true
-        }
-        .map(\.timestamp)
-        .max()
-    }
+    guard let filter else { return nil }
 
     let matchingEvents = candidateEvents
       .filter { $0.name == name }

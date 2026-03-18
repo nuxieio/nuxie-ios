@@ -259,6 +259,61 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     journeyStore.getCompletions(for: distinctId).last?.exitReason
                 }.toEventually(equal(.completed), timeout: .seconds(2))
             }
+
+            it("feeds scoped notification outcomes into all active journeys for goal evaluation") {
+                let notificationGoal = GoalConfig(
+                    kind: .event,
+                    eventName: SystemEventNames.notificationsEnabled,
+                    eventFilter: nil,
+                    window: 60
+                )
+                let primaryCampaign = makeCampaign(
+                    id: "camp-primary",
+                    flowId: "flow-primary",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let secondaryCampaign = makeCampaign(
+                    id: "camp-secondary",
+                    flowId: "flow-secondary",
+                    goal: notificationGoal,
+                    exitPolicy: nil
+                )
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, secondaryCampaign],
+                    flows: [
+                        makeFlow(flowId: "flow-primary"),
+                        makeFlow(flowId: "flow-secondary"),
+                    ]
+                )
+                await service.initialize()
+
+                _ = await service.handleEventForTrigger(
+                    NuxieEvent(id: "evt_origin", name: "paywall_trigger", distinctId: distinctId)
+                )
+
+                let activeJourneys = await service.getActiveJourneys(for: distinctId)
+                let primaryJourney = activeJourneys.first(where: { $0.campaignId == "camp-primary" })
+                let secondaryJourney = activeJourneys.first(where: { $0.campaignId == "camp-secondary" })
+                expect(primaryJourney).toNot(beNil())
+                expect(secondaryJourney?.convertedAt).to(beNil())
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": primaryJourney!.id],
+                        journeyId: primaryJourney!.id
+                    )
+                }
+
+                await expect {
+                    (await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-secondary"
+                    })?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
         }
     }
 }

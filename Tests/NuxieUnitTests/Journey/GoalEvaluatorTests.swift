@@ -231,6 +231,49 @@ final class GoalEvaluatorTests: AsyncSpec {
                 expect(result.at).to(equal(now))
                 expect(eventService.getEventsForUserCallCount).to(equal(0))
             }
+
+            it("preserves full-history lookup for unfiltered event goals") {
+                let anchor = Date(timeIntervalSince1970: 10)
+                let goalEventAt = Date(timeIntervalSince1970: 11)
+                dateProvider.setCurrentDate(Date(timeIntervalSince1970: 20))
+
+                eventService.setLastEventTime(
+                    name: "$notifications_enabled",
+                    distinctId: "user_1",
+                    time: goalEventAt
+                )
+
+                let goal = GoalConfig(
+                    kind: .event,
+                    eventName: "$notifications_enabled",
+                    eventFilter: nil,
+                    window: 20
+                )
+
+                let campaign = Campaign(
+                    id: "camp_1",
+                    name: "Campaign",
+                    flowId: "flow_1",
+                    flowNumber: 1,
+                    flowName: nil,
+                    reentry: .everyTime,
+                    publishedAt: "2026-01-01T00:00:00Z",
+                    trigger: .event(EventTriggerConfig(eventName: "app_opened", condition: nil)),
+                    goal: goal,
+                    exitPolicy: nil,
+                    conversionAnchor: nil,
+                    campaignType: nil
+                )
+                let journey = Journey(id: "journey_1", campaign: campaign, distinctId: "user_1")
+                journey.conversionAnchorAt = anchor
+                journey.conversionWindow = 20
+
+                let result = await GoalEvaluator().isGoalMet(journey: journey, campaign: campaign)
+
+                expect(result.met).to(beTrue())
+                expect(result.at).to(equal(goalEventAt))
+                expect(eventService.getEventsForUserCallCount).to(equal(0))
+            }
         }
     }
 }

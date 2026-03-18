@@ -624,10 +624,14 @@ public actor JourneyService: JourneyServiceProtocol {
     _ = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
     await handleScopedGatePlan(response?.gatePlan())
     let transientEvent = makeStoredEvent(from: scopedEvent)
+    let activeJourneyIds = await getActiveJourneys(for: scopedEvent.distinctId).map(\.id)
+    let transientEventsByJourneyId = Dictionary(
+      uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
+    )
     await processActiveJourneys(
       for: scopedEvent,
       campaigns: campaigns,
-      transientEventsByJourneyId: [journeyId: [transientEvent]]
+      transientEventsByJourneyId: transientEventsByJourneyId
     )
   }
 
