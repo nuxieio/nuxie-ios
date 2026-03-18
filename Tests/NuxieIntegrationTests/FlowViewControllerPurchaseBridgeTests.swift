@@ -1,6 +1,7 @@
 import Quick
 import Nimble
 import SafariServices
+import UserNotifications
 import WebKit
 import FactoryKit
 @testable import Nuxie
@@ -176,6 +177,59 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(pl?["error"] as? String).toNot(beNil())
             }
 
+            it("emits notifications_enabled when notifications are already authorized") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .authorized
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.notificationAuthorizationHandler = authHandler
+                _ = vc.view
+
+                vc.performRequestNotifications(journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.notificationsEnabled]))
+                expect(vc.emittedEvents.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(authHandler.requestedOptions).to(beNil())
+            }
+
+            it("emits notifications_denied when notifications are denied") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .denied
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.notificationAuthorizationHandler = authHandler
+                _ = vc.view
+
+                vc.performRequestNotifications()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.notificationsDenied]))
+                expect(authHandler.requestedOptions).to(beNil())
+            }
+
+            it("requests notification authorization when status is not determined") {
+                let authHandler = MockNotificationAuthorizationHandler()
+                authHandler.status = .notDetermined
+                authHandler.requestResult = .success(true)
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.notificationAuthorizationHandler = authHandler
+                _ = vc.view
+
+                vc.performRequestNotifications()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.notificationsEnabled]))
+                expect(authHandler.requestedOptions).to(equal([.alert, .badge, .sound]))
+            }
+
             it("presents in-app Safari for open_link target") {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 let window = UIWindow(frame: UIScreen.main.bounds)
@@ -193,5 +247,41 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(vc.presentedViewController).to(beAKindOf(SFSafariViewController.self))
             }
         }
+    }
+}
+
+private final class MockNotificationAuthorizationHandler: NotificationAuthorizationHandling {
+    var status: UNAuthorizationStatus = .notDetermined
+    var requestResult: Result<Bool, Error> = .success(true)
+    private(set) var requestedOptions: UNAuthorizationOptions?
+
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        status
+    }
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
+        requestedOptions = options
+        return try requestResult.get()
+    }
+}
+
+private final class NotificationSpyFlowViewController: FlowViewController {
+    struct EmittedEvent {
+        let name: String
+        let properties: [String: Any]
+    }
+
+    private(set) var emittedEvents: [EmittedEvent] = []
+
+    init(flow: Flow) {
+        super.init(flow: flow, archiveService: FlowArchiver())
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func emitSystemEvent(_ name: String, properties: [String: Any]) {
+        emittedEvents.append(EmittedEvent(name: name, properties: properties))
     }
 }

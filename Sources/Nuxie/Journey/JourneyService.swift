@@ -497,6 +497,11 @@ public actor JourneyService: JourneyServiceProtocol {
       )
       await handleRestore(controller: controller)
 
+    case "action/request_notifications":
+      await MainActor.run {
+        controller.performRequestNotifications(journeyId: journey.id)
+      }
+
     case "action/open_link":
       let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
       let instanceId = payload["instanceId"] as? String

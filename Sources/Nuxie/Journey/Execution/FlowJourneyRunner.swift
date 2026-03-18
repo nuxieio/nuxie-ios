@@ -476,6 +476,10 @@ final class FlowJourneyRunner {
                 let result = await handleRestore(restore, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
+            case .requestNotifications(let requestNotifications):
+                let result = await handleRequestNotifications(requestNotifications, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .openLink(let openLink):
                 let result = await handleOpenLink(openLink, context: context)
                 trackAction(action, context: context, error: nil)
@@ -946,6 +950,18 @@ final class FlowJourneyRunner {
             object: nil,
             userInfo: userInfo
         )
+        return .continue
+    }
+
+    private func handleRequestNotifications(
+        _ action: RequestNotificationsAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        let journeyId = journey.id
+        await MainActor.run {
+            controller.performRequestNotifications(journeyId: journeyId)
+        }
         return .continue
     }
 
@@ -1937,6 +1953,7 @@ private extension InteractionAction {
         case .updateCustomer: return "update_customer"
         case .purchase: return "purchase"
         case .restore: return "restore"
+        case .requestNotifications: return "request_notifications"
         case .openLink: return "open_link"
         case .dismiss: return "dismiss"
         case .callDelegate: return "call_delegate"

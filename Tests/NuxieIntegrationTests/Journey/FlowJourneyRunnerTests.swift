@@ -577,6 +577,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     actions: [
                         purchaseAction,
                         .restore(RestoreAction()),
+                        .requestNotifications(RequestNotificationsAction()),
                         .openLink(OpenLinkAction(url: AnyCodable("https://example.com"), target: "external")),
                         .dismiss(DismissAction())
                     ],
@@ -604,6 +605,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(controller.purchaseRequests.map(\.productId)).to(equal(["prod_1"]))
                 expect(controller.purchaseRequests.first?.placementIndex as? Int).to(equal(2))
                 expect(controller.restoreRequests).to(equal(1))
+                expect(controller.requestNotificationJourneyIds).to(equal([journey.id]))
                 expect(controller.openLinkRequests.map(\.urlString)).to(equal(["https://example.com"]))
                 expect(controller.dismissRequests).to(equal([.userDismissed]))
             }
@@ -1635,6 +1637,7 @@ private final class SpyFlowViewController: FlowViewController {
     private(set) var messages: [Message] = []
     private(set) var purchaseRequests: [PurchaseRequest] = []
     private(set) var restoreRequests = 0
+    private(set) var requestNotificationJourneyIds: [String?] = []
     private(set) var dismissRequests: [CloseReason] = []
     private(set) var openLinkRequests: [OpenLinkRequest] = []
 
@@ -1661,6 +1664,10 @@ private final class SpyFlowViewController: FlowViewController {
 
     override func performRestore() {
         restoreRequests += 1
+    }
+
+    override func performRequestNotifications(journeyId: String? = nil) {
+        requestNotificationJourneyIds.append(journeyId)
     }
 
     override func performDismiss(reason: CloseReason = .userDismissed) {
