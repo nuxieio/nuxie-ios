@@ -406,6 +406,58 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 try? await Task.sleep(nanoseconds: 800_000_000)
             }
 
+            it("uses enriched scoped notification properties during immediate local goal evaluation") {
+                Container.shared.sessionService().setSessionId("session-notification")
+
+                let notificationGoal = GoalConfig(
+                    kind: .event,
+                    eventName: SystemEventNames.notificationsEnabled,
+                    eventFilter: IREnvelope(
+                        ir_version: 1,
+                        engine_min: nil,
+                        compiled_at: nil,
+                        expr: .pred(
+                            op: "eq",
+                            key: "properties.$session_id",
+                            value: .string("session-notification")
+                        )
+                    ),
+                    window: 60
+                )
+                let campaign = makeCampaign(
+                    id: "camp-session-filter",
+                    flowId: "flow-session-filter",
+                    goal: notificationGoal,
+                    exitPolicy: nil
+                )
+
+                await primeProfile(
+                    campaigns: [campaign],
+                    flows: [makeFlow(flowId: "flow-session-filter")]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackForTriggerDelayNanoseconds = 750_000_000
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    (await service.getActiveJourneys(for: distinctId).first {
+                        $0.id == journey.id
+                    })?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .milliseconds(250))
+
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+
             it("feeds scoped notification outcomes into all active journeys for goal evaluation") {
                 let notificationGoal = GoalConfig(
                     kind: .event,

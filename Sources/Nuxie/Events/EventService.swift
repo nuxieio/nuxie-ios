@@ -73,6 +73,19 @@ public protocol EventServiceProtocol {
     userPropertiesSetOnce: [String: Any]?
   )
 
+  /// Build the enriched trigger properties that local journey evaluation should use before the
+  /// synchronous trigger tracking round trip completes.
+  /// - Parameters:
+  ///   - properties: Event properties
+  ///   - userProperties: Properties to set on the user profile (mapped to $set)
+  ///   - userPropertiesSetOnce: Properties to set once on the user profile (mapped to $set_once)
+  /// - Returns: Enriched event properties, including session/context fields
+  func prepareTriggerProperties(
+    _ properties: [String: Any]?,
+    userProperties: [String: Any]?,
+    userPropertiesSetOnce: [String: Any]?
+  ) async -> [String: Any]
+
   /// Track an event and return both the enriched event and server response
   /// Used for trigger flows that need gate plans and local evaluation
   /// - Parameters:
@@ -222,6 +235,17 @@ public protocol EventServiceProtocol {
 }
 
 public extension EventServiceProtocol {
+  func prepareTriggerProperties(
+    _ properties: [String: Any]? = nil,
+    userProperties: [String: Any]? = nil,
+    userPropertiesSetOnce: [String: Any]? = nil
+  ) async -> [String: Any] {
+    var finalProperties = properties ?? [:]
+    if let userProperties { finalProperties["$set"] = userProperties }
+    if let userPropertiesSetOnce { finalProperties["$set_once"] = userPropertiesSetOnce }
+    return finalProperties
+  }
+
   func trackForTrigger(
     _ event: String,
     properties: [String: Any]? = nil,
@@ -405,19 +429,11 @@ public class EventService: EventServiceProtocol {
     // Get current distinct ID
     let distinctId = identityService.getDistinctId()
 
-    // Build enriched properties
-    var finalProperties = properties ?? [:]
-
-    // Add session ID if not present
-    if finalProperties["$session_id"] == nil {
-      if let sessionId = sessionService.getSessionId(at: Date(), readOnly: false) {
-        finalProperties["$session_id"] = sessionId
-        sessionService.touchSession()
-      }
-    }
-
-    // Apply enrichment
-    finalProperties = await enrich(finalProperties)
+    let finalProperties = await buildTriggerProperties(
+      properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
 
     // Store event locally (for history)
     do {
@@ -459,18 +475,11 @@ public class EventService: EventServiceProtocol {
 
     let distinctId = identityService.getDistinctId()
 
-    var finalProperties = properties ?? [:]
-    if let userProperties { finalProperties["$set"] = userProperties }
-    if let userPropertiesSetOnce { finalProperties["$set_once"] = userPropertiesSetOnce }
-
-    if finalProperties["$session_id"] == nil {
-      if let sessionId = sessionService.getSessionId(at: Date(), readOnly: false) {
-        finalProperties["$session_id"] = sessionId
-        sessionService.touchSession()
-      }
-    }
-
-    finalProperties = await enrich(finalProperties)
+    let finalProperties = await buildTriggerProperties(
+      properties,
+      userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce
+    )
 
     if persistToHistory {
       do {
@@ -501,6 +510,19 @@ public class EventService: EventServiceProtocol {
     )
 
     return (enrichedEvent, response)
+  }
+
+  public func prepareTriggerProperties(
+    _ properties: [String: Any]?,
+    userProperties: [String: Any]?,
+    userPropertiesSetOnce: [String: Any]?
+  ) async -> [String: Any] {
+    await ready.wait()
+    return await buildTriggerProperties(
+      properties,
+      userProperties: userProperties,
+      userPropertiesSetOnce: userPropertiesSetOnce
+    )
   }
 
   /// Reassign events from one user to another (for anonymous → identified transitions)
@@ -684,6 +706,25 @@ public class EventService: EventServiceProtocol {
   }
 
   // MARK: - Worker helpers
+
+  private func buildTriggerProperties(
+    _ properties: [String: Any]?,
+    userProperties: [String: Any]?,
+    userPropertiesSetOnce: [String: Any]?
+  ) async -> [String: Any] {
+    var finalProperties = properties ?? [:]
+    if let userProperties { finalProperties["$set"] = userProperties }
+    if let userPropertiesSetOnce { finalProperties["$set_once"] = userPropertiesSetOnce }
+
+    if finalProperties["$session_id"] == nil {
+      if let sessionId = sessionService.getSessionId(at: Date(), readOnly: false) {
+        finalProperties["$session_id"] = sessionId
+        sessionService.touchSession()
+      }
+    }
+
+    return await enrich(finalProperties)
+  }
 
   private func enrich(_ custom: [String: Any]) async -> [String: Any] {
     let sanitized = EventSanitizer.sanitizeDataTypes(custom)

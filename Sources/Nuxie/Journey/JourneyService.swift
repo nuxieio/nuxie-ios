@@ -587,10 +587,16 @@ public actor JourneyService: JourneyServiceProtocol {
       return
     }
 
+    let enrichedProperties = await eventService.prepareTriggerProperties(
+      properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+
     let localScopedEvent = NuxieEvent(
       name: eventName,
       distinctId: journey.distinctId,
-      properties: properties,
+      properties: enrichedProperties,
       timestamp: dateProvider.now()
     )
 
@@ -625,7 +631,7 @@ public actor JourneyService: JourneyServiceProtocol {
       trackedEvent = NuxieEvent(
         name: eventName,
         distinctId: journey.distinctId,
-        properties: properties
+        properties: enrichedProperties
       )
       response = nil
     }

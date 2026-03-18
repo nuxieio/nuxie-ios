@@ -360,9 +360,15 @@ public class MockEventService: EventServiceProtocol {
             throw error
         }
 
+        let enrichedProperties = await prepareTriggerProperties(
+            properties,
+            userProperties: userProperties,
+            userPropertiesSetOnce: userPropertiesSetOnce
+        )
+
         let nuxieEvent = TestEventBuilder(name: event)
             .withDistinctId("test-distinct-id")
-            .withProperties(properties ?? [:])
+            .withProperties(enrichedProperties)
             .build()
 
         if persistToHistory {
@@ -382,6 +388,24 @@ public class MockEventService: EventServiceProtocol {
         )
 
         return (nuxieEvent, response)
+    }
+
+    public func prepareTriggerProperties(
+        _ properties: [String: Any]?,
+        userProperties: [String: Any]?,
+        userPropertiesSetOnce: [String: Any]?
+    ) async -> [String: Any] {
+        var finalProperties = properties ?? [:]
+        if let userProperties { finalProperties["$set"] = userProperties }
+        if let userPropertiesSetOnce { finalProperties["$set_once"] = userPropertiesSetOnce }
+
+        if finalProperties["$session_id"] == nil,
+           let sessionId = Container.shared.sessionService().getSessionId(at: Date(), readOnly: false) {
+            finalProperties["$session_id"] = sessionId
+            Container.shared.sessionService().touchSession()
+        }
+
+        return finalProperties
     }
 
     public func trackWithResponse(
