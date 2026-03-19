@@ -697,12 +697,36 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   fileprivate func handleUnsupportedScopedRequestPermission(
-    journeyId: String
+    journeyId: String,
+    permissionType: String
   ) async {
     guard let journey = inMemoryJourneysById[journeyId],
           let runner = flowRunners[journeyId],
           journey.status.isLive else { return }
     runner.endRequestPermissionRequest()
+
+    let scopedDistinctId = journey.distinctId
+    let enrichedProperties = await eventService.prepareTriggerProperties(
+      ["journey_id": journeyId, "type": permissionType],
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+    let localScopedEvent = NuxieEvent(
+      name: SystemEventNames.permissionDenied,
+      distinctId: scopedDistinctId,
+      properties: enrichedProperties,
+      timestamp: dateProvider.now()
+    )
+    let transientEvent = makeStoredEvent(from: localScopedEvent)
+    if let campaigns = await getAllCampaigns(for: scopedDistinctId) {
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: campaigns,
+        transientEventsByJourneyId: [journeyId: [transientEvent]],
+        restrictedToJourneyIds: [journeyId]
+      )
+    }
+
     await completeDeferredDismissIfReady(journeyId: journeyId)
   }
 
@@ -1490,7 +1514,8 @@ private final class FlowRuntimeDelegateAdapter:
   ) {
     Task { [weak journeyService] in
       await journeyService?.handleUnsupportedScopedRequestPermission(
-        journeyId: journeyId
+        journeyId: journeyId,
+        permissionType: permissionType
       )
     }
   }
