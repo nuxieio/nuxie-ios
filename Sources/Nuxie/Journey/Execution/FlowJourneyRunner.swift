@@ -61,6 +61,7 @@ final class FlowJourneyRunner {
     private var isProcessing = false
     private var isPaused = false
     private var pendingNotificationPermissionRequests = 0
+    private var pendingRequestPermissionRequests = 0
     private var pendingTrackingPermissionRequests = 0
     private var deferredDismissReason: CloseReason?
     private var debounceTasks: [String: Task<Void, Never>] = [:]
@@ -325,6 +326,7 @@ final class FlowJourneyRunner {
 
     func hasPendingWork() -> Bool {
         if pendingNotificationPermissionRequests > 0 { return true }
+        if pendingRequestPermissionRequests > 0 { return true }
         if pendingTrackingPermissionRequests > 0 { return true }
         if journey.flowState.pendingAction != nil { return true }
         if activeRequest != nil { return true }
@@ -334,6 +336,7 @@ final class FlowJourneyRunner {
 
     func hasPendingPermissionWork() -> Bool {
         if pendingNotificationPermissionRequests > 0 { return true }
+        if pendingRequestPermissionRequests > 0 { return true }
         if pendingTrackingPermissionRequests > 0 { return true }
         return false
     }
@@ -344,6 +347,10 @@ final class FlowJourneyRunner {
 
     func beginTrackingPermissionRequest() {
         pendingTrackingPermissionRequests += 1
+    }
+
+    func beginRequestPermissionRequest() {
+        pendingRequestPermissionRequests += 1
     }
 
     func endTrackingPermissionRequest() {
@@ -369,6 +376,14 @@ final class FlowJourneyRunner {
                 || eventName == SystemEventNames.notificationsDenied
             {
                 pendingNotificationPermissionRequests -= 1
+            }
+        }
+
+        if pendingRequestPermissionRequests > 0 {
+            if eventName == SystemEventNames.permissionGranted
+                || eventName == SystemEventNames.permissionDenied
+            {
+                pendingRequestPermissionRequests -= 1
             }
         }
 
@@ -532,6 +547,10 @@ final class FlowJourneyRunner {
                 return result
             case .requestNotifications(let requestNotifications):
                 let result = await handleRequestNotifications(requestNotifications, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .requestPermission(let requestPermission):
+                let result = await handleRequestPermission(requestPermission, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
             case .requestTracking(let requestTracking):
@@ -1020,6 +1039,22 @@ final class FlowJourneyRunner {
         beginNotificationPermissionRequest()
         await MainActor.run {
             controller.performRequestNotifications(journeyId: journeyId)
+        }
+        return .continue
+    }
+
+    private func handleRequestPermission(
+        _ action: RequestPermissionAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        let journeyId = journey.id
+        beginRequestPermissionRequest()
+        await MainActor.run {
+            controller.performRequestPermission(
+                permissionType: action.permissionType,
+                journeyId: journeyId
+            )
         }
         return .continue
     }
@@ -2026,6 +2061,7 @@ private extension InteractionAction {
         case .purchase: return "purchase"
         case .restore: return "restore"
         case .requestNotifications: return "request_notifications"
+        case .requestPermission: return "request_permission"
         case .requestTracking: return "request_tracking"
         case .openLink: return "open_link"
         case .dismiss: return "dismiss"

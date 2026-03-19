@@ -463,6 +463,17 @@ public actor JourneyService: JourneyServiceProtocol {
         controller.performRequestNotifications(journeyId: journey.id)
       }
 
+    case "action/request_permission":
+      guard let permissionType = payload["permissionType"] as? String,
+            !permissionType.isEmpty else { return }
+      runner.beginRequestPermissionRequest()
+      _ = await MainActor.run {
+        controller.performRequestPermission(
+          permissionType: permissionType,
+          journeyId: journey.id
+        )
+      }
+
     case "action/request_tracking":
       runner.beginTrackingPermissionRequest()
       _ = await MainActor.run {
@@ -1383,6 +1394,7 @@ public actor JourneyService: JourneyServiceProtocol {
 private final class FlowRuntimeDelegateAdapter:
   FlowRuntimeDelegate,
   NotificationPermissionEventReceiver,
+  RequestPermissionEventReceiver,
   TrackingPermissionEventReceiver
 {
   private weak var journeyService: JourneyService?
@@ -1432,6 +1444,22 @@ private final class FlowRuntimeDelegateAdapter:
   func flowViewController(
     _ controller: FlowViewController,
     didResolveNotificationPermissionEvent eventName: String,
+    properties: [String : Any],
+    journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleScopedPermissionEvent(
+        journeyId: journeyId,
+        eventName: eventName,
+        properties: properties,
+        distinctId: distinctId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didResolveRequestPermissionEvent eventName: String,
     properties: [String : Any],
     journeyId: String
   ) {

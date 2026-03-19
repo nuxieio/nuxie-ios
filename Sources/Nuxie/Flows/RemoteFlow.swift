@@ -544,6 +544,7 @@ public enum InteractionAction: Codable {
     case purchase(PurchaseAction)
     case restore(RestoreAction)
     case requestNotifications(RequestNotificationsAction)
+    case requestPermission(RequestPermissionAction)
     case requestTracking(RequestTrackingAction)
     case openLink(OpenLinkAction)
     case dismiss(DismissAction)
@@ -577,6 +578,7 @@ public enum InteractionAction: Codable {
         case purchase
         case restore
         case requestNotifications = "request_notifications"
+        case requestPermission = "request_permission"
         case requestTracking = "request_tracking"
         case openLink = "open_link"
         case dismiss
@@ -621,6 +623,8 @@ public enum InteractionAction: Codable {
             self = .restore(try RestoreAction(from: decoder))
         case .requestNotifications:
             self = .requestNotifications(try RequestNotificationsAction(from: decoder))
+        case .requestPermission:
+            self = .requestPermission(try RequestPermissionAction(from: decoder))
         case .requestTracking:
             self = .requestTracking(try RequestTrackingAction(from: decoder))
         case .openLink:
@@ -685,6 +689,8 @@ public enum InteractionAction: Codable {
         case .restore(let action):
             try action.encode(to: encoder)
         case .requestNotifications(let action):
+            try action.encode(to: encoder)
+        case .requestPermission(let action):
             try action.encode(to: encoder)
         case .requestTracking(let action):
             try action.encode(to: encoder)
@@ -885,6 +891,16 @@ public struct RequestNotificationsAction: Codable {
 
     public init(type: String = "request_notifications") {
         self.type = type
+    }
+}
+
+public struct RequestPermissionAction: Codable {
+    public let type: String
+    public let permissionType: String
+
+    public init(type: String = "request_permission", permissionType: String) {
+        self.type = type
+        self.permissionType = permissionType
     }
 }
 

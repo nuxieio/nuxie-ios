@@ -57,4 +57,37 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
 
         XCTAssertEqual(decoded?["type"] as? String, "request_tracking")
     }
+
+    func testDecodesRequestPermissionAction() throws {
+        let data = Data(
+            """
+            {
+              "type": "request_permission",
+              "permissionType": "camera"
+            }
+            """.utf8
+        )
+
+        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+
+        switch action {
+        case .requestPermission(let requestPermission):
+            XCTAssertEqual(requestPermission.type, "request_permission")
+            XCTAssertEqual(requestPermission.permissionType, "camera")
+        default:
+            XCTFail("Expected request_permission action")
+        }
+    }
+
+    func testEncodesRequestPermissionAction() throws {
+        let action = InteractionAction.requestPermission(
+            RequestPermissionAction(permissionType: "camera")
+        )
+
+        let data = try JSONEncoder().encode(action)
+        let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertEqual(decoded?["type"] as? String, "request_permission")
+        XCTAssertEqual(decoded?["permissionType"] as? String, "camera")
+    }
 }

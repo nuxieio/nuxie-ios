@@ -11,6 +11,8 @@ enum SystemEventNames {
     static let restoreNoPurchases = "$restore_no_purchases"
     static let notificationsEnabled = "$notifications_enabled"
     static let notificationsDenied = "$notifications_denied"
+    static let permissionGranted = "$permission_granted"
+    static let permissionDenied = "$permission_denied"
     static let trackingAuthorized = "$tracking_authorized"
     static let trackingDenied = "$tracking_denied"
 }

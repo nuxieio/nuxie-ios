@@ -774,6 +774,43 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.completed), timeout: .seconds(2))
             }
 
+            it("resumes wait_until work on scoped request permission outcomes") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-permission",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? RequestPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveRequestPermissionEvent: SystemEventNames.permissionGranted,
+                        properties: [
+                            "journey_id": journey.id,
+                            "type": "camera"
+                        ],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work before scoped notification tracking returns") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
