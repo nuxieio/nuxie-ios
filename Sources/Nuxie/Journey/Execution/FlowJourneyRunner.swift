@@ -353,6 +353,12 @@ final class FlowJourneyRunner {
         pendingRequestPermissionRequests += 1
     }
 
+    func endRequestPermissionRequest() {
+        if pendingRequestPermissionRequests > 0 {
+            pendingRequestPermissionRequests -= 1
+        }
+    }
+
     func endTrackingPermissionRequest() {
         if pendingTrackingPermissionRequests > 0 {
             pendingTrackingPermissionRequests -= 1
@@ -383,7 +389,7 @@ final class FlowJourneyRunner {
             if eventName == SystemEventNames.permissionGranted
                 || eventName == SystemEventNames.permissionDenied
             {
-                pendingRequestPermissionRequests -= 1
+                endRequestPermissionRequest()
             }
         }
 

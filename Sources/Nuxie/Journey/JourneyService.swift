@@ -696,6 +696,16 @@ public actor JourneyService: JourneyServiceProtocol {
     await handleScopedGatePlan(response?.gatePlan())
   }
 
+  fileprivate func handleUnsupportedScopedRequestPermission(
+    journeyId: String
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId],
+          journey.status.isLive else { return }
+    runner.endRequestPermissionRequest()
+    await completeDeferredDismissIfReady(journeyId: journeyId)
+  }
+
   // MARK: - Helpers
 
   private func dismissalExitReason(for reason: CloseReason) -> JourneyExitReason {
@@ -1469,6 +1479,18 @@ private final class FlowRuntimeDelegateAdapter:
         eventName: eventName,
         properties: properties,
         distinctId: distinctId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didIgnoreUnsupportedRequestPermissionType permissionType: String,
+    journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleUnsupportedScopedRequestPermission(
+        journeyId: journeyId
       )
     }
   }

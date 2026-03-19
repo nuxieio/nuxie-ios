@@ -600,6 +600,42 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 try? await Task.sleep(nanoseconds: 800_000_000)
             }
 
+            it("completes dismissed journeys after unsupported request permission kinds") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "location_always"],
+                        id: nil
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .milliseconds(500))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .milliseconds(500))
+            }
+
             it("resumes wait_until work on unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()

@@ -268,6 +268,12 @@ protocol RequestPermissionEventReceiver: AnyObject {
         properties: [String: Any],
         journeyId: String
     )
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didIgnoreUnsupportedRequestPermissionType permissionType: String,
+        journeyId: String
+    )
 }
 
 extension FlowRuntimeDelegate {
@@ -468,9 +474,20 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     func performRequestPermission(permissionType: String, journeyId: String? = nil) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let outcome = await self.resolveRequestPermissionOutcome(
+            let resolution = await self.resolveRequestPermissionOutcome(
                 permissionType: permissionType
             )
+            guard case let .status(outcome) = resolution else {
+                if let journeyId, !journeyId.isEmpty,
+                   let receiver = self.requestPermissionEventReceiver {
+                    receiver.flowViewController(
+                        self,
+                        didIgnoreUnsupportedRequestPermissionType: permissionType,
+                        journeyId: journeyId
+                    )
+                }
+                return
+            }
             let properties = self.permissionEventProperties(
                 journeyId: journeyId,
                 permissionType: permissionType
@@ -780,6 +797,11 @@ private extension FlowViewController {
         case photos
     }
 
+    enum RequestPermissionResolution {
+        case status(PermissionAuthorizationStatus)
+        case unsupportedType
+    }
+
     enum TrackingAuthorizationOutcome {
         case authorized
         case denied
@@ -844,10 +866,10 @@ private extension FlowViewController {
 
     func resolveRequestPermissionOutcome(
         permissionType: String
-    ) async -> PermissionAuthorizationStatus {
+    ) async -> RequestPermissionResolution {
         guard let permission = RequestPermissionKind(rawValue: permissionType) else {
-            LogWarning("FlowViewController: Unsupported request permission type \(permissionType); emitting permission_denied")
-            return .denied
+            LogWarning("FlowViewController: Unsupported request permission type \(permissionType); skipping event")
+            return .unsupportedType
         }
 
         let handler: PermissionAuthorizationHandling
@@ -872,16 +894,16 @@ private extension FlowViewController {
         let currentStatus = handler.authorizationStatus()
         switch currentStatus {
         case .granted, .limited, .denied, .restricted, .unsupported:
-            return currentStatus
+            return .status(currentStatus)
         case .notDetermined:
             guard let usageDescription = usageDescriptionProvider()?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                   !usageDescription.isEmpty
             else {
                 LogWarning("FlowViewController: \(usageDescriptionKey) is missing; emitting permission_denied")
-                return .denied
+                return .status(.denied)
             }
-            return await handler.requestAuthorization()
+            return .status(await handler.requestAuthorization())
         }
     }
 

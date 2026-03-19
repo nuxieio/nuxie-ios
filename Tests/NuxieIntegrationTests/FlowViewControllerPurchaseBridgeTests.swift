@@ -397,6 +397,19 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(delegate.events.first?.properties["type"] as? String).to(equal("photos"))
             }
 
+            it("ignores unsupported request permission kinds for standalone flows") {
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "location_always")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents).to(beEmpty())
+            }
+
             it("emits tracking_authorized when tracking is already authorized") {
                 let authHandler = MockTrackingAuthorizationHandler()
                 authHandler.status = .authorized
@@ -760,4 +773,10 @@ private final class RequestPermissionEventReceiverSpy: FlowRuntimeDelegate, Requ
     ) {
         events.append(Event(name: eventName, properties: properties, journeyId: journeyId))
     }
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didIgnoreUnsupportedRequestPermissionType permissionType: String,
+        journeyId: String
+    ) {}
 }
