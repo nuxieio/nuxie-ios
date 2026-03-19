@@ -1152,7 +1152,7 @@ public actor JourneyService: JourneyServiceProtocol {
   private func handleExplicitGoalActionHit(
     journey: Journey,
     goalId: String,
-  ) -> FlowJourneyRunner.GoalActionResolution {
+  ) async -> FlowJourneyRunner.GoalActionResolution {
     let hitAt = dateProvider.now()
     let didRecordHit = recordExplicitGoalHit(goalId, at: hitAt, journey: journey)
 
@@ -1161,7 +1161,7 @@ public actor JourneyService: JourneyServiceProtocol {
         persistJourney(journey)
       }
       return FlowJourneyRunner.GoalActionResolution(
-        shouldExit: shouldExitOnGoal(journey),
+        shouldExit: await shouldExitImmediatelyOnGoal(journey),
       )
     }
 
@@ -1208,7 +1208,7 @@ public actor JourneyService: JourneyServiceProtocol {
 
     latchGoalConversion(journey: journey, at: metAt)
     return FlowJourneyRunner.GoalActionResolution(
-      shouldExit: shouldExitOnGoal(journey),
+      shouldExit: await shouldExitImmediatelyOnGoal(journey),
     )
   }
 
@@ -1240,6 +1240,11 @@ public actor JourneyService: JourneyServiceProtocol {
     case .never, .onStopMatching:
       return false
     }
+  }
+
+  private func shouldExitImmediatelyOnGoal(_ journey: Journey) async -> Bool {
+    guard shouldExitOnGoal(journey) else { return false }
+    return !(await shouldDeferExitDecision())
   }
 
   private func isWithinGoalWindow(_ at: Date, journey: Journey) -> Bool {

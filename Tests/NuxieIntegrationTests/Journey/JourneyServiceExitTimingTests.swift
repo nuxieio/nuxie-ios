@@ -285,6 +285,70 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(0), timeout: .seconds(2))
             }
 
+            it("defers explicit goal-action exits until dismiss when the flow is still presented") {
+                let explicitGoal = Interaction(
+                    id: "explicit-goal",
+                    trigger: .press,
+                    actions: [
+                        .goal(GoalAction(goalId: "primary"))
+                    ],
+                    enabled: true
+                )
+                let campaign = makeCampaign(
+                    goal: GoalConfig(
+                        kind: .event,
+                        eventName: JourneyEvents.journeyGoalHit,
+                        eventFilter: IREnvelope(
+                            ir_version: 1,
+                            engine_min: nil,
+                            compiled_at: nil,
+                            expr: .predAnd([
+                                .pred(op: "eq", key: "journey_id", value: .journeyId),
+                                .pred(op: "eq", key: "goal_id", value: .string("primary")),
+                            ])
+                        ),
+                        window: 60
+                    ),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow(interactions: ["screen-1": [explicitGoal]])
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                let goalController = controller!
+                await MainActor.run {
+                    goalController.runtimeDelegate?.flowViewController(
+                        goalController,
+                        didReceiveRuntimeMessage: "action/press",
+                        payload: ["screenId": "screen-1"],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.id)
+                }.toEventually(equal([journey.id]), timeout: .seconds(2))
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).first?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+                expect(journeyStore.getCompletions(for: distinctId)).to(beEmpty())
+
+                await MainActor.run {
+                    goalController.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        goalController,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).count
+                }.toEventually(equal(0), timeout: .seconds(2))
+            }
+
             it("reevaluates goals triggered by dismiss interactions before falling back to dismissed") {
                 let dismissGoal = Interaction(
                     id: "dismiss-goal",
