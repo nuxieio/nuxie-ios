@@ -343,6 +343,10 @@ protocol NotificationPermissionEventReceiver: AnyObject {
     )
 }
 
+protocol FlowReplacementEventReceiver: AnyObject {
+    func flowViewControllerWasReplaced(_ controller: FlowViewController)
+}
+
 protocol TrackingPermissionEventReceiver: AnyObject {
     func flowViewController(
         _ controller: FlowViewController,

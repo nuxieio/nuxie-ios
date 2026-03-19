@@ -7,8 +7,9 @@ import FactoryKit
 @testable import NuxieTestSupport
 #endif
 
-private final class RuntimeDelegateSpy: FlowRuntimeDelegate {
+private final class RuntimeDelegateSpy: FlowRuntimeDelegate, FlowReplacementEventReceiver {
     private(set) var dismissRequests: [(controller: FlowViewController, reason: CloseReason)] = []
+    private(set) var replacedControllers: [FlowViewController] = []
 
     func flowViewController(
         _ controller: FlowViewController,
@@ -26,6 +27,10 @@ private final class RuntimeDelegateSpy: FlowRuntimeDelegate {
 
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
         dismissRequests.append((controller, reason))
+    }
+
+    func flowViewControllerWasReplaced(_ controller: FlowViewController) {
+        replacedControllers.append(controller)
     }
 }
 
@@ -173,7 +178,7 @@ final class FlowPresentationServiceTests: AsyncSpec {
                     expect(mockWindowProvider.createdWindows.count).to(equal(2))
                 }
 
-                it("notifies the runtime delegate before replacing a journey-backed flow") {
+                it("notifies the runtime delegate when replacing a journey-backed flow") {
                     let campaign = makeCampaign(id: "campaign-1")
                     let journey = Journey(
                         campaign: campaign,
@@ -199,9 +204,9 @@ final class FlowPresentationServiceTests: AsyncSpec {
                         runtimeDelegate: nil
                     )
 
-                    expect(runtimeDelegate.dismissRequests.count).to(equal(1))
-                    expect(runtimeDelegate.dismissRequests.first?.controller).to(beIdenticalTo(mockVC1))
-                    expect(runtimeDelegate.dismissRequests.first?.reason).to(equal(.userDismissed))
+                    expect(runtimeDelegate.replacedControllers.count).to(equal(1))
+                    expect(runtimeDelegate.replacedControllers.first).to(beIdenticalTo(mockVC1))
+                    expect(runtimeDelegate.dismissRequests).to(beEmpty())
                     expect(service.currentFlowViewController).to(beIdenticalTo(mockVC2))
                 }
                 

@@ -593,6 +593,23 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
+  fileprivate func handleFlowReplacement(journeyId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          journey.status.isLive else { return }
+
+    if let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) {
+      await evaluateGoalIfNeeded(journey, campaign: campaign)
+      if let reason = await exitDecision(journey, campaign) {
+        completeJourney(journey, reason: reason)
+        return
+      }
+    }
+
+    if journey.status.isLive {
+      completeJourney(journey, reason: .cancelled)
+    }
+  }
+
   fileprivate func handleScopedPermissionEvent(
     journeyId: String,
     eventName: String,
@@ -1637,6 +1654,7 @@ public actor JourneyService: JourneyServiceProtocol {
 
 private final class FlowRuntimeDelegateAdapter:
   FlowRuntimeDelegate,
+  FlowReplacementEventReceiver,
   NotificationPermissionEventReceiver,
   RequestPermissionEventReceiver,
   TrackingPermissionEventReceiver
@@ -1682,6 +1700,12 @@ private final class FlowRuntimeDelegateAdapter:
         reason: reason,
         controller: controller
       )
+    }
+  }
+
+  func flowViewControllerWasReplaced(_ controller: FlowViewController) {
+    Task { [weak journeyService] in
+      await journeyService?.handleFlowReplacement(journeyId: journeyId)
     }
   }
 

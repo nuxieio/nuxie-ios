@@ -170,13 +170,10 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         LogInfo("FlowPresentationService: Dismissing current flow")
 
         // Replacement dismissals bypass FlowViewController.performDismiss(), so
-        // forward the dismiss signal to the runtime delegate before we tear the
-        // window down.
+        // notify journey-backed runtimes before we tear the window down.
         if let controller = currentFlowViewController {
-            controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
-                controller,
-                reason: .userDismissed
-            )
+            (controller.runtimeDelegate as? FlowReplacementEventReceiver)?
+                .flowViewControllerWasReplaced(controller)
         }
         
         // Dismiss the presented view controller
