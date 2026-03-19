@@ -332,6 +332,12 @@ final class FlowJourneyRunner {
         return false
     }
 
+    func hasPendingPermissionWork() -> Bool {
+        if pendingNotificationPermissionRequests > 0 { return true }
+        if pendingTrackingPermissionRequests > 0 { return true }
+        return false
+    }
+
     func beginNotificationPermissionRequest() {
         pendingNotificationPermissionRequests += 1
     }
@@ -351,7 +357,7 @@ final class FlowJourneyRunner {
     }
 
     func consumeDeferredDismissReasonIfReady() -> CloseReason? {
-        guard !hasPendingWork() else { return nil }
+        guard !hasPendingPermissionWork() else { return nil }
         let reason = deferredDismissReason
         deferredDismissReason = nil
         return reason

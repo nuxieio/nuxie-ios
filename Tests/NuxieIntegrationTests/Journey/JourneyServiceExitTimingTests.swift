@@ -484,6 +484,43 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.dismissed), timeout: .seconds(2))
             }
 
+            it("does not defer dismissals for non-permission pending work") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-generic-dismiss",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .seconds(2))
+            }
+
             it("completes deferred dismissals after scoped tracking outcomes resolve") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -520,6 +557,42 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.dismissed), timeout: .milliseconds(500))
 
                 try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+
+            it("resumes wait_until work on unsupported tracking requests") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-unsupported-tracking",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
             }
 
             it("tracks scoped notification outcomes against the original user across identify races") {
