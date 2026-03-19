@@ -956,6 +956,38 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.completed), timeout: .seconds(2))
             }
 
+            it("honors gate plans from unsupported scoped request permission outcomes") {
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: OrderingRecorder())
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: journeyStore)
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "show_flow",
+                    flowId: "gate-flow"
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? RequestPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didIgnoreUnsupportedRequestPermissionType: "location_always",
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    await MainActor.run {
+                        orderingPresentationService.wasFlowPresented("gate-flow")
+                    }
+                }.toEventually(beTrue(), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work before scoped notification tracking returns") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()

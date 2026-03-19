@@ -724,8 +724,9 @@ public actor JourneyService: JourneyServiceProtocol {
 
     await completeDeferredDismissIfReady(journeyId: journeyId)
 
+    let response: EventResponse?
     do {
-      _ = try await eventService.trackForTrigger(
+      let tracked = try await eventService.trackForTrigger(
         SystemEventNames.permissionDenied,
         properties: enrichedProperties,
         userProperties: nil,
@@ -733,9 +734,13 @@ public actor JourneyService: JourneyServiceProtocol {
         persistToHistory: false,
         distinctIdOverride: distinctId
       )
+      response = tracked.1
     } catch {
+      response = nil
       LogWarning("JourneyService: Failed to track unsupported scoped permission event: \(error)")
     }
+
+    await handleScopedGatePlan(response?.gatePlan())
   }
 
   // MARK: - Helpers
