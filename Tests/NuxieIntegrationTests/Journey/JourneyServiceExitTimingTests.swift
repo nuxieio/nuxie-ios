@@ -376,6 +376,47 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
             }
 
+            it("replays scoped tracking outcomes into newly started journeys") {
+                let trackingCampaign = makeCampaign(
+                    id: "camp-tracking-replay",
+                    flowId: "flow-tracking-replay",
+                    trigger: .event(EventTriggerConfig(eventName: SystemEventNames.trackingAuthorized, condition: nil)),
+                    goal: GoalConfig(
+                        kind: .event,
+                        eventName: SystemEventNames.trackingAuthorized,
+                        eventFilter: nil,
+                        window: 60
+                    ),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let trackingFlow = makeFlow(flowId: "flow-tracking-replay")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, trackingCampaign],
+                    flows: [primaryFlow, trackingFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? TrackingPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveTrackingPermissionEvent: SystemEventNames.trackingAuthorized,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-tracking-replay"
+                    }?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
             it("tracks scoped notification outcomes against the original user across identify races") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -446,6 +487,40 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
                         controller,
                         didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
+            it("resumes wait_until work on scoped tracking outcomes") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-tracking",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? TrackingPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveTrackingPermissionEvent: SystemEventNames.trackingAuthorized,
                         properties: ["journey_id": journey.id],
                         journeyId: journey.id
                     )
