@@ -687,6 +687,11 @@ public actor JourneyService: JourneyServiceProtocol {
     await handleScopedGatePlan(response?.gatePlan())
   }
 
+  fileprivate func handleUnsupportedTrackingRequest(journeyId: String) async {
+    guard let runner = flowRunners[journeyId] else { return }
+    runner.endTrackingPermissionRequest()
+  }
+
   // MARK: - Helpers
 
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
@@ -1441,6 +1446,15 @@ private final class FlowRuntimeDelegateAdapter:
         properties: properties,
         distinctId: distinctId
       )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didCompleteUnsupportedTrackingRequestFor journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleUnsupportedTrackingRequest(journeyId: journeyId)
     }
   }
 }

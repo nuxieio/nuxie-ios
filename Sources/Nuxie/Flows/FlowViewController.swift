@@ -128,6 +128,18 @@ protocol TrackingPermissionEventReceiver: AnyObject {
         properties: [String: Any],
         journeyId: String
     )
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didCompleteUnsupportedTrackingRequestFor journeyId: String
+    )
+}
+
+extension TrackingPermissionEventReceiver {
+    func flowViewController(
+        _ controller: FlowViewController,
+        didCompleteUnsupportedTrackingRequestFor journeyId: String
+    ) {}
 }
 
 extension FlowRuntimeDelegate {
@@ -310,9 +322,24 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     }
 
     func performRequestTracking(journeyId: String? = nil) {
+        let currentStatus = trackingAuthorizationHandler.authorizationStatus()
+        if currentStatus == .unsupported {
+            LogWarning("FlowViewController: tracking authorization is unsupported on this platform; skipping event")
+            if let journeyId, !journeyId.isEmpty,
+               let receiver = trackingPermissionEventReceiver {
+                receiver.flowViewController(
+                    self,
+                    didCompleteUnsupportedTrackingRequestFor: journeyId
+                )
+            }
+            return
+        }
+
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let outcome = await self.resolveTrackingAuthorizationOutcome()
+            let outcome = await self.resolveTrackingAuthorizationOutcome(
+                currentStatus: currentStatus
+            )
             let properties = self.journeyScopedEventProperties(journeyId: journeyId)
             let eventName: String
             switch outcome {
@@ -321,7 +348,6 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
             case .denied:
                 eventName = SystemEventNames.trackingDenied
             case .unsupported:
-                LogWarning("FlowViewController: tracking authorization is unsupported on this platform; skipping event")
                 return
             }
             self.dispatchTrackingPermissionEvent(
@@ -599,8 +625,10 @@ private extension FlowViewController {
         }
     }
 
-    func resolveTrackingAuthorizationOutcome() async -> TrackingAuthorizationOutcome {
-        switch trackingAuthorizationHandler.authorizationStatus() {
+    func resolveTrackingAuthorizationOutcome(
+        currentStatus: TrackingAuthorizationStatus? = nil
+    ) async -> TrackingAuthorizationOutcome {
+        switch currentStatus ?? trackingAuthorizationHandler.authorizationStatus() {
         case .authorized:
             return .authorized
         case .denied, .restricted:

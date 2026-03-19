@@ -339,6 +339,12 @@ final class FlowJourneyRunner {
         pendingTrackingPermissionRequests += 1
     }
 
+    func endTrackingPermissionRequest() {
+        if pendingTrackingPermissionRequests > 0 {
+            pendingTrackingPermissionRequests -= 1
+        }
+    }
+
     func handleScopedSystemPermissionEvent(_ eventName: String) {
         if pendingNotificationPermissionRequests > 0 {
             if eventName == SystemEventNames.notificationsEnabled
@@ -352,7 +358,7 @@ final class FlowJourneyRunner {
             if eventName == SystemEventNames.trackingAuthorized
                 || eventName == SystemEventNames.trackingDenied
             {
-                pendingTrackingPermissionRequests -= 1
+                endTrackingPermissionRequest()
             }
         }
     }

@@ -79,6 +79,16 @@ private final class OrderingFlowPresentationService: MockFlowPresentationService
     }
 }
 
+private final class UnsupportedTrackingAuthorizationHandler: TrackingAuthorizationHandling {
+    func authorizationStatus() -> TrackingAuthorizationStatus {
+        .unsupported
+    }
+
+    func requestAuthorization() async -> TrackingAuthorizationStatus {
+        .unsupported
+    }
+}
+
 final class JourneyServiceExitTimingTests: AsyncSpec {
     override class func spec() {
         var mocks: MockFactory!
@@ -415,6 +425,44 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         $0.campaignId == "camp-tracking-replay"
                     }?.convertedAt
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
+            it("completes dismissed journeys after unsupported tracking requests") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                }
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .seconds(2))
             }
 
             it("tracks scoped notification outcomes against the original user across identify races") {
