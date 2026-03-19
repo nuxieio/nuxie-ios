@@ -600,6 +600,94 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 try? await Task.sleep(nanoseconds: 800_000_000)
             }
 
+            it("completes dismissed journeys after unsupported request permission kinds") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "location_always"],
+                        id: nil
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .milliseconds(500))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .milliseconds(500))
+            }
+
+            it("keeps deferred dismiss waiting when another request permission is still pending") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    controller.cameraPermissionAuthorizationHandler = DelayedRequestPermissionAuthorizationHandler(
+                        initialStatus: .notDetermined,
+                        delayNanoseconds: 200_000_000,
+                        result: .granted
+                    )
+                    controller.cameraUsageDescriptionProvider = { "Camera usage description" }
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "location_always"],
+                        id: nil
+                    )
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "camera"],
+                        id: nil
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 75_000_000)
+                let isStillActive = await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                expect(isStillActive).to(beTrue())
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -706,6 +794,30 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(distinctId), timeout: .seconds(2))
             }
 
+            it("tracks unsupported scoped request permission outcomes against the original user across identify races") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                _ = await startJourney()
+                mocks.identityService.setDistinctId("user_2")
+
+                await MainActor.run {
+                    controller.cameraPermissionAuthorizationHandler = UnsupportedRequestPermissionAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "camera"],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    mocks.eventService.trackForTriggerCalls.last?.distinctIdOverride
+                }.toEventually(equal(distinctId), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on scoped notification outcomes") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -772,6 +884,108 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     journeyStore.getCompletions(for: distinctId).last?.exitReason
                 }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
+            it("resumes wait_until work on scoped request permission outcomes") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-permission",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? RequestPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveRequestPermissionEvent: SystemEventNames.permissionGranted,
+                        properties: [
+                            "journey_id": journey.id,
+                            "type": "camera"
+                        ],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
+            it("resumes wait_until work on unsupported request permission kinds") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-unsupported-permission",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? RequestPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didIgnoreUnsupportedRequestPermissionType: "location_always",
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
+            it("honors gate plans from unsupported scoped request permission outcomes") {
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: OrderingRecorder())
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: journeyStore)
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "show_flow",
+                    flowId: "gate-flow"
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? RequestPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didIgnoreUnsupportedRequestPermissionType: "location_always",
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    await MainActor.run {
+                        orderingPresentationService.wasFlowPresented("gate-flow")
+                    }
+                }.toEventually(beTrue(), timeout: .seconds(2))
             }
 
             it("resumes wait_until work before scoped notification tracking returns") {
@@ -1058,5 +1272,40 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 expect(orderingPresentationService.wasFlowPresented("gate-flow")).to(beFalse())
             }
         }
+    }
+}
+
+private final class DelayedRequestPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    let initialStatus: PermissionAuthorizationStatus
+    let delayNanoseconds: UInt64
+    let result: PermissionAuthorizationStatus
+
+    init(
+        initialStatus: PermissionAuthorizationStatus,
+        delayNanoseconds: UInt64,
+        result: PermissionAuthorizationStatus
+    ) {
+        self.initialStatus = initialStatus
+        self.delayNanoseconds = delayNanoseconds
+        self.result = result
+    }
+
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        initialStatus
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return result
+    }
+}
+
+private final class UnsupportedRequestPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        .unsupported
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        .unsupported
     }
 }

@@ -2,6 +2,12 @@ import Foundation
 import FactoryKit
 import WebKit
 import UserNotifications
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
+#if canImport(Photos)
+import Photos
+#endif
 #if canImport(AppTrackingTransparency)
 import AppTrackingTransparency
 #endif
@@ -34,6 +40,20 @@ protocol TrackingAuthorizationHandling {
     func requestAuthorization() async -> TrackingAuthorizationStatus
 }
 
+enum PermissionAuthorizationStatus {
+    case granted
+    case denied
+    case restricted
+    case limited
+    case notDetermined
+    case unsupported
+}
+
+protocol PermissionAuthorizationHandling {
+    func authorizationStatus() -> PermissionAuthorizationStatus
+    func requestAuthorization() async -> PermissionAuthorizationStatus
+}
+
 struct UserNotificationAuthorizationHandler: NotificationAuthorizationHandling {
     func authorizationStatus() async -> UNAuthorizationStatus {
         await withCheckedContinuation { continuation in
@@ -45,6 +65,117 @@ struct UserNotificationAuthorizationHandler: NotificationAuthorizationHandling {
 
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
         try await UNUserNotificationCenter.current().requestAuthorization(options: options)
+    }
+}
+
+struct CameraPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        #if canImport(AVFoundation)
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return .granted
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .unsupported
+        }
+        #else
+        return .unsupported
+        #endif
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        #if canImport(AVFoundation)
+        let granted = await withCheckedContinuation { continuation in
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+        return granted ? .granted : .denied
+        #else
+        return .unsupported
+        #endif
+    }
+}
+
+struct MicrophonePermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        #if canImport(AVFoundation) && !os(macOS)
+        switch AVAudioSession.sharedInstance().recordPermission {
+        case .granted:
+            return .granted
+        case .denied:
+            return .denied
+        case .undetermined:
+            return .notDetermined
+        @unknown default:
+            return .unsupported
+        }
+        #else
+        return .unsupported
+        #endif
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        #if canImport(AVFoundation) && !os(macOS)
+        let granted = await withCheckedContinuation { continuation in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+        return granted ? .granted : .denied
+        #else
+        return .unsupported
+        #endif
+    }
+}
+
+struct PhotoLibraryPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        #if canImport(Photos)
+        switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
+        case .authorized:
+            return .granted
+        case .limited:
+            return .limited
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .unsupported
+        }
+        #else
+        return .unsupported
+        #endif
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        #if canImport(Photos)
+        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        switch status {
+        case .authorized:
+            return .granted
+        case .limited:
+            return .limited
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .unsupported
+        }
+        #else
+        return .unsupported
+        #endif
     }
 }
 
@@ -130,6 +261,21 @@ protocol TrackingPermissionEventReceiver: AnyObject {
     )
 }
 
+protocol RequestPermissionEventReceiver: AnyObject {
+    func flowViewController(
+        _ controller: FlowViewController,
+        didResolveRequestPermissionEvent eventName: String,
+        properties: [String: Any],
+        journeyId: String
+    )
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didIgnoreUnsupportedRequestPermissionType permissionType: String,
+        journeyId: String
+    )
+}
+
 extension FlowRuntimeDelegate {
     func flowViewController(
         _ controller: FlowViewController,
@@ -147,7 +293,19 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     private let viewModel: FlowViewModel
     private let fontStore: FontStore
     var notificationAuthorizationHandler: NotificationAuthorizationHandling = UserNotificationAuthorizationHandler()
+    var cameraPermissionAuthorizationHandler: PermissionAuthorizationHandling = CameraPermissionAuthorizationHandler()
+    var microphonePermissionAuthorizationHandler: PermissionAuthorizationHandling = MicrophonePermissionAuthorizationHandler()
+    var photoLibraryPermissionAuthorizationHandler: PermissionAuthorizationHandling = PhotoLibraryPermissionAuthorizationHandler()
     var trackingAuthorizationHandler: TrackingAuthorizationHandling = AppTrackingAuthorizationHandler()
+    var cameraUsageDescriptionProvider: () -> String? = {
+        Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") as? String
+    }
+    var microphoneUsageDescriptionProvider: () -> String? = {
+        Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") as? String
+    }
+    var photoLibraryUsageDescriptionProvider: () -> String? = {
+        Bundle.main.object(forInfoDictionaryKey: "NSPhotoLibraryUsageDescription") as? String
+    }
     var trackingUsageDescriptionProvider: () -> String? = {
         Bundle.main.object(forInfoDictionaryKey: "NSUserTrackingUsageDescription") as? String
     }
@@ -161,6 +319,9 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
             if let receiver = runtimeDelegate as? TrackingPermissionEventReceiver {
                 trackingPermissionEventReceiver = receiver
             }
+            if let receiver = runtimeDelegate as? RequestPermissionEventReceiver {
+                requestPermissionEventReceiver = receiver
+            }
         }
     }
 
@@ -170,6 +331,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     /// responses can arrive after the journey delegate has been removed from the
     /// active journey maps during identity changes or cancellation.
     var notificationPermissionEventReceiver: NotificationPermissionEventReceiver?
+    var requestPermissionEventReceiver: RequestPermissionEventReceiver?
     var trackingPermissionEventReceiver: TrackingPermissionEventReceiver?
 
     /// Closure called when the flow is closed
@@ -302,6 +464,49 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
                 eventName = SystemEventNames.notificationsDenied
             }
             self.dispatchNotificationPermissionEvent(
+                eventName,
+                properties: properties,
+                journeyId: journeyId
+            )
+        }
+    }
+
+    func performRequestPermission(permissionType: String, journeyId: String? = nil) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let resolution = await self.resolveRequestPermissionOutcome(
+                permissionType: permissionType
+            )
+            guard case let .status(outcome) = resolution else {
+                self.handleUnsupportedRequestPermission(
+                    permissionType: permissionType,
+                    journeyId: journeyId
+                )
+                return
+            }
+            guard outcome != .unsupported else {
+                self.handleUnsupportedRequestPermission(
+                    permissionType: permissionType,
+                    journeyId: journeyId
+                )
+                return
+            }
+            let properties = self.permissionEventProperties(
+                journeyId: journeyId,
+                permissionType: permissionType
+            )
+            let eventName: String
+            switch outcome {
+            case .granted:
+                eventName = SystemEventNames.permissionGranted
+            case .denied, .restricted, .notDetermined:
+                eventName = SystemEventNames.permissionDenied
+            case .limited:
+                eventName = SystemEventNames.permissionGranted
+            case .unsupported:
+                return
+            }
+            self.dispatchRequestPermissionEvent(
                 eventName,
                 properties: properties,
                 journeyId: journeyId
@@ -541,6 +746,12 @@ extension FlowViewController {
             } else {
                 performRequestNotifications()
             }
+        case "action/request_permission":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else if let permissionType = payload["permissionType"] as? String {
+                performRequestPermission(permissionType: permissionType)
+            }
         case "action/request_tracking":
             if runtimeDelegate != nil {
                 runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
@@ -581,6 +792,17 @@ private extension FlowViewController {
     enum NotificationAuthorizationOutcome {
         case enabled
         case denied
+    }
+
+    enum RequestPermissionKind: String {
+        case camera
+        case microphone
+        case photos
+    }
+
+    enum RequestPermissionResolution {
+        case status(PermissionAuthorizationStatus)
+        case unsupportedType
     }
 
     enum TrackingAuthorizationOutcome {
@@ -645,6 +867,49 @@ private extension FlowViewController {
         }
     }
 
+    func resolveRequestPermissionOutcome(
+        permissionType: String
+    ) async -> RequestPermissionResolution {
+        guard let permission = RequestPermissionKind(rawValue: permissionType) else {
+            LogWarning("FlowViewController: Unsupported request permission type \(permissionType); skipping event")
+            return .unsupportedType
+        }
+
+        let handler: PermissionAuthorizationHandling
+        let usageDescriptionProvider: () -> String?
+        let usageDescriptionKey: String
+
+        switch permission {
+        case .camera:
+            handler = cameraPermissionAuthorizationHandler
+            usageDescriptionProvider = cameraUsageDescriptionProvider
+            usageDescriptionKey = "NSCameraUsageDescription"
+        case .microphone:
+            handler = microphonePermissionAuthorizationHandler
+            usageDescriptionProvider = microphoneUsageDescriptionProvider
+            usageDescriptionKey = "NSMicrophoneUsageDescription"
+        case .photos:
+            handler = photoLibraryPermissionAuthorizationHandler
+            usageDescriptionProvider = photoLibraryUsageDescriptionProvider
+            usageDescriptionKey = "NSPhotoLibraryUsageDescription"
+        }
+
+        let currentStatus = handler.authorizationStatus()
+        switch currentStatus {
+        case .granted, .limited, .denied, .restricted, .unsupported:
+            return .status(currentStatus)
+        case .notDetermined:
+            guard let usageDescription = usageDescriptionProvider()?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !usageDescription.isEmpty
+            else {
+                LogWarning("FlowViewController: \(usageDescriptionKey) is missing; emitting permission_denied")
+                return .status(.denied)
+            }
+            return .status(await handler.requestAuthorization())
+        }
+    }
+
     func isNotificationAuthorizationGranted(_ status: UNAuthorizationStatus) -> Bool {
         switch status {
         case .authorized:
@@ -656,11 +921,42 @@ private extension FlowViewController {
         }
     }
 
-    func journeyScopedEventProperties(journeyId: String?) -> [String: Any] {
-        guard let journeyId, !journeyId.isEmpty else {
-            return [:]
+    func journeyScopedEventProperties(
+        journeyId: String?,
+        extraProperties: [String: Any] = [:]
+    ) -> [String: Any] {
+        var properties = extraProperties
+        if let journeyId, !journeyId.isEmpty {
+            properties["journey_id"] = journeyId
         }
-        return ["journey_id": journeyId]
+        return properties
+    }
+
+    func permissionEventProperties(
+        journeyId: String?,
+        permissionType: String
+    ) -> [String: Any] {
+        journeyScopedEventProperties(
+            journeyId: journeyId,
+            extraProperties: ["type": permissionType]
+        )
+    }
+
+    func handleUnsupportedRequestPermission(
+        permissionType: String,
+        journeyId: String?
+    ) {
+        guard let journeyId, !journeyId.isEmpty,
+              let receiver = requestPermissionEventReceiver
+        else {
+            return
+        }
+
+        receiver.flowViewController(
+            self,
+            didIgnoreUnsupportedRequestPermissionType: permissionType,
+            journeyId: journeyId
+        )
     }
 
     func dispatchNotificationPermissionEvent(
@@ -699,6 +995,32 @@ private extension FlowViewController {
             receiver.flowViewController(
                 self,
                 didResolveTrackingPermissionEvent: eventName,
+                properties: properties,
+                journeyId: journeyId
+            )
+            return
+        }
+
+        if journeyId == nil {
+            sendSystemEventToRuntime(
+                eventName,
+                properties: properties
+            )
+        }
+
+        emitSystemEvent(eventName, properties: properties)
+    }
+
+    func dispatchRequestPermissionEvent(
+        _ eventName: String,
+        properties: [String: Any],
+        journeyId: String?
+    ) {
+        if let journeyId, !journeyId.isEmpty,
+           let receiver = requestPermissionEventReceiver {
+            receiver.flowViewController(
+                self,
+                didResolveRequestPermissionEvent: eventName,
                 properties: properties,
                 journeyId: journeyId
             )

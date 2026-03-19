@@ -309,6 +309,145 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
             }
 
+            it("emits permission_granted when camera permission is already authorized") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .granted
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.cameraPermissionAuthorizationHandler = authHandler
+                vc.cameraUsageDescriptionProvider = { "Camera usage description" }
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "camera", journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.permissionGranted]))
+                expect(vc.emittedEvents.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(vc.emittedEvents.first?.properties["type"] as? String).to(equal("camera"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("emits permission_denied when camera usage description is missing") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .notDetermined
+                authHandler.requestResult = .granted
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.cameraPermissionAuthorizationHandler = authHandler
+                vc.cameraUsageDescriptionProvider = { nil }
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "camera")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.permissionDenied]))
+                expect(vc.emittedEvents.first?.properties["type"] as? String).to(equal("camera"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("posts permission outcomes back to standalone flows over the bridge") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .granted
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.microphonePermissionAuthorizationHandler = authHandler
+                vc.microphoneUsageDescriptionProvider = { "Microphone usage description" }
+                _ = vc.view
+                injectBootstrap(vc.flowWebView)
+
+                vc.flowWebView.evaluateJavaScript(
+                    "window.webkit.messageHandlers.bridge.postMessage({ type: 'action/request_permission', payload: { permissionType: 'microphone' } })"
+                ) { _, _ in }
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() }
+                }
+
+                let msgs = getMessages(vc.flowWebView)
+                let match = msgs.first { ($0["type"] as? String) == "action/event" }
+                expect(match).toNot(beNil())
+                let payload = match?["payload"] as? [String: Any]
+                expect(payload?["name"] as? String).to(equal(SystemEventNames.permissionGranted))
+                let properties = payload?["properties"] as? [String: Any]
+                expect(properties?["type"] as? String).to(equal("microphone"))
+            }
+
+            it("routes journey-scoped permission outcomes through the runtime delegate") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .granted
+                let delegate = RequestPermissionEventReceiverSpy()
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.photoLibraryPermissionAuthorizationHandler = authHandler
+                vc.photoLibraryUsageDescriptionProvider = { "Photos usage description" }
+                vc.runtimeDelegate = delegate
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "photos", journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(delegate.events.map(\.name)).to(equal([SystemEventNames.permissionGranted]))
+                expect(delegate.events.first?.journeyId).to(equal("journey-1"))
+                expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(delegate.events.first?.properties["type"] as? String).to(equal("photos"))
+            }
+
+            it("ignores unsupported request permission kinds for standalone flows") {
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "location_always")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents).to(beEmpty())
+            }
+
+            it("ignores unsupported request permission statuses for standalone flows") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .unsupported
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.cameraPermissionAuthorizationHandler = authHandler
+                vc.cameraUsageDescriptionProvider = { "Camera usage description" }
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "camera")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents).to(beEmpty())
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("routes unsupported request permission statuses through the scoped unsupported callback") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .unsupported
+                let delegate = RequestPermissionEventReceiverSpy()
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.cameraPermissionAuthorizationHandler = authHandler
+                vc.cameraUsageDescriptionProvider = { "Camera usage description" }
+                vc.runtimeDelegate = delegate
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "camera", journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(delegate.events).to(beEmpty())
+                expect(delegate.ignoredUnsupportedPermissionTypes).to(equal(["camera"]))
+            }
+
             it("emits tracking_authorized when tracking is already authorized") {
                 let authHandler = MockTrackingAuthorizationHandler()
                 authHandler.status = .authorized
@@ -554,6 +693,21 @@ private final class MockTrackingAuthorizationHandler: TrackingAuthorizationHandl
     }
 }
 
+private final class MockRequestPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    var status: PermissionAuthorizationStatus = .notDetermined
+    var requestResult: PermissionAuthorizationStatus = .granted
+    private(set) var requestedAuthorization = false
+
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        status
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        requestedAuthorization = true
+        return requestResult
+    }
+}
+
 private final class NotificationSpyFlowViewController: FlowViewController {
     struct EmittedEvent {
         let name: String
@@ -628,5 +782,42 @@ private final class TrackingPermissionEventReceiverSpy: FlowRuntimeDelegate, Tra
         journeyId: String
     ) {
         events.append(Event(name: eventName, properties: properties, journeyId: journeyId))
+    }
+}
+
+private final class RequestPermissionEventReceiverSpy: FlowRuntimeDelegate, RequestPermissionEventReceiver {
+    struct Event {
+        let name: String
+        let properties: [String: Any]
+        let journeyId: String
+    }
+
+    private(set) var events: [Event] = []
+    private(set) var ignoredUnsupportedPermissionTypes: [String] = []
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didReceiveRuntimeMessage type: String,
+        payload: [String : Any],
+        id: String?
+    ) {}
+
+    func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {}
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didResolveRequestPermissionEvent eventName: String,
+        properties: [String : Any],
+        journeyId: String
+    ) {
+        events.append(Event(name: eventName, properties: properties, journeyId: journeyId))
+    }
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didIgnoreUnsupportedRequestPermissionType permissionType: String,
+        journeyId: String
+    ) {
+        ignoredUnsupportedPermissionTypes.append(permissionType)
     }
 }

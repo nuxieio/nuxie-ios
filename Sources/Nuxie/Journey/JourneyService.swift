@@ -463,6 +463,17 @@ public actor JourneyService: JourneyServiceProtocol {
         controller.performRequestNotifications(journeyId: journey.id)
       }
 
+    case "action/request_permission":
+      guard let permissionType = payload["permissionType"] as? String,
+            !permissionType.isEmpty else { return }
+      runner.beginRequestPermissionRequest()
+      _ = await MainActor.run {
+        controller.performRequestPermission(
+          permissionType: permissionType,
+          journeyId: journey.id
+        )
+      }
+
     case "action/request_tracking":
       runner.beginTrackingPermissionRequest()
       _ = await MainActor.run {
@@ -682,6 +693,53 @@ public actor JourneyService: JourneyServiceProtocol {
         )
       }
     }
+    await handleScopedGatePlan(response?.gatePlan())
+  }
+
+  fileprivate func handleUnsupportedScopedRequestPermission(
+    journeyId: String,
+    permissionType: String,
+    distinctId: String
+  ) async {
+    let enrichedProperties = await eventService.prepareTriggerProperties(
+      ["journey_id": journeyId, "type": permissionType],
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+    let localScopedEvent = NuxieEvent(
+      name: SystemEventNames.permissionDenied,
+      distinctId: distinctId,
+      properties: enrichedProperties,
+      timestamp: dateProvider.now()
+    )
+    let transientEvent = makeStoredEvent(from: localScopedEvent)
+    if let campaigns = await getAllCampaigns(for: distinctId) {
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: campaigns,
+        transientEventsByJourneyId: [journeyId: [transientEvent]],
+        restrictedToJourneyIds: [journeyId]
+      )
+    }
+
+    await completeDeferredDismissIfReady(journeyId: journeyId)
+
+    let response: EventResponse?
+    do {
+      let tracked = try await eventService.trackForTrigger(
+        SystemEventNames.permissionDenied,
+        properties: enrichedProperties,
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        persistToHistory: false,
+        distinctIdOverride: distinctId
+      )
+      response = tracked.1
+    } catch {
+      response = nil
+      LogWarning("JourneyService: Failed to track unsupported scoped permission event: \(error)")
+    }
+
     await handleScopedGatePlan(response?.gatePlan())
   }
 
@@ -1383,6 +1441,7 @@ public actor JourneyService: JourneyServiceProtocol {
 private final class FlowRuntimeDelegateAdapter:
   FlowRuntimeDelegate,
   NotificationPermissionEventReceiver,
+  RequestPermissionEventReceiver,
   TrackingPermissionEventReceiver
 {
   private weak var journeyService: JourneyService?
@@ -1440,6 +1499,36 @@ private final class FlowRuntimeDelegateAdapter:
         journeyId: journeyId,
         eventName: eventName,
         properties: properties,
+        distinctId: distinctId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didResolveRequestPermissionEvent eventName: String,
+    properties: [String : Any],
+    journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleScopedPermissionEvent(
+        journeyId: journeyId,
+        eventName: eventName,
+        properties: properties,
+        distinctId: distinctId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didIgnoreUnsupportedRequestPermissionType permissionType: String,
+    journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleUnsupportedScopedRequestPermission(
+        journeyId: journeyId,
+        permissionType: permissionType,
         distinctId: distinctId
       )
     }
