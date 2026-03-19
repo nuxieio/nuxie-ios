@@ -185,7 +185,7 @@ struct PhotoLibraryPermissionAuthorizationHandler: PermissionAuthorizationHandli
 final class LocationPermissionAuthorizationHandler: NSObject, PermissionAuthorizationHandling {
     #if canImport(CoreLocation) && !os(macOS)
     private var manager: CLLocationManager?
-    private var continuation: CheckedContinuation<PermissionAuthorizationStatus, Never>?
+    private var continuations: [CheckedContinuation<PermissionAuthorizationStatus, Never>] = []
 
     private static func map(_ status: CLAuthorizationStatus) -> PermissionAuthorizationStatus {
         switch status {
@@ -205,11 +205,14 @@ final class LocationPermissionAuthorizationHandler: NSObject, PermissionAuthoriz
     private func resolveContinuationIfNeeded(_ status: CLAuthorizationStatus) {
         let resolvedStatus = Self.map(status)
         guard resolvedStatus != .notDetermined,
-              let continuation
+              !continuations.isEmpty
         else { return }
 
-        self.continuation = nil
-        continuation.resume(returning: resolvedStatus)
+        let pendingContinuations = continuations
+        continuations.removeAll()
+        pendingContinuations.forEach { continuation in
+            continuation.resume(returning: resolvedStatus)
+        }
     }
     #endif
 
@@ -240,8 +243,10 @@ final class LocationPermissionAuthorizationHandler: NSObject, PermissionAuthoriz
                     manager = createdManager
                 }
 
-                self.continuation = continuation
-                manager.requestWhenInUseAuthorization()
+                self.continuations.append(continuation)
+                if self.continuations.count == 1 {
+                    manager.requestWhenInUseAuthorization()
+                }
             }
         }
         #else

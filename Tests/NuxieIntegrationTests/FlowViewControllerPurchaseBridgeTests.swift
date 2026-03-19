@@ -389,6 +389,43 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedAuthorization).to(beFalse())
             }
 
+            it("emits location permission outcomes for overlapping requests") {
+                let authHandler = BlockingRequestPermissionAuthorizationHandler()
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.locationPermissionAuthorizationHandler = authHandler
+                vc.locationUsageDescriptionProvider = { "Location usage description" }
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "location", journeyId: "journey-1")
+                vc.performRequestPermission(permissionType: "location", journeyId: "journey-2")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        expect(authHandler.requestedAuthorizationCount).to(equal(2))
+                        done()
+                    }
+                }
+
+                authHandler.resolveAll(with: .granted)
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([
+                    SystemEventNames.permissionGranted,
+                    SystemEventNames.permissionGranted,
+                ]))
+                expect(vc.emittedEvents.map { $0.properties["journey_id"] as? String }).to(equal([
+                    "journey-1",
+                    "journey-2",
+                ]))
+                expect(vc.emittedEvents.map { $0.properties["type"] as? String }).to(equal([
+                    "location",
+                    "location",
+                ]))
+            }
+
             it("posts permission outcomes back to standalone flows over the bridge") {
                 let authHandler = MockRequestPermissionAuthorizationHandler()
                 authHandler.status = .granted
@@ -745,6 +782,30 @@ private final class MockRequestPermissionAuthorizationHandler: PermissionAuthori
     func requestAuthorization() async -> PermissionAuthorizationStatus {
         requestedAuthorization = true
         return requestResult
+    }
+}
+
+private final class BlockingRequestPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    private(set) var requestedAuthorizationCount = 0
+    private var continuations: [CheckedContinuation<PermissionAuthorizationStatus, Never>] = []
+
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        .notDetermined
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        requestedAuthorizationCount += 1
+        return await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func resolveAll(with status: PermissionAuthorizationStatus) {
+        let pendingContinuations = continuations
+        continuations.removeAll()
+        pendingContinuations.forEach { continuation in
+            continuation.resume(returning: status)
+        }
     }
 }
 
