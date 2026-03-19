@@ -62,6 +62,7 @@ final class FlowJourneyRunner {
     private var isPaused = false
     private var pendingNotificationPermissionRequests = 0
     private var pendingTrackingPermissionRequests = 0
+    private var deferredDismissReason: CloseReason?
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private var didWarnConverters = false
@@ -343,6 +344,17 @@ final class FlowJourneyRunner {
         if pendingTrackingPermissionRequests > 0 {
             pendingTrackingPermissionRequests -= 1
         }
+    }
+
+    func deferDismiss(reason: CloseReason) {
+        deferredDismissReason = reason
+    }
+
+    func consumeDeferredDismissReasonIfReady() -> CloseReason? {
+        guard !hasPendingWork() else { return nil }
+        let reason = deferredDismissReason
+        deferredDismissReason = nil
+        return reason
     }
 
     func handleScopedSystemPermissionEvent(_ eventName: String) {

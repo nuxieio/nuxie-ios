@@ -571,17 +571,13 @@ public actor JourneyService: JourneyServiceProtocol {
       }
     }
 
-    if journey.status.isLive, !runner.hasPendingWork() {
-      let exitReason: JourneyExitReason
-      switch reason {
-      case .userDismissed:
-        exitReason = .dismissed
-      case .error:
-        exitReason = .error
-      case .purchaseCompleted, .timeout:
-        exitReason = .completed
-      }
-      completeJourney(journey, reason: exitReason)
+    if journey.status.isLive, runner.hasPendingWork() {
+      runner.deferDismiss(reason: reason)
+      return
+    }
+
+    if journey.status.isLive {
+      completeJourney(journey, reason: dismissalExitReason(for: reason))
     }
   }
 
@@ -625,6 +621,8 @@ public actor JourneyService: JourneyServiceProtocol {
         restrictedToJourneyIds: nil
       )
     }
+
+    await completeDeferredDismissIfReady(journeyId: journeyId)
 
     let trackedEvent: NuxieEvent
     let response: EventResponse?
@@ -690,9 +688,29 @@ public actor JourneyService: JourneyServiceProtocol {
   fileprivate func handleUnsupportedTrackingRequest(journeyId: String) async {
     guard let runner = flowRunners[journeyId] else { return }
     runner.endTrackingPermissionRequest()
+    await completeDeferredDismissIfReady(journeyId: journeyId)
   }
 
   // MARK: - Helpers
+
+  private func dismissalExitReason(for reason: CloseReason) -> JourneyExitReason {
+    switch reason {
+    case .userDismissed:
+      return .dismissed
+    case .error:
+      return .error
+    case .purchaseCompleted, .timeout:
+      return .completed
+    }
+  }
+
+  private func completeDeferredDismissIfReady(journeyId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId],
+          journey.status.isLive,
+          let reason = runner.consumeDeferredDismissReasonIfReady() else { return }
+    completeJourney(journey, reason: dismissalExitReason(for: reason))
+  }
 
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
     if let existing = flowRunners[journey.id] {

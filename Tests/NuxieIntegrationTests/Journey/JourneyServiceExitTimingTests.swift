@@ -89,6 +89,25 @@ private final class UnsupportedTrackingAuthorizationHandler: TrackingAuthorizati
     }
 }
 
+private final class DelayedTrackingAuthorizationHandler: TrackingAuthorizationHandling {
+    let delayNanoseconds: UInt64
+    let result: TrackingAuthorizationStatus
+
+    init(delayNanoseconds: UInt64, result: TrackingAuthorizationStatus) {
+        self.delayNanoseconds = delayNanoseconds
+        self.result = result
+    }
+
+    func authorizationStatus() -> TrackingAuthorizationStatus {
+        .notDetermined
+    }
+
+    func requestAuthorization() async -> TrackingAuthorizationStatus {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return result
+    }
+}
+
 final class JourneyServiceExitTimingTests: AsyncSpec {
     override class func spec() {
         var mocks: MockFactory!
@@ -463,6 +482,44 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     journeyStore.getCompletions(for: distinctId).last?.exitReason
                 }.toEventually(equal(.dismissed), timeout: .seconds(2))
+            }
+
+            it("completes deferred dismissals after scoped tracking outcomes resolve") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackForTriggerDelayNanoseconds = 750_000_000
+
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = DelayedTrackingAuthorizationHandler(
+                        delayNanoseconds: 100_000_000,
+                        result: .authorized
+                    )
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .milliseconds(500))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .milliseconds(500))
+
+                try? await Task.sleep(nanoseconds: 800_000_000)
             }
 
             it("tracks scoped notification outcomes against the original user across identify races") {
