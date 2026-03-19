@@ -7,6 +7,33 @@ import FactoryKit
 @testable import NuxieTestSupport
 #endif
 
+private final class RuntimeDelegateSpy: FlowRuntimeDelegate, FlowReplacementEventReceiver {
+    private(set) var dismissRequests: [(controller: FlowViewController, reason: CloseReason)] = []
+    private(set) var replacedControllers: [FlowViewController] = []
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didReceiveRuntimeMessage type: String,
+        payload: [String : Any],
+        id: String?
+    ) {}
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didSendRuntimeMessage type: String,
+        payload: [String : Any],
+        replyTo: String?
+    ) {}
+
+    func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
+        dismissRequests.append((controller, reason))
+    }
+
+    func flowViewControllerWasReplaced(_ controller: FlowViewController) {
+        replacedControllers.append(controller)
+    }
+}
+
 final class FlowPresentationServiceTests: AsyncSpec {
     override class func spec() {
         var service: FlowPresentationService!
@@ -149,6 +176,38 @@ final class FlowPresentationServiceTests: AsyncSpec {
                     
                     // Should have created a new window
                     expect(mockWindowProvider.createdWindows.count).to(equal(2))
+                }
+
+                it("notifies the runtime delegate when replacing a journey-backed flow") {
+                    let campaign = makeCampaign(id: "campaign-1")
+                    let journey = Journey(
+                        campaign: campaign,
+                        distinctId: "user-1"
+                    )
+                    let runtimeDelegate = RuntimeDelegateSpy()
+
+                    let flowId1 = "flow-1"
+                    let flowId2 = "flow-2"
+                    let mockVC1 = MockFlowViewController(mockFlowId: flowId1)
+                    let mockVC2 = MockFlowViewController(mockFlowId: flowId2)
+                    mockFlowService.mockViewControllers[flowId1] = mockVC1
+                    mockFlowService.mockViewControllers[flowId2] = mockVC2
+
+                    try! await service.presentFlow(
+                        flowId1,
+                        from: journey,
+                        runtimeDelegate: runtimeDelegate
+                    )
+                    try! await service.presentFlow(
+                        flowId2,
+                        from: nil,
+                        runtimeDelegate: nil
+                    )
+
+                    expect(runtimeDelegate.replacedControllers.count).to(equal(1))
+                    expect(runtimeDelegate.replacedControllers.first).to(beIdenticalTo(mockVC1))
+                    expect(runtimeDelegate.dismissRequests).to(beEmpty())
+                    expect(service.currentFlowViewController).to(beIdenticalTo(mockVC2))
                 }
                 
                 it("should present view controller in window") {

@@ -46,6 +46,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     internal var currentWindow: PresentationWindowProtocol?
     internal var currentFlowId: String?
     internal var currentJourney: Journey?
+    internal weak var currentFlowViewController: FlowViewController?
     
     // MARK: - Grace Period
     
@@ -133,6 +134,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         self.currentWindow = window
         self.currentFlowId = flowId
         self.currentJourney = journey
+        self.currentFlowViewController = flowViewController
         
         // 6. Present flow
         await window.present(flowViewController)
@@ -166,6 +168,13 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         }
         
         LogInfo("FlowPresentationService: Dismissing current flow")
+
+        // Replacement dismissals bypass FlowViewController.performDismiss(), so
+        // notify journey-backed runtimes before we tear the window down.
+        if let controller = currentFlowViewController {
+            (controller.runtimeDelegate as? FlowReplacementEventReceiver)?
+                .flowViewControllerWasReplaced(controller)
+        }
         
         // Dismiss the presented view controller
         await window.dismiss()
@@ -245,6 +254,7 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         // Reset state
         currentFlowId = nil
         currentJourney = nil
+        currentFlowViewController = nil
     }
 }
 

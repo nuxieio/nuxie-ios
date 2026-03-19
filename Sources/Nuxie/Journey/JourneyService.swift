@@ -593,6 +593,23 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
+  fileprivate func handleFlowReplacement(journeyId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          journey.status.isLive else { return }
+
+    if let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) {
+      await evaluateGoalIfNeeded(journey, campaign: campaign)
+      if let reason = await exitDecision(journey, campaign) {
+        completeJourney(journey, reason: reason)
+        return
+      }
+    }
+
+    if journey.status.isLive {
+      completeJourney(journey, reason: .cancelled)
+    }
+  }
+
   fileprivate func handleScopedPermissionEvent(
     journeyId: String,
     eventName: String,
@@ -1152,7 +1169,7 @@ public actor JourneyService: JourneyServiceProtocol {
   private func handleExplicitGoalActionHit(
     journey: Journey,
     goalId: String,
-  ) -> FlowJourneyRunner.GoalActionResolution {
+  ) async -> FlowJourneyRunner.GoalActionResolution {
     let hitAt = dateProvider.now()
     let didRecordHit = recordExplicitGoalHit(goalId, at: hitAt, journey: journey)
 
@@ -1161,7 +1178,7 @@ public actor JourneyService: JourneyServiceProtocol {
         persistJourney(journey)
       }
       return FlowJourneyRunner.GoalActionResolution(
-        shouldExit: shouldExitOnGoal(journey),
+        shouldExit: await shouldExitImmediatelyOnGoal(journey),
       )
     }
 
@@ -1208,7 +1225,7 @@ public actor JourneyService: JourneyServiceProtocol {
 
     latchGoalConversion(journey: journey, at: metAt)
     return FlowJourneyRunner.GoalActionResolution(
-      shouldExit: shouldExitOnGoal(journey),
+      shouldExit: await shouldExitImmediatelyOnGoal(journey),
     )
   }
 
@@ -1240,6 +1257,11 @@ public actor JourneyService: JourneyServiceProtocol {
     case .never, .onStopMatching:
       return false
     }
+  }
+
+  private func shouldExitImmediatelyOnGoal(_ journey: Journey) async -> Bool {
+    guard shouldExitOnGoal(journey) else { return false }
+    return !(await shouldDeferExitDecision())
   }
 
   private func isWithinGoalWindow(_ at: Date, journey: Journey) -> Bool {
@@ -1632,6 +1654,7 @@ public actor JourneyService: JourneyServiceProtocol {
 
 private final class FlowRuntimeDelegateAdapter:
   FlowRuntimeDelegate,
+  FlowReplacementEventReceiver,
   NotificationPermissionEventReceiver,
   RequestPermissionEventReceiver,
   TrackingPermissionEventReceiver
@@ -1677,6 +1700,12 @@ private final class FlowRuntimeDelegateAdapter:
         reason: reason,
         controller: controller
       )
+    }
+  }
+
+  func flowViewControllerWasReplaced(_ controller: FlowViewController) {
+    Task { [weak journeyService] in
+      await journeyService?.handleFlowReplacement(journeyId: journeyId)
     }
   }
 
