@@ -128,18 +128,6 @@ protocol TrackingPermissionEventReceiver: AnyObject {
         properties: [String: Any],
         journeyId: String
     )
-
-    func flowViewController(
-        _ controller: FlowViewController,
-        didCompleteUnsupportedTrackingRequestFor journeyId: String
-    )
-}
-
-extension TrackingPermissionEventReceiver {
-    func flowViewController(
-        _ controller: FlowViewController,
-        didCompleteUnsupportedTrackingRequestFor journeyId: String
-    ) {}
 }
 
 extension FlowRuntimeDelegate {
@@ -329,7 +317,9 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
                let receiver = trackingPermissionEventReceiver {
                 receiver.flowViewController(
                     self,
-                    didCompleteUnsupportedTrackingRequestFor: journeyId
+                    didResolveTrackingPermissionEvent: SystemEventNames.trackingDenied,
+                    properties: journeyScopedEventProperties(journeyId: journeyId),
+                    journeyId: journeyId
                 )
             }
             return

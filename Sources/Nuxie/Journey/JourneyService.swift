@@ -685,14 +685,6 @@ public actor JourneyService: JourneyServiceProtocol {
     await handleScopedGatePlan(response?.gatePlan())
   }
 
-  fileprivate func handleUnsupportedTrackingRequest(journeyId: String) async {
-    guard let runner = flowRunners[journeyId],
-          let journey = inMemoryJourneysById[journeyId] else { return }
-    runner.endTrackingPermissionRequest()
-    await processUnsupportedTrackingEventLocally(for: journey)
-    await completeDeferredDismissIfReady(journeyId: journeyId)
-  }
-
   // MARK: - Helpers
 
   private func dismissalExitReason(for reason: CloseReason) -> JourneyExitReason {
@@ -712,33 +704,6 @@ public actor JourneyService: JourneyServiceProtocol {
           journey.status.isLive,
           let reason = runner.consumeDeferredDismissReasonIfReady() else { return }
     completeJourney(journey, reason: dismissalExitReason(for: reason))
-  }
-
-  private func processUnsupportedTrackingEventLocally(for journey: Journey) async {
-    let properties = await eventService.prepareTriggerProperties(
-      [
-        "journey_id": journey.id,
-        "tracking_unsupported": true,
-      ],
-      userProperties: nil,
-      userPropertiesSetOnce: nil
-    )
-
-    let event = NuxieEvent(
-      name: SystemEventNames.trackingDenied,
-      distinctId: journey.distinctId,
-      properties: properties,
-      timestamp: dateProvider.now()
-    )
-
-    guard let campaigns = await getAllCampaigns(for: journey.distinctId) else { return }
-    let transientEvent = makeStoredEvent(from: event)
-    await processActiveJourneys(
-      for: event,
-      campaigns: campaigns,
-      transientEventsByJourneyId: [journey.id: [transientEvent]],
-      restrictedToJourneyIds: Set([journey.id])
-    )
   }
 
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
@@ -1493,15 +1458,6 @@ private final class FlowRuntimeDelegateAdapter:
         properties: properties,
         distinctId: distinctId
       )
-    }
-  }
-
-  func flowViewController(
-    _ controller: FlowViewController,
-    didCompleteUnsupportedTrackingRequestFor journeyId: String
-  ) {
-    Task { [weak journeyService] in
-      await journeyService?.handleUnsupportedTrackingRequest(journeyId: journeyId)
     }
   }
 }

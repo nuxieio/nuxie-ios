@@ -382,6 +382,27 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedAuthorization).to(beFalse())
             }
 
+            it("routes unsupported scoped tracking requests through the tracking receiver") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .unsupported
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                let delegate = TrackingPermissionEventReceiverSpy()
+                vc.trackingAuthorizationHandler = authHandler
+                vc.runtimeDelegate = delegate
+                _ = vc.view
+
+                vc.performRequestTracking(journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(delegate.events.map(\.name)).to(equal([SystemEventNames.trackingDenied]))
+                expect(delegate.events.first?.journeyId).to(equal("journey-1"))
+                expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
             it("requests tracking authorization when status is not determined") {
                 let authHandler = MockTrackingAuthorizationHandler()
                 authHandler.status = .notDetermined

@@ -446,6 +446,47 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
             }
 
+            it("replays unsupported scoped tracking outcomes into newly started journeys") {
+                let trackingCampaign = makeCampaign(
+                    id: "camp-tracking-denied-replay",
+                    flowId: "flow-tracking-denied-replay",
+                    trigger: .event(EventTriggerConfig(eventName: SystemEventNames.trackingDenied, condition: nil)),
+                    goal: GoalConfig(
+                        kind: .event,
+                        eventName: SystemEventNames.trackingDenied,
+                        eventFilter: nil,
+                        window: 60
+                    ),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let trackingFlow = makeFlow(flowId: "flow-tracking-denied-replay")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, trackingCampaign],
+                    flows: [primaryFlow, trackingFlow]
+                )
+                await service.initialize()
+
+                _ = await startJourney()
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-tracking-denied-replay"
+                    }?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
             it("completes dismissed journeys after unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -633,6 +674,30 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
                         properties: ["journey_id": journey.id],
                         journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    mocks.eventService.trackForTriggerCalls.last?.distinctIdOverride
+                }.toEventually(equal(distinctId), timeout: .seconds(2))
+            }
+
+            it("tracks unsupported scoped tracking outcomes against the original user across identify races") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                _ = await startJourney()
+                mocks.identityService.setDistinctId("user_2")
+
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
                     )
                 }
 
