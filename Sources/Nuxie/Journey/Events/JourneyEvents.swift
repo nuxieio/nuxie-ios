@@ -10,6 +10,7 @@ public class JourneyEvents {
     public static let journeyPaused = "$journey_paused"
     public static let journeyResumed = "$journey_resumed"
     public static let journeyErrored = "$journey_errored"
+    public static let journeyGoalHit = "$journey_goal_hit"
     public static let journeyGoalMet = "$journey_goal_met"
     public static let journeyExited = "$journey_exited"
     public static let journeyAction = "$journey_action"
@@ -159,6 +160,32 @@ public class JourneyEvents {
         }
         if let error {
             properties["error_message"] = error
+        }
+
+        return properties
+    }
+
+    public static func journeyGoalHitProperties(
+        journey: Journey,
+        screenId: String?,
+        interactionId: String?,
+        goalId: String,
+        goalLabel: String?
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "goal_id": goalId,
+        ]
+
+        if let screenId {
+            properties["screen_id"] = screenId
+        }
+        if let interactionId {
+            properties["interaction_id"] = interactionId
+        }
+        if let goalLabel, !goalLabel.isEmpty {
+            properties["goal_label"] = goalLabel
         }
 
         return properties

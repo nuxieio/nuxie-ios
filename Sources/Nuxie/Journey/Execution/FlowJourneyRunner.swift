@@ -539,6 +539,10 @@ final class FlowJourneyRunner {
                 await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
+            case .goal(let goal):
+                await handleGoal(goal, context: context)
+                trackAction(action, context: context, error: nil)
+                return .continue
             case .updateCustomer(let updateCustomer):
                 handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
@@ -1657,6 +1661,21 @@ final class FlowJourneyRunner {
         )
     }
 
+    private func handleGoal(_ action: GoalAction, context: TriggerContext) async {
+        eventService.track(
+            JourneyEvents.journeyGoalHit,
+            properties: JourneyEvents.journeyGoalHitProperties(
+                journey: journey,
+                screenId: context.screenId ?? journey.flowState.currentScreenId,
+                interactionId: context.interactionId,
+                goalId: action.goalId.isEmpty ? "primary" : action.goalId,
+                goalLabel: action.label
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+    }
+
     private func sendViewModelInit() {
         guard let controller = viewController else { return }
         warnConvertersIfNeeded()
@@ -2063,6 +2082,7 @@ private extension InteractionAction {
         case .condition: return "condition"
         case .experiment: return "experiment"
         case .sendEvent: return "send_event"
+        case .goal: return "goal"
         case .updateCustomer: return "update_customer"
         case .purchase: return "purchase"
         case .restore: return "restore"
