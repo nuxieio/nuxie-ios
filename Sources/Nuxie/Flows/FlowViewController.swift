@@ -1,6 +1,7 @@
 import Foundation
 import FactoryKit
 import WebKit
+import UserNotifications
 
 #if canImport(UIKit)
 import UIKit
@@ -11,6 +12,25 @@ import AppKit
 #if canImport(SafariServices)
 import SafariServices
 #endif
+
+protocol NotificationAuthorizationHandling {
+    func authorizationStatus() async -> UNAuthorizationStatus
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool
+}
+
+struct UserNotificationAuthorizationHandler: NotificationAuthorizationHandling {
+    func authorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
+        try await UNUserNotificationCenter.current().requestAuthorization(options: options)
+    }
+}
 
 /// Delegate for Flow runtime bridge messages
 protocol FlowRuntimeDelegate: AnyObject {
@@ -32,6 +52,15 @@ protocol FlowRuntimeDelegate: AnyObject {
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason)
 }
 
+protocol NotificationPermissionEventReceiver: AnyObject {
+    func flowViewController(
+        _ controller: FlowViewController,
+        didResolveNotificationPermissionEvent eventName: String,
+        properties: [String: Any],
+        journeyId: String
+    )
+}
+
 extension FlowRuntimeDelegate {
     func flowViewController(
         _ controller: FlowViewController,
@@ -48,9 +77,23 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     private let viewModel: FlowViewModel
     private let fontStore: FontStore
+    var notificationAuthorizationHandler: NotificationAuthorizationHandling = UserNotificationAuthorizationHandler()
 
     /// Delegate for runtime bridge messages
-    weak var runtimeDelegate: FlowRuntimeDelegate?
+    weak var runtimeDelegate: FlowRuntimeDelegate? {
+        didSet {
+            if let receiver = runtimeDelegate as? NotificationPermissionEventReceiver {
+                notificationPermissionEventReceiver = receiver
+            }
+        }
+    }
+
+    /// Dedicated receiver for native notification permission results.
+    ///
+    /// This is retained separately from `runtimeDelegate` because permission
+    /// responses can arrive after the journey delegate has been removed from the
+    /// active journey maps during identity changes or cancellation.
+    var notificationPermissionEventReceiver: NotificationPermissionEventReceiver?
 
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
@@ -167,6 +210,30 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     func performRestore() {
         handleBridgeRestore(requestId: nil)
+    }
+
+    func performRequestNotifications(journeyId: String? = nil) {
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.resolveNotificationAuthorizationOutcome()
+            let properties = self.notificationPermissionProperties(journeyId: journeyId)
+            let eventName: String
+            switch outcome {
+            case .enabled:
+                eventName = SystemEventNames.notificationsEnabled
+            case .denied:
+                eventName = SystemEventNames.notificationsDenied
+            }
+            self.dispatchNotificationPermissionEvent(
+                eventName,
+                properties: properties,
+                journeyId: journeyId
+            )
+        }
+    }
+
+    func emitSystemEvent(_ name: String, properties: [String: Any]) {
+        NuxieSDK.shared.trigger(name, properties: properties.isEmpty ? nil : properties)
     }
 
     func performDismiss(reason: CloseReason = .userDismissed) {
@@ -352,6 +419,12 @@ extension FlowViewController {
             } else {
                 handleBridgeRestore(requestId: id)
             }
+        case "action/request_notifications":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else {
+                performRequestNotifications()
+            }
         case "action/open_link":
             if runtimeDelegate != nil {
                 runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
@@ -383,10 +456,93 @@ extension FlowViewController {
 }
 
 private extension FlowViewController {
+    enum NotificationAuthorizationOutcome {
+        case enabled
+        case denied
+    }
+
     func invokeOnCloseOnce(_ reason: CloseReason) {
         guard !didInvokeClose else { return }
         didInvokeClose = true
         onClose?(reason)
+    }
+
+    func resolveNotificationAuthorizationOutcome() async -> NotificationAuthorizationOutcome {
+        let status = await notificationAuthorizationHandler.authorizationStatus()
+        if isNotificationAuthorizationGranted(status) {
+            return .enabled
+        }
+        if status == .denied {
+            return .denied
+        }
+
+        do {
+            let granted = try await notificationAuthorizationHandler.requestAuthorization(
+                options: [.alert, .badge, .sound]
+            )
+            return granted ? .enabled : .denied
+        } catch {
+            LogWarning("FlowViewController: notification request failed: \(error)")
+            return .denied
+        }
+    }
+
+    func isNotificationAuthorizationGranted(_ status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized:
+            return true
+        case .ephemeral, .provisional, .notDetermined, .denied:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    func notificationPermissionProperties(journeyId: String?) -> [String: Any] {
+        guard let journeyId, !journeyId.isEmpty else {
+            return [:]
+        }
+        return ["journey_id": journeyId]
+    }
+
+    func dispatchNotificationPermissionEvent(
+        _ eventName: String,
+        properties: [String: Any],
+        journeyId: String?
+    ) {
+        if let journeyId, !journeyId.isEmpty,
+           let receiver = notificationPermissionEventReceiver {
+            receiver.flowViewController(
+                self,
+                didResolveNotificationPermissionEvent: eventName,
+                properties: properties,
+                journeyId: journeyId
+            )
+            return
+        }
+
+        if journeyId == nil {
+            sendNotificationPermissionEventToRuntime(
+                eventName,
+                properties: properties
+            )
+        }
+
+        emitSystemEvent(eventName, properties: properties)
+    }
+
+    func sendNotificationPermissionEventToRuntime(
+        _ eventName: String,
+        properties: [String: Any]
+    ) {
+        guard flowWebView != nil else { return }
+
+        var payload: [String: Any] = ["name": eventName]
+        if !properties.isEmpty {
+            payload["properties"] = properties
+        }
+
+        flowWebView.sendBridgeMessage(type: "action/event", payload: payload)
     }
 
     func applyColorSchemeMode() {

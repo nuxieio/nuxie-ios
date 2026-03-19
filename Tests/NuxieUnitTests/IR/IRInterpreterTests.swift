@@ -117,9 +117,15 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
         _ event: String,
         properties: [String: Any]?,
         userProperties: [String: Any]?,
-        userPropertiesSetOnce: [String: Any]?
+        userPropertiesSetOnce: [String: Any]?,
+        persistToHistory: Bool,
+        distinctIdOverride: String?
     ) async throws -> (NuxieEvent, EventResponse) {
-        let nuxieEvent = NuxieEvent(name: event, distinctId: "test-user", properties: properties ?? [:])
+        let nuxieEvent = NuxieEvent(
+            name: event,
+            distinctId: distinctIdOverride ?? "test-user",
+            properties: properties ?? [:]
+        )
         let response = EventResponse(
             status: "ok",
             payload: nil,

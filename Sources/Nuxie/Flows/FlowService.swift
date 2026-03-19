@@ -217,6 +217,8 @@ final class FlowService: FlowServiceProtocol {
             colorSchemeMode: colorSchemeMode
         )
         controller.runtimeDelegate = runtimeDelegate
+        controller.notificationPermissionEventReceiver =
+            runtimeDelegate as? NotificationPermissionEventReceiver
         return controller
     }
     

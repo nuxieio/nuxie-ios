@@ -60,6 +60,7 @@ final class FlowJourneyRunner {
     private var activeIndex: Int = 0
     private var isProcessing = false
     private var isPaused = false
+    private var pendingNotificationPermissionRequests = 0
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private var didWarnConverters = false
@@ -321,10 +322,27 @@ final class FlowJourneyRunner {
     }
 
     func hasPendingWork() -> Bool {
+        if pendingNotificationPermissionRequests > 0 { return true }
         if journey.flowState.pendingAction != nil { return true }
         if activeRequest != nil { return true }
         if !actionQueue.isEmpty { return true }
         return false
+    }
+
+    func beginNotificationPermissionRequest() {
+        pendingNotificationPermissionRequests += 1
+    }
+
+    func handleNotificationPermissionEvent(_ eventName: String) {
+        guard eventName == SystemEventNames.notificationsEnabled
+            || eventName == SystemEventNames.notificationsDenied
+        else {
+            return
+        }
+
+        if pendingNotificationPermissionRequests > 0 {
+            pendingNotificationPermissionRequests -= 1
+        }
     }
 
     private func makeSystemEvent(name: String, properties: [String: Any]) -> NuxieEvent {
@@ -474,6 +492,10 @@ final class FlowJourneyRunner {
                 return result
             case .restore(let restore):
                 let result = await handleRestore(restore, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .requestNotifications(let requestNotifications):
+                let result = await handleRequestNotifications(requestNotifications, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
             case .openLink(let openLink):
@@ -946,6 +968,19 @@ final class FlowJourneyRunner {
             object: nil,
             userInfo: userInfo
         )
+        return .continue
+    }
+
+    private func handleRequestNotifications(
+        _ action: RequestNotificationsAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        guard let controller = viewController else { return .continue }
+        let journeyId = journey.id
+        beginNotificationPermissionRequest()
+        await MainActor.run {
+            controller.performRequestNotifications(journeyId: journeyId)
+        }
         return .continue
     }
 
@@ -1937,6 +1972,7 @@ private extension InteractionAction {
         case .updateCustomer: return "update_customer"
         case .purchase: return "purchase"
         case .restore: return "restore"
+        case .requestNotifications: return "request_notifications"
         case .openLink: return "open_link"
         case .dismiss: return "dismiss"
         case .callDelegate: return "call_delegate"

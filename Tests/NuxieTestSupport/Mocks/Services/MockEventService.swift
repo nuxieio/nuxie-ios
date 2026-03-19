@@ -43,7 +43,7 @@ public class MockEventService: EventServiceProtocol {
         
         // Create a simple NuxieEvent for mock purposes (without enrichment)
         let nuxieEvent = TestEventBuilder(name: event)
-            .withDistinctId("test-distinct-id")
+            .withDistinctId(Container.shared.identityService().getDistinctId())
             .withProperties(properties ?? [:])
             .build()
         
@@ -270,6 +270,7 @@ public class MockEventService: EventServiceProtocol {
             _trackForTriggerCalls.removeAll()
             _trackWithResponseResult = nil
             _trackWithResponseError = nil
+            _trackForTriggerDelayNanoseconds = 0
         }
     }
     
@@ -308,7 +309,8 @@ public class MockEventService: EventServiceProtocol {
     private var _trackWithResponseResult: EventResponse?
     private var _trackWithResponseError: Error?
     private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
-    private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?)] = []
+    private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?, distinctIdOverride: String?)] = []
+    private var _trackForTriggerDelayNanoseconds: UInt64 = 0
     
     public var trackWithResponseResult: EventResponse? {
         get { lock.withLock { _trackWithResponseResult } }
@@ -325,19 +327,31 @@ public class MockEventService: EventServiceProtocol {
         set { lock.withLock { _trackWithResponseCalls = newValue } }
     }
 
-    public private(set) var trackForTriggerCalls: [(event: String, properties: [String: Any]?)] {
+    public private(set) var trackForTriggerCalls: [(event: String, properties: [String: Any]?, distinctIdOverride: String?)] {
         get { lock.withLock { _trackForTriggerCalls } }
         set { lock.withLock { _trackForTriggerCalls = newValue } }
+    }
+
+    public var trackForTriggerDelayNanoseconds: UInt64 {
+        get { lock.withLock { _trackForTriggerDelayNanoseconds } }
+        set { lock.withLock { _trackForTriggerDelayNanoseconds = newValue } }
     }
 
     public func trackForTrigger(
         _ event: String,
         properties: [String: Any]?,
         userProperties: [String: Any]?,
-        userPropertiesSetOnce: [String: Any]?
+        userPropertiesSetOnce: [String: Any]?,
+        persistToHistory: Bool,
+        distinctIdOverride: String?
     ) async throws -> (NuxieEvent, EventResponse) {
         lock.withLock {
-            _trackForTriggerCalls.append((event: event, properties: properties))
+            _trackForTriggerCalls.append((event: event, properties: properties, distinctIdOverride: distinctIdOverride))
+        }
+
+        let delayNanoseconds = lock.withLock { _trackForTriggerDelayNanoseconds }
+        if delayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
         }
 
         let (result, error): (EventResponse?, Error?) = lock.withLock {
@@ -347,12 +361,20 @@ public class MockEventService: EventServiceProtocol {
             throw error
         }
 
+        let enrichedProperties = await prepareTriggerProperties(
+            properties,
+            userProperties: userProperties,
+            userPropertiesSetOnce: userPropertiesSetOnce
+        )
+
         let nuxieEvent = TestEventBuilder(name: event)
-            .withDistinctId("test-distinct-id")
-            .withProperties(properties ?? [:])
+            .withDistinctId(distinctIdOverride ?? "test-distinct-id")
+            .withProperties(enrichedProperties)
             .build()
 
-        await route(nuxieEvent)
+        if persistToHistory {
+            await route(nuxieEvent)
+        }
 
         let response = result ?? EventResponse(
             status: "ok",
@@ -367,6 +389,24 @@ public class MockEventService: EventServiceProtocol {
         )
 
         return (nuxieEvent, response)
+    }
+
+    public func prepareTriggerProperties(
+        _ properties: [String: Any]?,
+        userProperties: [String: Any]?,
+        userPropertiesSetOnce: [String: Any]?
+    ) async -> [String: Any] {
+        var finalProperties = properties ?? [:]
+        if let userProperties { finalProperties["$set"] = userProperties }
+        if let userPropertiesSetOnce { finalProperties["$set_once"] = userPropertiesSetOnce }
+
+        if finalProperties["$session_id"] == nil,
+           let sessionId = Container.shared.sessionService().getSessionId(at: Date(), readOnly: false) {
+            finalProperties["$session_id"] = sessionId
+            Container.shared.sessionService().touchSession()
+        }
+
+        return finalProperties
     }
 
     public func trackWithResponse(

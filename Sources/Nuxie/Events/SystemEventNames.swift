@@ -9,4 +9,6 @@ enum SystemEventNames {
     static let restoreCompleted = "$restore_completed"
     static let restoreFailed = "$restore_failed"
     static let restoreNoPurchases = "$restore_no_purchases"
+    static let notificationsEnabled = "$notifications_enabled"
+    static let notificationsDenied = "$notifications_denied"
 }
