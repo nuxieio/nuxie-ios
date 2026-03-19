@@ -4,6 +4,12 @@ import FactoryKit
 final class FlowJourneyRunner {
     private static let currentDeviceTimezoneToken = "__current_device__"
 
+    struct GoalActionResolution {
+        let shouldExit: Bool
+
+        static let `continue` = GoalActionResolution(shouldExit: false)
+    }
+
     struct TriggerContext {
         let screenId: String?
         let componentId: String?
@@ -50,6 +56,7 @@ final class FlowJourneyRunner {
 
     weak var viewController: FlowViewController?
     var onShowScreen: ((String, AnyCodable?) async -> Void)?
+    var onGoalActionHit: ((String, String?) async -> GoalActionResolution)?
     private(set) var isRuntimeReady = false
 
     private var interactionsById: [String: [Interaction]] = [:]
@@ -539,6 +546,10 @@ final class FlowJourneyRunner {
                 await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
+            case .goal(let goal):
+                let result = await handleGoal(goal, context: context)
+                trackAction(action, context: context, error: nil)
+                return result.shouldExit ? .exit(.goalMet) : .continue
             case .updateCustomer(let updateCustomer):
                 handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
@@ -1657,6 +1668,24 @@ final class FlowJourneyRunner {
         )
     }
 
+    private func handleGoal(_ action: GoalAction, context: TriggerContext) async -> GoalActionResolution {
+        let goalId = action.goalId.isEmpty ? "primary" : action.goalId
+        eventService.track(
+            JourneyEvents.journeyGoalHit,
+            properties: JourneyEvents.journeyGoalHitProperties(
+                journey: journey,
+                screenId: context.screenId ?? journey.flowState.currentScreenId,
+                interactionId: context.interactionId,
+                goalId: goalId,
+                goalLabel: action.label
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+        return await onGoalActionHit?(goalId, action.label)
+            ?? GoalActionResolution(shouldExit: false)
+    }
+
     private func sendViewModelInit() {
         guard let controller = viewController else { return }
         warnConvertersIfNeeded()
@@ -2063,6 +2092,7 @@ private extension InteractionAction {
         case .condition: return "condition"
         case .experiment: return "experiment"
         case .sendEvent: return "send_event"
+        case .goal: return "goal"
         case .updateCustomer: return "update_customer"
         case .purchase: return "purchase"
         case .restore: return "restore"

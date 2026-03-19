@@ -51,6 +51,7 @@ public protocol JourneyServiceProtocol: AnyObject {
 }
 
 public actor JourneyService: JourneyServiceProtocol {
+  private static let explicitGoalHitsContextKey = "__explicit_goal_hits"
 
   // MARK: - Dependencies
 
@@ -789,6 +790,12 @@ public actor JourneyService: JourneyServiceProtocol {
           }
         }
       }
+      runner.onGoalActionHit = { [weak self, weak journey] goalId, _ in
+        guard let self, let journey else {
+          return FlowJourneyRunner.GoalActionResolution(shouldExit: false)
+        }
+        return await self.handleExplicitGoalActionHit(journey: journey, goalId: goalId)
+      }
 
       flowRunners[journey.id] = runner
 
@@ -1138,23 +1145,208 @@ public actor JourneyService: JourneyServiceProtocol {
       transientEvents: transientEvents
     )
     if result.met, let at = result.at {
-      journey.convertedAt = at
-      journey.updatedAt = dateProvider.now()
-      persistJourney(journey)
+      latchGoalConversion(journey: journey, at: at)
+    }
+  }
 
-      eventService.track(
-        JourneyEvents.journeyGoalMet,
-        properties: [
-          "journey_id": journey.id,
-          "campaign_id": journey.campaignId,
-          "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
-          "met_at": at.timeIntervalSince1970,
-          "window_seconds": journey.conversionWindow,
-        ],
-        userProperties: nil,
-        userPropertiesSetOnce: nil
+  private func handleExplicitGoalActionHit(
+    journey: Journey,
+    goalId: String,
+  ) -> FlowJourneyRunner.GoalActionResolution {
+    let hitAt = dateProvider.now()
+    let didRecordHit = recordExplicitGoalHit(goalId, at: hitAt, journey: journey)
+
+    if journey.convertedAt != nil {
+      if didRecordHit {
+        persistJourney(journey)
+      }
+      return FlowJourneyRunner.GoalActionResolution(
+        shouldExit: shouldExitOnGoal(journey),
       )
     }
+
+    guard
+      let goal = journey.goalSnapshot,
+      let explicitGoalIds = compiledExplicitGoalIds(from: goal)
+    else {
+      if didRecordHit {
+        persistJourney(journey)
+      }
+      return FlowJourneyRunner.GoalActionResolution(shouldExit: false)
+    }
+
+    let metAt: Date?
+    switch goal.kind {
+    case .event:
+      metAt =
+        explicitGoalIds.count == 1 &&
+        explicitGoalIds.first == goalId &&
+        isWithinGoalWindow(hitAt, journey: journey)
+        ? explicitGoalHitTimestamps(for: journey)[goalId]
+        : nil
+    case .attribute:
+      guard isWithinGoalWindow(hitAt, journey: journey) else {
+        metAt = nil
+        break
+      }
+      let goalHits = explicitGoalHitTimestamps(for: journey)
+      let requiredHits = explicitGoalIds.compactMap { goalHits[$0] }
+      metAt =
+        requiredHits.count == explicitGoalIds.count
+        ? requiredHits.max()
+        : nil
+    case .segmentEnter, .segmentLeave:
+      metAt = nil
+    }
+
+    guard let metAt else {
+      if didRecordHit {
+        persistJourney(journey)
+      }
+      return FlowJourneyRunner.GoalActionResolution(shouldExit: false)
+    }
+
+    latchGoalConversion(journey: journey, at: metAt)
+    return FlowJourneyRunner.GoalActionResolution(
+      shouldExit: shouldExitOnGoal(journey),
+    )
+  }
+
+  private func latchGoalConversion(journey: Journey, at: Date) {
+    guard journey.convertedAt == nil else { return }
+
+    journey.convertedAt = at
+    journey.updatedAt = dateProvider.now()
+    persistJourney(journey)
+
+    eventService.track(
+      JourneyEvents.journeyGoalMet,
+      properties: [
+        "journey_id": journey.id,
+        "campaign_id": journey.campaignId,
+        "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
+        "met_at": at.timeIntervalSince1970,
+        "window_seconds": journey.conversionWindow,
+      ],
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+  }
+
+  private func shouldExitOnGoal(_ journey: Journey) -> Bool {
+    switch journey.exitPolicySnapshot?.mode ?? .never {
+    case .onGoal, .onGoalOrStop:
+      return true
+    case .never, .onStopMatching:
+      return false
+    }
+  }
+
+  private func isWithinGoalWindow(_ at: Date, journey: Journey) -> Bool {
+    guard journey.conversionWindow > 0 else { return true }
+    return at <= journey.conversionAnchorAt.addingTimeInterval(journey.conversionWindow)
+  }
+
+  private func explicitGoalHitTimestamps(for journey: Journey) -> [String: Date] {
+    guard let raw = journey.getContext(Self.explicitGoalHitsContextKey) as? [String: Any] else {
+      return [:]
+    }
+
+    return raw.reduce(into: [String: Date]()) { result, entry in
+      switch entry.value {
+      case let seconds as Double:
+        result[entry.key] = Date(timeIntervalSince1970: seconds)
+      case let seconds as Float:
+        result[entry.key] = Date(timeIntervalSince1970: TimeInterval(seconds))
+      case let seconds as Int:
+        result[entry.key] = Date(timeIntervalSince1970: TimeInterval(seconds))
+      case let seconds as NSNumber:
+        result[entry.key] = Date(timeIntervalSince1970: seconds.doubleValue)
+      default:
+        break
+      }
+    }
+  }
+
+  @discardableResult
+  private func recordExplicitGoalHit(_ goalId: String, at: Date, journey: Journey) -> Bool {
+    var goalHits = explicitGoalHitTimestamps(for: journey)
+    guard goalHits[goalId] == nil else { return false }
+
+    goalHits[goalId] = at
+    journey.setContext(
+      Self.explicitGoalHitsContextKey,
+      value: goalHits.mapValues { $0.timeIntervalSince1970 },
+    )
+    return true
+  }
+
+  private func compiledExplicitGoalIds(from goal: GoalConfig) -> [String]? {
+    switch goal.kind {
+    case .event:
+      guard goal.eventName == JourneyEvents.journeyGoalHit else { return nil }
+      guard let goalId = compiledExplicitGoalId(from: goal.eventFilter?.expr) else {
+        return nil
+      }
+      return [goalId]
+    case .attribute:
+      guard let expr = goal.attributeExpr?.expr else { return nil }
+      return compiledExplicitGoalIds(fromAttributeExpr: expr)
+    case .segmentEnter, .segmentLeave:
+      return nil
+    }
+  }
+
+  private func compiledExplicitGoalIds(fromAttributeExpr expr: IRExpr) -> [String]? {
+    guard case .and(let args) = expr else { return nil }
+
+    var goalIds: [String] = []
+    for arg in args {
+      guard
+        case .eventsExists(let name, _, _, _, let whereExpr) = arg,
+        name == JourneyEvents.journeyGoalHit,
+        let goalId = compiledExplicitGoalId(from: whereExpr)
+      else {
+        return nil
+      }
+      goalIds.append(goalId)
+    }
+
+    return goalIds.isEmpty ? nil : goalIds
+  }
+
+  private func compiledExplicitGoalId(from expr: IRExpr?) -> String? {
+    guard let expr else { return nil }
+
+    let predicates: [IRExpr]
+    switch expr {
+    case .pred(_, _, _):
+      predicates = [expr]
+    case .predAnd(let args):
+      predicates = args
+    default:
+      return nil
+    }
+
+    var goalId: String?
+    var hasJourneyScope = false
+
+    for predicate in predicates {
+      guard case .pred(let op, let key, let value) = predicate, op == "eq" else {
+        continue
+      }
+      switch (key, value) {
+      case ("goal_id", .string(let value)?):
+        goalId = value
+      case ("journey_id", .journeyId?):
+        hasJourneyScope = true
+      default:
+        break
+      }
+    }
+
+    guard hasJourneyScope else { return nil }
+    return goalId
   }
 
   private func makeStoredEvent(from event: NuxieEvent) -> StoredEvent {

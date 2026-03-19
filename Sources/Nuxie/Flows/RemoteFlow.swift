@@ -540,6 +540,7 @@ public enum InteractionAction: Codable {
     case condition(ConditionAction)
     case experiment(ExperimentAction)
     case sendEvent(SendEventAction)
+    case goal(GoalAction)
     case updateCustomer(UpdateCustomerAction)
     case purchase(PurchaseAction)
     case restore(RestoreAction)
@@ -574,6 +575,7 @@ public enum InteractionAction: Codable {
         case condition
         case experiment
         case sendEvent = "send_event"
+        case goal
         case updateCustomer = "update_customer"
         case purchase
         case restore
@@ -615,6 +617,8 @@ public enum InteractionAction: Codable {
             self = .experiment(try ExperimentAction(from: decoder))
         case .sendEvent:
             self = .sendEvent(try SendEventAction(from: decoder))
+        case .goal:
+            self = .goal(try GoalAction(from: decoder))
         case .updateCustomer:
             self = .updateCustomer(try UpdateCustomerAction(from: decoder))
         case .purchase:
@@ -681,6 +685,8 @@ public enum InteractionAction: Codable {
         case .experiment(let action):
             try action.encode(to: encoder)
         case .sendEvent(let action):
+            try action.encode(to: encoder)
+        case .goal(let action):
             try action.encode(to: encoder)
         case .updateCustomer(let action):
             try action.encode(to: encoder)
@@ -853,6 +859,42 @@ public struct SendEventAction: Codable {
         self.type = type
         self.eventName = eventName
         self.properties = properties
+    }
+}
+
+public struct GoalAction: Codable {
+    public let type: String
+    public let goalId: String
+    public let label: String?
+
+    public init(type: String = "goal", goalId: String, label: String? = nil) {
+        self.type = type
+        self.goalId = goalId
+        self.label = label
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case goalId
+        case label
+        case legacyId = "id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decodeIfPresent(String.self, forKey: .type) ?? "goal"
+        goalId =
+            try container.decodeIfPresent(String.self, forKey: .goalId)
+            ?? container.decodeIfPresent(String.self, forKey: .legacyId)
+            ?? "primary"
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(goalId, forKey: .goalId)
+        try container.encodeIfPresent(label, forKey: .label)
     }
 }
 
