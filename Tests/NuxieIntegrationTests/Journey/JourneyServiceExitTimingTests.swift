@@ -636,6 +636,58 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.dismissed), timeout: .milliseconds(500))
             }
 
+            it("keeps deferred dismiss waiting when another request permission is still pending") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    controller.cameraPermissionAuthorizationHandler = DelayedRequestPermissionAuthorizationHandler(
+                        initialStatus: .notDetermined,
+                        delayNanoseconds: 200_000_000,
+                        result: .granted
+                    )
+                    controller.cameraUsageDescriptionProvider = { "Camera usage description" }
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "location_always"],
+                        id: nil
+                    )
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "camera"],
+                        id: nil
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 75_000_000)
+                let isStillActive = await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                expect(isStillActive).to(beTrue())
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -1164,5 +1216,30 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 expect(orderingPresentationService.wasFlowPresented("gate-flow")).to(beFalse())
             }
         }
+    }
+}
+
+private final class DelayedRequestPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    let initialStatus: PermissionAuthorizationStatus
+    let delayNanoseconds: UInt64
+    let result: PermissionAuthorizationStatus
+
+    init(
+        initialStatus: PermissionAuthorizationStatus,
+        delayNanoseconds: UInt64,
+        result: PermissionAuthorizationStatus
+    ) {
+        self.initialStatus = initialStatus
+        self.delayNanoseconds = delayNanoseconds
+        self.result = result
+    }
+
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        initialStatus
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return result
     }
 }

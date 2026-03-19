@@ -478,14 +478,17 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
                 permissionType: permissionType
             )
             guard case let .status(outcome) = resolution else {
-                if let journeyId, !journeyId.isEmpty,
-                   let receiver = self.requestPermissionEventReceiver {
-                    receiver.flowViewController(
-                        self,
-                        didIgnoreUnsupportedRequestPermissionType: permissionType,
-                        journeyId: journeyId
-                    )
-                }
+                self.handleUnsupportedRequestPermission(
+                    permissionType: permissionType,
+                    journeyId: journeyId
+                )
+                return
+            }
+            guard outcome != .unsupported else {
+                self.handleUnsupportedRequestPermission(
+                    permissionType: permissionType,
+                    journeyId: journeyId
+                )
                 return
             }
             let properties = self.permissionEventProperties(
@@ -501,7 +504,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
             case .limited:
                 eventName = SystemEventNames.permissionGranted
             case .unsupported:
-                eventName = SystemEventNames.permissionDenied
+                return
             }
             self.dispatchRequestPermissionEvent(
                 eventName,
@@ -936,6 +939,23 @@ private extension FlowViewController {
         journeyScopedEventProperties(
             journeyId: journeyId,
             extraProperties: ["type": permissionType]
+        )
+    }
+
+    func handleUnsupportedRequestPermission(
+        permissionType: String,
+        journeyId: String?
+    ) {
+        guard let journeyId, !journeyId.isEmpty,
+              let receiver = requestPermissionEventReceiver
+        else {
+            return
+        }
+
+        receiver.flowViewController(
+            self,
+            didIgnoreUnsupportedRequestPermissionType: permissionType,
+            journeyId: journeyId
         )
     }
 

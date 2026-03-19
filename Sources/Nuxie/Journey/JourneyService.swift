@@ -703,7 +703,6 @@ public actor JourneyService: JourneyServiceProtocol {
     guard let journey = inMemoryJourneysById[journeyId],
           let runner = flowRunners[journeyId],
           journey.status.isLive else { return }
-    runner.endRequestPermissionRequest()
 
     let scopedDistinctId = journey.distinctId
     let enrichedProperties = await eventService.prepareTriggerProperties(
