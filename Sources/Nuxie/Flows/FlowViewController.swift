@@ -5,6 +5,9 @@ import UserNotifications
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+#if canImport(CoreLocation) && !os(macOS)
+import CoreLocation
+#endif
 #if canImport(Photos)
 import Photos
 #endif
@@ -179,6 +182,86 @@ struct PhotoLibraryPermissionAuthorizationHandler: PermissionAuthorizationHandli
     }
 }
 
+final class LocationPermissionAuthorizationHandler: NSObject, PermissionAuthorizationHandling {
+    #if canImport(CoreLocation) && !os(macOS)
+    private var manager: CLLocationManager?
+    private var continuation: CheckedContinuation<PermissionAuthorizationStatus, Never>?
+
+    private static func map(_ status: CLAuthorizationStatus) -> PermissionAuthorizationStatus {
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse:
+            return .granted
+        case .denied:
+            return .denied
+        case .restricted:
+            return .restricted
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .unsupported
+        }
+    }
+
+    private func resolveContinuationIfNeeded(_ status: CLAuthorizationStatus) {
+        let resolvedStatus = Self.map(status)
+        guard resolvedStatus != .notDetermined,
+              let continuation
+        else { return }
+
+        self.continuation = nil
+        continuation.resume(returning: resolvedStatus)
+    }
+    #endif
+
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        #if canImport(CoreLocation) && !os(macOS)
+        return Self.map(CLLocationManager.authorizationStatus())
+        #else
+        return .unsupported
+        #endif
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        #if canImport(CoreLocation) && !os(macOS)
+        let currentStatus = authorizationStatus()
+        guard currentStatus == .notDetermined else {
+            return currentStatus
+        }
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                let manager: CLLocationManager
+                if let existingManager = self.manager {
+                    manager = existingManager
+                } else {
+                    let createdManager = CLLocationManager()
+                    createdManager.delegate = self
+                    self.manager = createdManager
+                    manager = createdManager
+                }
+
+                self.continuation = continuation
+                manager.requestWhenInUseAuthorization()
+            }
+        }
+        #else
+        return .unsupported
+        #endif
+    }
+}
+
+#if canImport(CoreLocation) && !os(macOS)
+extension LocationPermissionAuthorizationHandler: CLLocationManagerDelegate {
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        resolveContinuationIfNeeded(manager.authorizationStatus)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        resolveContinuationIfNeeded(status)
+    }
+}
+#endif
+
 struct AppTrackingAuthorizationHandler: TrackingAuthorizationHandling {
     func authorizationStatus() -> TrackingAuthorizationStatus {
         #if canImport(AppTrackingTransparency)
@@ -294,11 +377,15 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     private let fontStore: FontStore
     var notificationAuthorizationHandler: NotificationAuthorizationHandling = UserNotificationAuthorizationHandler()
     var cameraPermissionAuthorizationHandler: PermissionAuthorizationHandling = CameraPermissionAuthorizationHandler()
+    var locationPermissionAuthorizationHandler: PermissionAuthorizationHandling = LocationPermissionAuthorizationHandler()
     var microphonePermissionAuthorizationHandler: PermissionAuthorizationHandling = MicrophonePermissionAuthorizationHandler()
     var photoLibraryPermissionAuthorizationHandler: PermissionAuthorizationHandling = PhotoLibraryPermissionAuthorizationHandler()
     var trackingAuthorizationHandler: TrackingAuthorizationHandling = AppTrackingAuthorizationHandler()
     var cameraUsageDescriptionProvider: () -> String? = {
         Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") as? String
+    }
+    var locationUsageDescriptionProvider: () -> String? = {
+        Bundle.main.object(forInfoDictionaryKey: "NSLocationWhenInUseUsageDescription") as? String
     }
     var microphoneUsageDescriptionProvider: () -> String? = {
         Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") as? String
@@ -796,6 +883,7 @@ private extension FlowViewController {
 
     enum RequestPermissionKind: String {
         case camera
+        case location
         case microphone
         case photos
     }
@@ -884,6 +972,10 @@ private extension FlowViewController {
             handler = cameraPermissionAuthorizationHandler
             usageDescriptionProvider = cameraUsageDescriptionProvider
             usageDescriptionKey = "NSCameraUsageDescription"
+        case .location:
+            handler = locationPermissionAuthorizationHandler
+            usageDescriptionProvider = locationUsageDescriptionProvider
+            usageDescriptionKey = "NSLocationWhenInUseUsageDescription"
         case .microphone:
             handler = microphonePermissionAuthorizationHandler
             usageDescriptionProvider = microphoneUsageDescriptionProvider

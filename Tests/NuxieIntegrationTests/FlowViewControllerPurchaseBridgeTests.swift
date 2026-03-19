@@ -349,6 +349,46 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedAuthorization).to(beFalse())
             }
 
+            it("emits permission_granted when location permission is already authorized") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .granted
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.locationPermissionAuthorizationHandler = authHandler
+                vc.locationUsageDescriptionProvider = { "Location usage description" }
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "location", journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.permissionGranted]))
+                expect(vc.emittedEvents.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(vc.emittedEvents.first?.properties["type"] as? String).to(equal("location"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("emits permission_denied when location usage description is missing") {
+                let authHandler = MockRequestPermissionAuthorizationHandler()
+                authHandler.status = .notDetermined
+                authHandler.requestResult = .granted
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.locationPermissionAuthorizationHandler = authHandler
+                vc.locationUsageDescriptionProvider = { nil }
+                _ = vc.view
+
+                vc.performRequestPermission(permissionType: "location")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.permissionDenied]))
+                expect(vc.emittedEvents.first?.properties["type"] as? String).to(equal("location"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
             it("posts permission outcomes back to standalone flows over the bridge") {
                 let authHandler = MockRequestPermissionAuthorizationHandler()
                 authHandler.status = .granted
