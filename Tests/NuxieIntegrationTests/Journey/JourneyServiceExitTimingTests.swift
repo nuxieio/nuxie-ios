@@ -79,6 +79,35 @@ private final class OrderingFlowPresentationService: MockFlowPresentationService
     }
 }
 
+private final class UnsupportedTrackingAuthorizationHandler: TrackingAuthorizationHandling {
+    func authorizationStatus() -> TrackingAuthorizationStatus {
+        .unsupported
+    }
+
+    func requestAuthorization() async -> TrackingAuthorizationStatus {
+        .unsupported
+    }
+}
+
+private final class DelayedTrackingAuthorizationHandler: TrackingAuthorizationHandling {
+    let delayNanoseconds: UInt64
+    let result: TrackingAuthorizationStatus
+
+    init(delayNanoseconds: UInt64, result: TrackingAuthorizationStatus) {
+        self.delayNanoseconds = delayNanoseconds
+        self.result = result
+    }
+
+    func authorizationStatus() -> TrackingAuthorizationStatus {
+        .notDetermined
+    }
+
+    func requestAuthorization() async -> TrackingAuthorizationStatus {
+        try? await Task.sleep(nanoseconds: delayNanoseconds)
+        return result
+    }
+}
+
 final class JourneyServiceExitTimingTests: AsyncSpec {
     override class func spec() {
         var mocks: MockFactory!
@@ -376,6 +405,237 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
             }
 
+            it("replays scoped tracking outcomes into newly started journeys") {
+                let trackingCampaign = makeCampaign(
+                    id: "camp-tracking-replay",
+                    flowId: "flow-tracking-replay",
+                    trigger: .event(EventTriggerConfig(eventName: SystemEventNames.trackingAuthorized, condition: nil)),
+                    goal: GoalConfig(
+                        kind: .event,
+                        eventName: SystemEventNames.trackingAuthorized,
+                        eventFilter: nil,
+                        window: 60
+                    ),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let trackingFlow = makeFlow(flowId: "flow-tracking-replay")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, trackingCampaign],
+                    flows: [primaryFlow, trackingFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? TrackingPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveTrackingPermissionEvent: SystemEventNames.trackingAuthorized,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-tracking-replay"
+                    }?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
+            it("replays unsupported scoped tracking outcomes into newly started journeys") {
+                let trackingCampaign = makeCampaign(
+                    id: "camp-tracking-denied-replay",
+                    flowId: "flow-tracking-denied-replay",
+                    trigger: .event(EventTriggerConfig(eventName: SystemEventNames.trackingDenied, condition: nil)),
+                    goal: GoalConfig(
+                        kind: .event,
+                        eventName: SystemEventNames.trackingDenied,
+                        eventFilter: nil,
+                        window: 60
+                    ),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let trackingFlow = makeFlow(flowId: "flow-tracking-denied-replay")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, trackingCampaign],
+                    flows: [primaryFlow, trackingFlow]
+                )
+                await service.initialize()
+
+                _ = await startJourney()
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-tracking-denied-replay"
+                    }?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
+            it("completes dismissed journeys after unsupported tracking requests") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                }
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                try? await Task.sleep(nanoseconds: 50_000_000)
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .seconds(2))
+            }
+
+            it("does not defer dismissals for non-permission pending work") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-generic-dismiss",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .seconds(2))
+            }
+
+            it("completes deferred dismissals after scoped tracking outcomes resolve") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackForTriggerDelayNanoseconds = 750_000_000
+
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = DelayedTrackingAuthorizationHandler(
+                        delayNanoseconds: 100_000_000,
+                        result: .authorized
+                    )
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                    controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        controller,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == journey.id }
+                }.toEventually(beFalse(), timeout: .milliseconds(500))
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.dismissed), timeout: .milliseconds(500))
+
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+
+            it("resumes wait_until work on unsupported tracking requests") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-unsupported-tracking",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .first(where: { $0.journeyId == journey.id })?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
             it("tracks scoped notification outcomes against the original user across identify races") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -422,6 +682,30 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(distinctId), timeout: .seconds(2))
             }
 
+            it("tracks unsupported scoped tracking outcomes against the original user across identify races") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                _ = await startJourney()
+                mocks.identityService.setDistinctId("user_2")
+
+                await MainActor.run {
+                    controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_tracking",
+                        payload: [:],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    mocks.eventService.trackForTriggerCalls.last?.distinctIdOverride
+                }.toEventually(equal(distinctId), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on scoped notification outcomes") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -446,6 +730,40 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     (controller.runtimeDelegate as? NotificationPermissionEventReceiver)?.flowViewController(
                         controller,
                         didResolveNotificationPermissionEvent: SystemEventNames.notificationsEnabled,
+                        properties: ["journey_id": journey.id],
+                        journeyId: journey.id
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.completed), timeout: .seconds(2))
+            }
+
+            it("resumes wait_until work on scoped tracking outcomes") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-tracking",
+                    screenId: nil,
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.exit(ExitAction(reason: "completed"))]
+                )
+
+                await MainActor.run {
+                    (controller.runtimeDelegate as? TrackingPermissionEventReceiver)?.flowViewController(
+                        controller,
+                        didResolveTrackingPermissionEvent: SystemEventNames.trackingAuthorized,
                         properties: ["journey_id": journey.id],
                         journeyId: journey.id
                     )

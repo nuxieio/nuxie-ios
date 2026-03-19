@@ -29,4 +29,32 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
 
         XCTAssertEqual(decoded?["type"] as? String, "request_notifications")
     }
+
+    func testDecodesRequestTrackingAction() throws {
+        let data = Data(
+            """
+            {
+              "type": "request_tracking"
+            }
+            """.utf8
+        )
+
+        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+
+        switch action {
+        case .requestTracking(let requestTracking):
+            XCTAssertEqual(requestTracking.type, "request_tracking")
+        default:
+            XCTFail("Expected request_tracking action")
+        }
+    }
+
+    func testEncodesRequestTrackingAction() throws {
+        let action = InteractionAction.requestTracking(RequestTrackingAction())
+
+        let data = try JSONEncoder().encode(action)
+        let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertEqual(decoded?["type"] as? String, "request_tracking")
+    }
 }

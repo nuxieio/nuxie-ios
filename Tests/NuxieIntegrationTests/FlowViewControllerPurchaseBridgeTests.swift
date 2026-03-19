@@ -309,6 +309,201 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
             }
 
+            it("emits tracking_authorized when tracking is already authorized") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .authorized
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+
+                vc.performRequestTracking(journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingAuthorized]))
+                expect(vc.emittedEvents.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("emits tracking_denied when tracking is denied") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .denied
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingDenied]))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("emits tracking_denied when tracking is restricted") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .restricted
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingDenied]))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("does not emit a tracking event when ATT is unsupported") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .unsupported
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents).to(beEmpty())
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("routes unsupported scoped tracking requests through the tracking receiver") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .unsupported
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                let delegate = TrackingPermissionEventReceiverSpy()
+                vc.trackingAuthorizationHandler = authHandler
+                vc.runtimeDelegate = delegate
+                _ = vc.view
+
+                vc.performRequestTracking(journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(delegate.events.map(\.name)).to(equal([SystemEventNames.trackingDenied]))
+                expect(delegate.events.first?.journeyId).to(equal("journey-1"))
+                expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("requests tracking authorization when status is not determined") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .notDetermined
+                authHandler.requestResult = .authorized
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingAuthorized]))
+                expect(authHandler.requestedAuthorization).to(beTrue())
+            }
+
+            it("emits tracking_authorized when already authorized and usage description is missing") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .authorized
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { nil }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingAuthorized]))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("emits tracking_denied when NSUserTrackingUsageDescription is missing") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .notDetermined
+                authHandler.requestResult = .authorized
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { nil }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingDenied]))
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
+            it("posts tracking outcomes back to standalone flows over the bridge") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .authorized
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+                injectBootstrap(vc.flowWebView)
+
+                vc.flowWebView.evaluateJavaScript(
+                    "window.webkit.messageHandlers.bridge.postMessage({ type: 'action/request_tracking', payload: {} })"
+                ) { _, _ in }
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { done() }
+                }
+
+                let msgs = getMessages(vc.flowWebView)
+                let match = msgs.first { ($0["type"] as? String) == "action/event" }
+                expect(match).toNot(beNil())
+                let payload = match?["payload"] as? [String: Any]
+                expect(payload?["name"] as? String).to(equal(SystemEventNames.trackingAuthorized))
+            }
+
+            it("routes journey-scoped tracking outcomes through the runtime delegate") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .authorized
+                let delegate = TrackingPermissionEventReceiverSpy()
+                let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                vc.runtimeDelegate = delegate
+                _ = vc.view
+
+                vc.performRequestTracking(journeyId: "journey-1")
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(delegate.events.map(\.name)).to(equal([SystemEventNames.trackingAuthorized]))
+                expect(delegate.events.first?.journeyId).to(equal("journey-1"))
+                expect(delegate.events.first?.properties["journey_id"] as? String).to(equal("journey-1"))
+            }
+
             it("presents in-app Safari for open_link target") {
                 let vc = FlowViewController(flow: makeFlow(), archiveService: FlowArchiver())
                 let window = UIWindow(frame: UIScreen.main.bounds)
@@ -341,6 +536,21 @@ private final class MockNotificationAuthorizationHandler: NotificationAuthorizat
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
         requestedOptions = options
         return try requestResult.get()
+    }
+}
+
+private final class MockTrackingAuthorizationHandler: TrackingAuthorizationHandling {
+    var status: TrackingAuthorizationStatus = .notDetermined
+    var requestResult: TrackingAuthorizationStatus = .authorized
+    private(set) var requestedAuthorization = false
+
+    func authorizationStatus() -> TrackingAuthorizationStatus {
+        status
+    }
+
+    func requestAuthorization() async -> TrackingAuthorizationStatus {
+        requestedAuthorization = true
+        return requestResult
     }
 }
 
@@ -386,6 +596,34 @@ private final class NotificationPermissionEventReceiverSpy: FlowRuntimeDelegate,
     func flowViewController(
         _ controller: FlowViewController,
         didResolveNotificationPermissionEvent eventName: String,
+        properties: [String : Any],
+        journeyId: String
+    ) {
+        events.append(Event(name: eventName, properties: properties, journeyId: journeyId))
+    }
+}
+
+private final class TrackingPermissionEventReceiverSpy: FlowRuntimeDelegate, TrackingPermissionEventReceiver {
+    struct Event {
+        let name: String
+        let properties: [String: Any]
+        let journeyId: String
+    }
+
+    private(set) var events: [Event] = []
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didReceiveRuntimeMessage type: String,
+        payload: [String : Any],
+        id: String?
+    ) {}
+
+    func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {}
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didResolveTrackingPermissionEvent eventName: String,
         properties: [String : Any],
         journeyId: String
     ) {

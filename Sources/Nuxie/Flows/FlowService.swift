@@ -219,6 +219,8 @@ final class FlowService: FlowServiceProtocol {
         controller.runtimeDelegate = runtimeDelegate
         controller.notificationPermissionEventReceiver =
             runtimeDelegate as? NotificationPermissionEventReceiver
+        controller.trackingPermissionEventReceiver =
+            runtimeDelegate as? TrackingPermissionEventReceiver
         return controller
     }
     

@@ -463,6 +463,12 @@ public actor JourneyService: JourneyServiceProtocol {
         controller.performRequestNotifications(journeyId: journey.id)
       }
 
+    case "action/request_tracking":
+      runner.beginTrackingPermissionRequest()
+      _ = await MainActor.run {
+        controller.performRequestTracking(journeyId: journey.id)
+      }
+
     case "action/open_link":
       let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
       let instanceId = payload["instanceId"] as? String
@@ -565,21 +571,17 @@ public actor JourneyService: JourneyServiceProtocol {
       }
     }
 
-    if journey.status.isLive, !runner.hasPendingWork() {
-      let exitReason: JourneyExitReason
-      switch reason {
-      case .userDismissed:
-        exitReason = .dismissed
-      case .error:
-        exitReason = .error
-      case .purchaseCompleted, .timeout:
-        exitReason = .completed
-      }
-      completeJourney(journey, reason: exitReason)
+    if journey.status.isLive, runner.hasPendingPermissionWork() {
+      runner.deferDismiss(reason: reason)
+      return
+    }
+
+    if journey.status.isLive {
+      completeJourney(journey, reason: dismissalExitReason(for: reason))
     }
   }
 
-  fileprivate func handleScopedNotificationPermissionEvent(
+  fileprivate func handleScopedPermissionEvent(
     journeyId: String,
     eventName: String,
     properties: [String: Any],
@@ -620,6 +622,8 @@ public actor JourneyService: JourneyServiceProtocol {
       )
     }
 
+    await completeDeferredDismissIfReady(journeyId: journeyId)
+
     let trackedEvent: NuxieEvent
     let response: EventResponse?
     do {
@@ -634,7 +638,7 @@ public actor JourneyService: JourneyServiceProtocol {
       trackedEvent = tracked.0
       response = tracked.1
     } catch {
-      LogWarning("JourneyService: Failed to track scoped notification event: \(error)")
+      LogWarning("JourneyService: Failed to track scoped permission event: \(error)")
       trackedEvent = NuxieEvent(
         name: eventName,
         distinctId: scopedDistinctId,
@@ -682,6 +686,25 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   // MARK: - Helpers
+
+  private func dismissalExitReason(for reason: CloseReason) -> JourneyExitReason {
+    switch reason {
+    case .userDismissed:
+      return .dismissed
+    case .error:
+      return .error
+    case .purchaseCompleted, .timeout:
+      return .completed
+    }
+  }
+
+  private func completeDeferredDismissIfReady(journeyId: String) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId],
+          journey.status.isLive,
+          let reason = runner.consumeDeferredDismissReasonIfReady() else { return }
+    completeJourney(journey, reason: dismissalExitReason(for: reason))
+  }
 
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
     if let existing = flowRunners[journey.id] {
@@ -952,7 +975,7 @@ public actor JourneyService: JourneyServiceProtocol {
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
 
       if eventJourneyId == journey.id, let runner = flowRunners[journey.id] {
-        runner.handleNotificationPermissionEvent(event.name)
+        runner.handleScopedSystemPermissionEvent(event.name)
       }
 
       await evaluateGoalIfNeeded(
@@ -1357,7 +1380,11 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 }
 
-private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate, NotificationPermissionEventReceiver {
+private final class FlowRuntimeDelegateAdapter:
+  FlowRuntimeDelegate,
+  NotificationPermissionEventReceiver,
+  TrackingPermissionEventReceiver
+{
   private weak var journeyService: JourneyService?
   private let journeyId: String
   private let distinctId: String
@@ -1409,7 +1436,23 @@ private final class FlowRuntimeDelegateAdapter: FlowRuntimeDelegate, Notificatio
     journeyId: String
   ) {
     Task { [weak journeyService] in
-      await journeyService?.handleScopedNotificationPermissionEvent(
+      await journeyService?.handleScopedPermissionEvent(
+        journeyId: journeyId,
+        eventName: eventName,
+        properties: properties,
+        distinctId: distinctId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didResolveTrackingPermissionEvent eventName: String,
+    properties: [String : Any],
+    journeyId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleScopedPermissionEvent(
         journeyId: journeyId,
         eventName: eventName,
         properties: properties,

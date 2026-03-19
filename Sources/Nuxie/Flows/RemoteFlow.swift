@@ -544,6 +544,7 @@ public enum InteractionAction: Codable {
     case purchase(PurchaseAction)
     case restore(RestoreAction)
     case requestNotifications(RequestNotificationsAction)
+    case requestTracking(RequestTrackingAction)
     case openLink(OpenLinkAction)
     case dismiss(DismissAction)
     case callDelegate(CallDelegateAction)
@@ -576,6 +577,7 @@ public enum InteractionAction: Codable {
         case purchase
         case restore
         case requestNotifications = "request_notifications"
+        case requestTracking = "request_tracking"
         case openLink = "open_link"
         case dismiss
         case callDelegate = "call_delegate"
@@ -619,6 +621,8 @@ public enum InteractionAction: Codable {
             self = .restore(try RestoreAction(from: decoder))
         case .requestNotifications:
             self = .requestNotifications(try RequestNotificationsAction(from: decoder))
+        case .requestTracking:
+            self = .requestTracking(try RequestTrackingAction(from: decoder))
         case .openLink:
             self = .openLink(try OpenLinkAction(from: decoder))
         case .dismiss:
@@ -681,6 +685,8 @@ public enum InteractionAction: Codable {
         case .restore(let action):
             try action.encode(to: encoder)
         case .requestNotifications(let action):
+            try action.encode(to: encoder)
+        case .requestTracking(let action):
             try action.encode(to: encoder)
         case .openLink(let action):
             try action.encode(to: encoder)
@@ -878,6 +884,14 @@ public struct RequestNotificationsAction: Codable {
     public let type: String
 
     public init(type: String = "request_notifications") {
+        self.type = type
+    }
+}
+
+public struct RequestTrackingAction: Codable {
+    public let type: String
+
+    public init(type: String = "request_tracking") {
         self.type = type
     }
 }

@@ -578,6 +578,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         purchaseAction,
                         .restore(RestoreAction()),
                         .requestNotifications(RequestNotificationsAction()),
+                        .requestTracking(RequestTrackingAction()),
                         .openLink(OpenLinkAction(url: AnyCodable("https://example.com"), target: "external")),
                         .dismiss(DismissAction())
                     ],
@@ -606,11 +607,13 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(controller.purchaseRequests.first?.placementIndex as? Int).to(equal(2))
                 expect(controller.restoreRequests).to(equal(1))
                 expect(controller.requestNotificationJourneyIds).to(equal([journey.id]))
+                expect(controller.requestTrackingJourneyIds).to(equal([journey.id]))
                 expect(controller.openLinkRequests.map(\.urlString)).to(equal(["https://example.com"]))
                 expect(controller.dismissRequests).to(equal([.userDismissed]))
                 expect(runner.hasPendingWork()).to(beTrue())
 
-                runner.handleNotificationPermissionEvent(SystemEventNames.notificationsEnabled)
+                runner.handleScopedSystemPermissionEvent(SystemEventNames.notificationsEnabled)
+                runner.handleScopedSystemPermissionEvent(SystemEventNames.trackingAuthorized)
 
                 expect(runner.hasPendingWork()).to(beFalse())
             }
@@ -1643,6 +1646,7 @@ private final class SpyFlowViewController: FlowViewController {
     private(set) var purchaseRequests: [PurchaseRequest] = []
     private(set) var restoreRequests = 0
     private(set) var requestNotificationJourneyIds: [String?] = []
+    private(set) var requestTrackingJourneyIds: [String?] = []
     private(set) var dismissRequests: [CloseReason] = []
     private(set) var openLinkRequests: [OpenLinkRequest] = []
 
@@ -1673,6 +1677,10 @@ private final class SpyFlowViewController: FlowViewController {
 
     override func performRequestNotifications(journeyId: String? = nil) {
         requestNotificationJourneyIds.append(journeyId)
+    }
+
+    override func performRequestTracking(journeyId: String? = nil) {
+        requestTrackingJourneyIds.append(journeyId)
     }
 
     override func performDismiss(reason: CloseReason = .userDismissed) {

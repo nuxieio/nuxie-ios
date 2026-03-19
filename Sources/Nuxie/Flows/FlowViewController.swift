@@ -2,6 +2,9 @@ import Foundation
 import FactoryKit
 import WebKit
 import UserNotifications
+#if canImport(AppTrackingTransparency)
+import AppTrackingTransparency
+#endif
 
 #if canImport(UIKit)
 import UIKit
@@ -18,6 +21,19 @@ protocol NotificationAuthorizationHandling {
     func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool
 }
 
+enum TrackingAuthorizationStatus {
+    case authorized
+    case denied
+    case restricted
+    case notDetermined
+    case unsupported
+}
+
+protocol TrackingAuthorizationHandling {
+    func authorizationStatus() -> TrackingAuthorizationStatus
+    func requestAuthorization() async -> TrackingAuthorizationStatus
+}
+
 struct UserNotificationAuthorizationHandler: NotificationAuthorizationHandling {
     func authorizationStatus() async -> UNAuthorizationStatus {
         await withCheckedContinuation { continuation in
@@ -31,6 +47,50 @@ struct UserNotificationAuthorizationHandler: NotificationAuthorizationHandling {
         try await UNUserNotificationCenter.current().requestAuthorization(options: options)
     }
 }
+
+struct AppTrackingAuthorizationHandler: TrackingAuthorizationHandling {
+    func authorizationStatus() -> TrackingAuthorizationStatus {
+        #if canImport(AppTrackingTransparency)
+        if #available(iOS 14, *) {
+            return TrackingAuthorizationStatus(ATTrackingManager.trackingAuthorizationStatus)
+        }
+        #endif
+        return .unsupported
+    }
+
+    func requestAuthorization() async -> TrackingAuthorizationStatus {
+        #if canImport(AppTrackingTransparency)
+        if #available(iOS 14, *) {
+            return await withCheckedContinuation { continuation in
+                ATTrackingManager.requestTrackingAuthorization { status in
+                    continuation.resume(returning: TrackingAuthorizationStatus(status))
+                }
+            }
+        }
+        #endif
+        return .unsupported
+    }
+}
+
+#if canImport(AppTrackingTransparency)
+@available(iOS 14, *)
+private extension TrackingAuthorizationStatus {
+    init(_ status: ATTrackingManager.AuthorizationStatus) {
+        switch status {
+        case .authorized:
+            self = .authorized
+        case .denied:
+            self = .denied
+        case .restricted:
+            self = .restricted
+        case .notDetermined:
+            self = .notDetermined
+        @unknown default:
+            self = .restricted
+        }
+    }
+}
+#endif
 
 /// Delegate for Flow runtime bridge messages
 protocol FlowRuntimeDelegate: AnyObject {
@@ -61,6 +121,15 @@ protocol NotificationPermissionEventReceiver: AnyObject {
     )
 }
 
+protocol TrackingPermissionEventReceiver: AnyObject {
+    func flowViewController(
+        _ controller: FlowViewController,
+        didResolveTrackingPermissionEvent eventName: String,
+        properties: [String: Any],
+        journeyId: String
+    )
+}
+
 extension FlowRuntimeDelegate {
     func flowViewController(
         _ controller: FlowViewController,
@@ -78,12 +147,19 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     private let viewModel: FlowViewModel
     private let fontStore: FontStore
     var notificationAuthorizationHandler: NotificationAuthorizationHandling = UserNotificationAuthorizationHandler()
+    var trackingAuthorizationHandler: TrackingAuthorizationHandling = AppTrackingAuthorizationHandler()
+    var trackingUsageDescriptionProvider: () -> String? = {
+        Bundle.main.object(forInfoDictionaryKey: "NSUserTrackingUsageDescription") as? String
+    }
 
     /// Delegate for runtime bridge messages
     weak var runtimeDelegate: FlowRuntimeDelegate? {
         didSet {
             if let receiver = runtimeDelegate as? NotificationPermissionEventReceiver {
                 notificationPermissionEventReceiver = receiver
+            }
+            if let receiver = runtimeDelegate as? TrackingPermissionEventReceiver {
+                trackingPermissionEventReceiver = receiver
             }
         }
     }
@@ -94,6 +170,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     /// responses can arrive after the journey delegate has been removed from the
     /// active journey maps during identity changes or cancellation.
     var notificationPermissionEventReceiver: NotificationPermissionEventReceiver?
+    var trackingPermissionEventReceiver: TrackingPermissionEventReceiver?
 
     /// Closure called when the flow is closed
     public var onClose: ((CloseReason) -> Void)?
@@ -216,7 +293,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
         Task { [weak self] in
             guard let self else { return }
             let outcome = await self.resolveNotificationAuthorizationOutcome()
-            let properties = self.notificationPermissionProperties(journeyId: journeyId)
+            let properties = self.journeyScopedEventProperties(journeyId: journeyId)
             let eventName: String
             switch outcome {
             case .enabled:
@@ -225,6 +302,45 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
                 eventName = SystemEventNames.notificationsDenied
             }
             self.dispatchNotificationPermissionEvent(
+                eventName,
+                properties: properties,
+                journeyId: journeyId
+            )
+        }
+    }
+
+    func performRequestTracking(journeyId: String? = nil) {
+        let currentStatus = trackingAuthorizationHandler.authorizationStatus()
+        if currentStatus == .unsupported {
+            LogWarning("FlowViewController: tracking authorization is unsupported on this platform; skipping event")
+            if let journeyId, !journeyId.isEmpty,
+               let receiver = trackingPermissionEventReceiver {
+                receiver.flowViewController(
+                    self,
+                    didResolveTrackingPermissionEvent: SystemEventNames.trackingDenied,
+                    properties: journeyScopedEventProperties(journeyId: journeyId),
+                    journeyId: journeyId
+                )
+            }
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let outcome = await self.resolveTrackingAuthorizationOutcome(
+                currentStatus: currentStatus
+            )
+            let properties = self.journeyScopedEventProperties(journeyId: journeyId)
+            let eventName: String
+            switch outcome {
+            case .authorized:
+                eventName = SystemEventNames.trackingAuthorized
+            case .denied:
+                eventName = SystemEventNames.trackingDenied
+            case .unsupported:
+                return
+            }
+            self.dispatchTrackingPermissionEvent(
                 eventName,
                 properties: properties,
                 journeyId: journeyId
@@ -425,6 +541,12 @@ extension FlowViewController {
             } else {
                 performRequestNotifications()
             }
+        case "action/request_tracking":
+            if runtimeDelegate != nil {
+                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
+            } else {
+                performRequestTracking()
+            }
         case "action/open_link":
             if runtimeDelegate != nil {
                 runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
@@ -461,6 +583,12 @@ private extension FlowViewController {
         case denied
     }
 
+    enum TrackingAuthorizationOutcome {
+        case authorized
+        case denied
+        case unsupported
+    }
+
     func invokeOnCloseOnce(_ reason: CloseReason) {
         guard !didInvokeClose else { return }
         didInvokeClose = true
@@ -487,6 +615,36 @@ private extension FlowViewController {
         }
     }
 
+    func resolveTrackingAuthorizationOutcome(
+        currentStatus: TrackingAuthorizationStatus? = nil
+    ) async -> TrackingAuthorizationOutcome {
+        switch currentStatus ?? trackingAuthorizationHandler.authorizationStatus() {
+        case .authorized:
+            return .authorized
+        case .denied, .restricted:
+            return .denied
+        case .unsupported:
+            return .unsupported
+        case .notDetermined:
+            guard let usageDescription = trackingUsageDescriptionProvider()?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !usageDescription.isEmpty
+            else {
+                LogWarning("FlowViewController: NSUserTrackingUsageDescription is missing; emitting tracking_denied")
+                return .denied
+            }
+
+            switch await trackingAuthorizationHandler.requestAuthorization() {
+            case .authorized:
+                return .authorized
+            case .denied, .restricted, .notDetermined:
+                return .denied
+            case .unsupported:
+                return .unsupported
+            }
+        }
+    }
+
     func isNotificationAuthorizationGranted(_ status: UNAuthorizationStatus) -> Bool {
         switch status {
         case .authorized:
@@ -498,7 +656,7 @@ private extension FlowViewController {
         }
     }
 
-    func notificationPermissionProperties(journeyId: String?) -> [String: Any] {
+    func journeyScopedEventProperties(journeyId: String?) -> [String: Any] {
         guard let journeyId, !journeyId.isEmpty else {
             return [:]
         }
@@ -522,7 +680,7 @@ private extension FlowViewController {
         }
 
         if journeyId == nil {
-            sendNotificationPermissionEventToRuntime(
+            sendSystemEventToRuntime(
                 eventName,
                 properties: properties
             )
@@ -531,7 +689,33 @@ private extension FlowViewController {
         emitSystemEvent(eventName, properties: properties)
     }
 
-    func sendNotificationPermissionEventToRuntime(
+    func dispatchTrackingPermissionEvent(
+        _ eventName: String,
+        properties: [String: Any],
+        journeyId: String?
+    ) {
+        if let journeyId, !journeyId.isEmpty,
+           let receiver = trackingPermissionEventReceiver {
+            receiver.flowViewController(
+                self,
+                didResolveTrackingPermissionEvent: eventName,
+                properties: properties,
+                journeyId: journeyId
+            )
+            return
+        }
+
+        if journeyId == nil {
+            sendSystemEventToRuntime(
+                eventName,
+                properties: properties
+            )
+        }
+
+        emitSystemEvent(eventName, properties: properties)
+    }
+
+    func sendSystemEventToRuntime(
         _ eventName: String,
         properties: [String: Any]
     ) {
