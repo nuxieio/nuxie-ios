@@ -364,6 +364,24 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
                 expect(authHandler.requestedAuthorization).to(beFalse())
             }
 
+            it("does not emit a tracking event when ATT is unsupported") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .unsupported
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { "Tracking usage description" }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents).to(beEmpty())
+                expect(authHandler.requestedAuthorization).to(beFalse())
+            }
+
             it("requests tracking authorization when status is not determined") {
                 let authHandler = MockTrackingAuthorizationHandler()
                 authHandler.status = .notDetermined
@@ -381,6 +399,24 @@ final class FlowViewControllerPurchaseBridgeSpec: QuickSpec {
 
                 expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingAuthorized]))
                 expect(authHandler.requestedAuthorization).to(beTrue())
+            }
+
+            it("emits tracking_authorized when already authorized and usage description is missing") {
+                let authHandler = MockTrackingAuthorizationHandler()
+                authHandler.status = .authorized
+                let vc = NotificationSpyFlowViewController(flow: makeFlow())
+                vc.trackingAuthorizationHandler = authHandler
+                vc.trackingUsageDescriptionProvider = { nil }
+                _ = vc.view
+
+                vc.performRequestTracking()
+
+                waitUntil(timeout: .seconds(2)) { done in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { done() }
+                }
+
+                expect(vc.emittedEvents.map(\.name)).to(equal([SystemEventNames.trackingAuthorized]))
+                expect(authHandler.requestedAuthorization).to(beFalse())
             }
 
             it("emits tracking_denied when NSUserTrackingUsageDescription is missing") {

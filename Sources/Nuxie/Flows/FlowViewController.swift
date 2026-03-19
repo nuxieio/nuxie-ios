@@ -26,6 +26,7 @@ enum TrackingAuthorizationStatus {
     case denied
     case restricted
     case notDetermined
+    case unsupported
 }
 
 protocol TrackingAuthorizationHandling {
@@ -54,7 +55,7 @@ struct AppTrackingAuthorizationHandler: TrackingAuthorizationHandling {
             return TrackingAuthorizationStatus(ATTrackingManager.trackingAuthorizationStatus)
         }
         #endif
-        return .restricted
+        return .unsupported
     }
 
     func requestAuthorization() async -> TrackingAuthorizationStatus {
@@ -67,7 +68,7 @@ struct AppTrackingAuthorizationHandler: TrackingAuthorizationHandling {
             }
         }
         #endif
-        return .restricted
+        return .unsupported
     }
 }
 
@@ -319,6 +320,9 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
                 eventName = SystemEventNames.trackingAuthorized
             case .denied:
                 eventName = SystemEventNames.trackingDenied
+            case .unsupported:
+                LogWarning("FlowViewController: tracking authorization is unsupported on this platform; skipping event")
+                return
             }
             self.dispatchTrackingPermissionEvent(
                 eventName,
@@ -566,6 +570,7 @@ private extension FlowViewController {
     enum TrackingAuthorizationOutcome {
         case authorized
         case denied
+        case unsupported
     }
 
     func invokeOnCloseOnce(_ reason: CloseReason) {
@@ -595,23 +600,30 @@ private extension FlowViewController {
     }
 
     func resolveTrackingAuthorizationOutcome() async -> TrackingAuthorizationOutcome {
-        guard let usageDescription = trackingUsageDescriptionProvider()?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !usageDescription.isEmpty
-        else {
-            LogWarning("FlowViewController: NSUserTrackingUsageDescription is missing; emitting tracking_denied")
-            return .denied
-        }
-
         switch trackingAuthorizationHandler.authorizationStatus() {
         case .authorized:
             return .authorized
         case .denied, .restricted:
             return .denied
+        case .unsupported:
+            return .unsupported
         case .notDetermined:
-            return (await trackingAuthorizationHandler.requestAuthorization()) == .authorized
-                ? .authorized
-                : .denied
+            guard let usageDescription = trackingUsageDescriptionProvider()?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !usageDescription.isEmpty
+            else {
+                LogWarning("FlowViewController: NSUserTrackingUsageDescription is missing; emitting tracking_denied")
+                return .denied
+            }
+
+            switch await trackingAuthorizationHandler.requestAuthorization() {
+            case .authorized:
+                return .authorized
+            case .denied, .restricted, .notDetermined:
+                return .denied
+            case .unsupported:
+                return .unsupported
+            }
         }
     }
 
