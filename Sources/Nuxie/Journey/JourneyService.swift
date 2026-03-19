@@ -698,13 +698,9 @@ public actor JourneyService: JourneyServiceProtocol {
 
   fileprivate func handleUnsupportedScopedRequestPermission(
     journeyId: String,
-    permissionType: String
+    permissionType: String,
+    distinctId: String
   ) async {
-    guard let journey = inMemoryJourneysById[journeyId],
-          let runner = flowRunners[journeyId],
-          journey.status.isLive else { return }
-
-    let scopedDistinctId = journey.distinctId
     let enrichedProperties = await eventService.prepareTriggerProperties(
       ["journey_id": journeyId, "type": permissionType],
       userProperties: nil,
@@ -712,12 +708,12 @@ public actor JourneyService: JourneyServiceProtocol {
     )
     let localScopedEvent = NuxieEvent(
       name: SystemEventNames.permissionDenied,
-      distinctId: scopedDistinctId,
+      distinctId: distinctId,
       properties: enrichedProperties,
       timestamp: dateProvider.now()
     )
     let transientEvent = makeStoredEvent(from: localScopedEvent)
-    if let campaigns = await getAllCampaigns(for: scopedDistinctId) {
+    if let campaigns = await getAllCampaigns(for: distinctId) {
       await processActiveJourneys(
         for: localScopedEvent,
         campaigns: campaigns,
@@ -727,6 +723,19 @@ public actor JourneyService: JourneyServiceProtocol {
     }
 
     await completeDeferredDismissIfReady(journeyId: journeyId)
+
+    do {
+      _ = try await eventService.trackForTrigger(
+        SystemEventNames.permissionDenied,
+        properties: enrichedProperties,
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        persistToHistory: false,
+        distinctIdOverride: distinctId
+      )
+    } catch {
+      LogWarning("JourneyService: Failed to track unsupported scoped permission event: \(error)")
+    }
   }
 
   // MARK: - Helpers
@@ -1514,7 +1523,8 @@ private final class FlowRuntimeDelegateAdapter:
     Task { [weak journeyService] in
       await journeyService?.handleUnsupportedScopedRequestPermission(
         journeyId: journeyId,
-        permissionType: permissionType
+        permissionType: permissionType,
+        distinctId: distinctId
       )
     }
   }

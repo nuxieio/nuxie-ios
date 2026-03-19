@@ -794,6 +794,30 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(distinctId), timeout: .seconds(2))
             }
 
+            it("tracks unsupported scoped request permission outcomes against the original user across identify races") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                _ = await startJourney()
+                mocks.identityService.setDistinctId("user_2")
+
+                await MainActor.run {
+                    controller.cameraPermissionAuthorizationHandler = UnsupportedRequestPermissionAuthorizationHandler()
+                    controller.runtimeDelegate?.flowViewController(
+                        controller,
+                        didReceiveRuntimeMessage: "action/request_permission",
+                        payload: ["permissionType": "camera"],
+                        id: nil
+                    )
+                }
+
+                await expect {
+                    mocks.eventService.trackForTriggerCalls.last?.distinctIdOverride
+                }.toEventually(equal(distinctId), timeout: .seconds(2))
+            }
+
             it("resumes wait_until work on scoped notification outcomes") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
@@ -1241,5 +1265,15 @@ private final class DelayedRequestPermissionAuthorizationHandler: PermissionAuth
     func requestAuthorization() async -> PermissionAuthorizationStatus {
         try? await Task.sleep(nanoseconds: delayNanoseconds)
         return result
+    }
+}
+
+private final class UnsupportedRequestPermissionAuthorizationHandler: PermissionAuthorizationHandling {
+    func authorizationStatus() -> PermissionAuthorizationStatus {
+        .unsupported
+    }
+
+    func requestAuthorization() async -> PermissionAuthorizationStatus {
+        .unsupported
     }
 }

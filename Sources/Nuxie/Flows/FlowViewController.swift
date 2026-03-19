@@ -104,7 +104,7 @@ struct CameraPermissionAuthorizationHandler: PermissionAuthorizationHandling {
 
 struct MicrophonePermissionAuthorizationHandler: PermissionAuthorizationHandling {
     func authorizationStatus() -> PermissionAuthorizationStatus {
-        #if canImport(AVFoundation)
+        #if canImport(AVFoundation) && !os(macOS)
         switch AVAudioSession.sharedInstance().recordPermission {
         case .granted:
             return .granted
@@ -121,7 +121,7 @@ struct MicrophonePermissionAuthorizationHandler: PermissionAuthorizationHandling
     }
 
     func requestAuthorization() async -> PermissionAuthorizationStatus {
-        #if canImport(AVFoundation)
+        #if canImport(AVFoundation) && !os(macOS)
         let granted = await withCheckedContinuation { continuation in
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 continuation.resume(returning: granted)
