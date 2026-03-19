@@ -233,18 +233,21 @@ final class LocationPermissionAuthorizationHandler: NSObject, PermissionAuthoriz
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.main.async {
+                self.continuations.append(continuation)
+                let shouldRequestAuthorization = self.continuations.count == 1
+
                 let manager: CLLocationManager
                 if let existingManager = self.manager {
                     manager = existingManager
                 } else {
                     let createdManager = CLLocationManager()
-                    createdManager.delegate = self
                     self.manager = createdManager
                     manager = createdManager
                 }
 
-                self.continuations.append(continuation)
-                if self.continuations.count == 1 {
+                manager.delegate = self
+
+                if shouldRequestAuthorization {
                     manager.requestWhenInUseAuthorization()
                 }
             }
