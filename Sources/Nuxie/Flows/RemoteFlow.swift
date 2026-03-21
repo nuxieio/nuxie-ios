@@ -539,6 +539,7 @@ public enum InteractionAction: Codable {
     case waitUntil(WaitUntilAction)
     case condition(ConditionAction)
     case experiment(ExperimentAction)
+    case goal(GoalAction)
     case sendEvent(SendEventAction)
     case updateCustomer(UpdateCustomerAction)
     case purchase(PurchaseAction)
@@ -573,6 +574,7 @@ public enum InteractionAction: Codable {
         case waitUntil = "wait_until"
         case condition
         case experiment
+        case goal
         case sendEvent = "send_event"
         case updateCustomer = "update_customer"
         case purchase
@@ -613,6 +615,8 @@ public enum InteractionAction: Codable {
             self = .condition(try ConditionAction(from: decoder))
         case .experiment:
             self = .experiment(try ExperimentAction(from: decoder))
+        case .goal:
+            self = .goal(try GoalAction(from: decoder))
         case .sendEvent:
             self = .sendEvent(try SendEventAction(from: decoder))
         case .updateCustomer:
@@ -679,6 +683,8 @@ public enum InteractionAction: Codable {
         case .condition(let action):
             try action.encode(to: encoder)
         case .experiment(let action):
+            try action.encode(to: encoder)
+        case .goal(let action):
             try action.encode(to: encoder)
         case .sendEvent(let action):
             try action.encode(to: encoder)
@@ -842,6 +848,18 @@ public struct ExperimentVariant: Codable {
     public let name: String?
     public let percentage: Double
     public let actions: [InteractionAction]
+}
+
+public struct GoalAction: Codable {
+    public let type: String
+    public let goalId: String
+    public let label: String?
+
+    public init(type: String = "goal", goalId: String, label: String? = nil) {
+        self.type = type
+        self.goalId = goalId
+        self.label = label
+    }
 }
 
 public struct SendEventAction: Codable {

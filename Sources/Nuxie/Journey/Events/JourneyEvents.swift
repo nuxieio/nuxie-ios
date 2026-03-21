@@ -10,6 +10,7 @@ public class JourneyEvents {
     public static let journeyPaused = "$journey_paused"
     public static let journeyResumed = "$journey_resumed"
     public static let journeyErrored = "$journey_errored"
+    public static let journeyGoalHit = "$journey_goal_hit"
     public static let journeyGoalMet = "$journey_goal_met"
     public static let journeyExited = "$journey_exited"
     public static let journeyAction = "$journey_action"

@@ -535,6 +535,10 @@ final class FlowJourneyRunner {
                 let result = await handleExperiment(experiment, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
+            case .goal(let goal):
+                await handleGoal(goal, context: context)
+                trackAction(action, context: context, error: nil)
+                return .continue
             case .sendEvent(let sendEvent):
                 await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
@@ -922,6 +926,35 @@ final class FlowJourneyRunner {
                 eventName: action.eventName,
                 eventProperties: properties
             ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+    }
+
+    private func handleGoal(
+        _ action: GoalAction,
+        context: TriggerContext
+    ) async {
+        let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goalId.isEmpty else { return }
+
+        var properties: [String: Any] = [
+            "journeyId": journey.id,
+            "campaignId": journey.campaignId,
+            "goalId": goalId,
+        ]
+        if let screenId = context.screenId ?? journey.flowState.currentScreenId {
+            properties["screenId"] = screenId
+        }
+
+        let goalLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !goalLabel.isEmpty {
+            properties["goalLabel"] = goalLabel
+        }
+
+        eventService.track(
+            JourneyEvents.journeyGoalHit,
+            properties: properties,
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
@@ -2062,6 +2095,7 @@ private extension InteractionAction {
         case .waitUntil: return "wait_until"
         case .condition: return "condition"
         case .experiment: return "experiment"
+        case .goal: return "goal"
         case .sendEvent: return "send_event"
         case .updateCustomer: return "update_customer"
         case .purchase: return "purchase"
