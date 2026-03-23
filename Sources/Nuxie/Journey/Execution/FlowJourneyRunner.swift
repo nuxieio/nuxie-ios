@@ -4,12 +4,6 @@ import FactoryKit
 final class FlowJourneyRunner {
     private static let currentDeviceTimezoneToken = "__current_device__"
 
-    struct GoalActionResolution {
-        let shouldExit: Bool
-
-        static let `continue` = GoalActionResolution(shouldExit: false)
-    }
-
     struct TriggerContext {
         let screenId: String?
         let componentId: String?
@@ -45,6 +39,7 @@ final class FlowJourneyRunner {
     private let flow: Flow
     private let remoteFlow: RemoteFlow
     private let viewModels: FlowViewModelRuntime
+    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -56,7 +51,6 @@ final class FlowJourneyRunner {
 
     weak var viewController: FlowViewController?
     var onShowScreen: ((String, AnyCodable?) async -> Void)?
-    var onGoalActionHit: ((String, String?) async -> GoalActionResolution)?
     private(set) var isRuntimeReady = false
 
     private var interactionsById: [String: [Interaction]] = [:]
@@ -79,6 +73,7 @@ final class FlowJourneyRunner {
         journey: Journey,
         campaign: Campaign,
         flow: Flow,
+        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)? = nil,
         viewController: FlowViewController? = nil
     ) {
         self.journey = journey
@@ -86,6 +81,7 @@ final class FlowJourneyRunner {
         self.flow = flow
         self.remoteFlow = flow.remoteFlow
         self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
+        self.onGoalHit = onGoalHit
         self.viewController = viewController
 
         self.interactionsById = flow.remoteFlow.interactions
@@ -547,9 +543,9 @@ final class FlowJourneyRunner {
                 trackAction(action, context: context, error: nil)
                 return .continue
             case .goal(let goal):
-                let result = await handleGoal(goal, context: context)
+                await handleGoal(goal, context: context)
                 trackAction(action, context: context, error: nil)
-                return result.shouldExit ? .exit(.goalMet) : .continue
+                return .continue
             case .updateCustomer(let updateCustomer):
                 handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
@@ -938,6 +934,34 @@ final class FlowJourneyRunner {
         )
     }
 
+    private func handleGoal(
+        _ action: GoalAction,
+        context: TriggerContext
+    ) async {
+        let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goalId.isEmpty else { return }
+        let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
+
+        let trimmedLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let goalLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
+
+        if let onGoalHit {
+            await onGoalHit(goalId, goalLabel, resolvedScreenId)
+            return
+        }
+
+        eventService.track(
+            JourneyEvents.journeyGoalHit,
+            properties: JourneyEvents.journeyGoalHitProperties(
+                journey: journey,
+                screenId: resolvedScreenId,
+                goalId: goalId,
+                goalLabel: goalLabel
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+    }
     private func handleUpdateCustomer(
         _ action: UpdateCustomerAction,
         context: TriggerContext

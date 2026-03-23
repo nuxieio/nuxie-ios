@@ -121,6 +121,28 @@ public class JourneyEvents {
         return properties
     }
 
+    public static func journeyGoalHitProperties(
+        journey: Journey,
+        screenId: String?,
+        goalId: String,
+        goalLabel: String?
+    ) -> [String: Any] {
+        var properties: [String: Any] = [
+            "journey_id": journey.id,
+            "campaign_id": journey.campaignId,
+            "goal_id": goalId
+        ]
+
+        if let screenId {
+            properties["screen_id"] = screenId
+        }
+        if let goalLabel, !goalLabel.isEmpty {
+            properties["goal_label"] = goalLabel
+        }
+
+        return properties
+    }
+
     public static func journeyExitedProperties(
         journey: Journey,
         reason: JourneyExitReason,

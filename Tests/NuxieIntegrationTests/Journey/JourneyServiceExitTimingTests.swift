@@ -364,6 +364,51 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal([campaignId, "camp-notifications"].sorted()), timeout: .seconds(2))
             }
 
+            it("marks journeys converted when scoped goal actions fire") {
+                let campaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                let activeJourneys = await service.getActiveJourneys(for: distinctId)
+                expect(activeJourneys.map(\.id)).to(equal([journey.id]))
+                expect(activeJourneys.first?.convertedAt).toNot(beNil())
+                expect(mocks.eventService.trackForTriggerCalls.last?.properties?["journey_id"] as? String)
+                    .to(equal(journey.id))
+                expect(mocks.eventService.trackForTriggerCalls.last?.properties?["campaign_id"] as? String)
+                    .to(equal(campaign.id))
+                expect(mocks.eventService.trackForTriggerCalls.last?.properties?["goal_id"] as? String)
+                    .to(equal("signup_complete"))
+                expect(mocks.eventService.trackForTriggerCalls.last?.properties?["goal_label"] as? String)
+                    .to(equal("Signed Up"))
+                expect(mocks.eventService.trackForTriggerCalls.last?.properties?["journeyId"]).to(beNil())
+                expect(mocks.eventService.trackForTriggerCalls.last?.properties?["goalId"]).to(beNil())
+
+                let dismissController = controller!
+                await MainActor.run {
+                    dismissController.runtimeDelegate?.flowViewControllerDidRequestDismiss(
+                        dismissController,
+                        reason: .userDismissed
+                    )
+                }
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
+            }
+
             it("replays scoped notification outcomes into newly started journeys") {
                 let notificationCampaign = makeCampaign(
                     id: "camp-notifications-replay",
