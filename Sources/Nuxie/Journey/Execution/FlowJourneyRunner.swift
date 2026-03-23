@@ -947,7 +947,7 @@ final class FlowJourneyRunner {
 
         if let onGoalHit {
             await onGoalHit(goalId, goalLabel, resolvedScreenId)
-            return journey.status.isLive ? .continue : .stopSequence
+            return (journey.status.isLive && deferredDismissReason == nil) ? .continue : .stopSequence
         }
 
         eventService.track(

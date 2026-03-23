@@ -673,6 +673,7 @@ public actor JourneyService: JourneyServiceProtocol {
       properties: trackedEvent.properties,
       timestamp: trackedEvent.timestamp
     )
+    let trackedTransientEvent = makeStoredEvent(from: scopedEvent)
 
     let campaigns = if let cachedCampaigns {
       cachedCampaigns
@@ -687,7 +688,7 @@ public actor JourneyService: JourneyServiceProtocol {
       })
       if !startedJourneyIds.isEmpty {
         let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
-          uniqueKeysWithValues: startedJourneyIds.map { ($0, [transientEvent]) }
+          uniqueKeysWithValues: startedJourneyIds.map { ($0, [trackedTransientEvent]) }
         )
         await processActiveJourneys(
           for: scopedEvent,
@@ -1269,21 +1270,22 @@ public actor JourneyService: JourneyServiceProtocol {
       }
       let campaign = campaigns.first(where: { $0.id == journey.campaignId }) ??
         (allowSnapshotFallback ? sourceScopedGoalCampaign(for: journey, campaigns: campaigns) : nil)
-      guard let campaign else { continue }
 
       if eventJourneyId == journey.id, let runner = flowRunners[journey.id] {
         runner.handleScopedSystemPermissionEvent(event.name)
       }
 
-      await evaluateGoalIfNeeded(
-        journey,
-        campaign: campaign,
-        transientEvents: transientEventsByJourneyId[journey.id] ?? []
-      )
-      if !(await shouldDeferExitDecision(for: journey)) {
-        if let reason = await exitDecision(journey, campaign) {
-          completeJourney(journey, reason: reason)
-          continue
+      if let campaign {
+        await evaluateGoalIfNeeded(
+          journey,
+          campaign: campaign,
+          transientEvents: transientEventsByJourneyId[journey.id] ?? []
+        )
+        if !(await shouldDeferExitDecision(for: journey)) {
+          if let reason = await exitDecision(journey, campaign) {
+            completeJourney(journey, reason: reason)
+            continue
+          }
         }
       }
 

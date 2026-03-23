@@ -1679,6 +1679,34 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let trackedEvents = mocks.eventService.trackedEvents.map(\.name)
                 expect(trackedEvents).toNot(contain("should_not_run"))
             }
+
+            it("stops executing after goal actions that defer dismissal") {
+                let flowId = "flow-goal-deferred-stop"
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .goal(GoalAction(goalId: "signup_complete", label: "Signed Up")),
+                        .sendEvent(SendEventAction(eventName: "should_not_run", properties: nil)),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                var runner: FlowJourneyRunner!
+                runner = FlowJourneyRunner(
+                    journey: journey,
+                    campaign: campaign,
+                    flow: flow,
+                    onGoalHit: { _, _, _ in
+                        runner.deferDismiss(reason: .goalMet)
+                    }
+                )
+
+                _ = await runner.handleRuntimeReady()
+
+                let trackedEvents = mocks.eventService.trackedEvents.map(\.name)
+                expect(trackedEvents).toNot(contain("should_not_run"))
+            }
         }
     }
 }

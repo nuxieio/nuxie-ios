@@ -630,6 +630,41 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal([campaignId, "camp-goal-trigger"].sorted()), timeout: .seconds(2))
             }
 
+            it("primes newly started journeys from the tracked scoped goal event") {
+                let goalCampaign = makeCampaign(
+                    id: "camp-goal-triggered-complete",
+                    flowId: "flow-goal-triggered-complete",
+                    trigger: .event(EventTriggerConfig(eventName: JourneyEvents.journeyGoalHit, condition: nil)),
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let goalFlow = makeFlow(flowId: "flow-goal-triggered-complete")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, goalCampaign],
+                    flows: [primaryFlow, goalFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackForTriggerDelayNanoseconds = 200_000_000
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    (await service.getActiveJourneys(for: distinctId).first {
+                        $0.campaignId == "camp-goal-triggered-complete"
+                    })?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
             it("dismisses the source flow before starting goal-triggered flows") {
                 let goalCampaign = makeCampaign(
                     id: "camp-goal-trigger",
@@ -820,6 +855,70 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         $0.journeyId == siblingJourney.id
                     })?.exitReason
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
+            }
+
+            it("dispatches goal-hit triggers into sibling runners after the cache expires") {
+                let siblingFollowUp = Interaction(
+                    id: "goal-hit-sibling-follow-up",
+                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "sibling_follow_up",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+                let primaryCampaign = makeCampaign(
+                    id: "camp-primary-sibling-dispatch",
+                    flowId: "flow-primary-sibling-dispatch",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let siblingCampaign = makeCampaign(
+                    id: "camp-sibling-dispatch",
+                    flowId: "flow-sibling-dispatch",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, siblingCampaign],
+                    flows: [
+                        makeFlow(flowId: "flow-primary-sibling-dispatch"),
+                        makeFlow(
+                            flowId: "flow-sibling-dispatch",
+                            interactions: ["__global__": [siblingFollowUp]]
+                        ),
+                    ]
+                )
+                await service.initialize()
+
+                let primaryJourney = await service.startJourney(
+                    for: primaryCampaign,
+                    distinctId: distinctId
+                )
+                let siblingJourney = await service.startJourney(
+                    for: siblingCampaign,
+                    distinctId: distinctId
+                )
+                expect(primaryJourney).toNot(beNil())
+                expect(siblingJourney).toNot(beNil())
+
+                await mocks.profileService.clearCache(distinctId: distinctId)
+
+                await service.handleScopedGoalEvent(
+                    journeyId: primaryJourney!.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    mocks.eventService.trackedEvents.map(\.name)
+                }.toEventually(contain("sibling_follow_up"), timeout: .seconds(2))
             }
 
             it("replays scoped notification outcomes into newly started journeys") {
