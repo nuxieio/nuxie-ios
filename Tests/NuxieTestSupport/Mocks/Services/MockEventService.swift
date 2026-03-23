@@ -91,7 +91,7 @@ public class MockEventService: EventServiceProtocol {
         let events = lock.withLock { _routedEvents }
         return events.suffix(limit).compactMap { event in
             try? StoredEvent(
-                id: UUID.v7().uuidString,
+                id: event.id,
                 name: event.name,
                 properties: event.properties,
                 timestamp: event.timestamp,
@@ -108,12 +108,18 @@ public class MockEventService: EventServiceProtocol {
         let userEvents = events.filter { $0.distinctId == distinctId }
         return userEvents.suffix(limit).compactMap { event in
             try? StoredEvent(
-                id: UUID.v7().uuidString,
+                id: event.id,
                 name: event.name,
                 properties: event.properties,
                 timestamp: event.timestamp,
                 distinctId: event.distinctId
             )
+        }
+    }
+
+    public func storePreparedEventInHistory(_ event: NuxieEvent) async {
+        lock.withLock {
+            _routedEvents.append(event)
         }
     }
     

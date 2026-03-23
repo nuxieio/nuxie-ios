@@ -99,6 +99,7 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
     func onAppDidEnterBackground() async {}
     func onAppBecameActive() async {}
     func drain() async {}
+    func storePreparedEventInHistory(_ event: NuxieEvent) async {}
     func trackWithResponse(_ event: String, properties: [String: Any]?) async throws -> EventResponse {
         return EventResponse(
             status: "ok",

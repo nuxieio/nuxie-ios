@@ -68,6 +68,16 @@ public class MockEventStore: EventStoreProtocol {
         
         storedEvents.append(event)
     }
+
+    public func storePreparedEvent(_ event: StoredEvent) async throws {
+        storeEventCallCount += 1
+
+        if shouldFailStore {
+            throw NSError(domain: "MockEventStore", code: 2, userInfo: [NSLocalizedDescriptionKey: "Mock store error"])
+        }
+
+        storedEvents.append(event)
+    }
     
     public func getRecentEvents(limit: Int) async throws -> [StoredEvent] {
         getRecentEventsCallCount += 1

@@ -455,6 +455,75 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
+            it("persists scoped goal hits for multi-step attribute goals") {
+                let campaign = makeCampaign(
+                    goal: GoalConfig(
+                        kind: .attribute,
+                        attributeExpr: IREnvelope(
+                            ir_version: 1,
+                            engine_min: nil,
+                            compiled_at: nil,
+                            expr: .and([
+                                .eventsExists(
+                                    name: JourneyEvents.journeyGoalHit,
+                                    since: nil,
+                                    until: nil,
+                                    within: nil,
+                                    where_: .pred(
+                                        op: "eq",
+                                        key: "goal_id",
+                                        value: .string("signup_started")
+                                    )
+                                ),
+                                .eventsExists(
+                                    name: JourneyEvents.journeyGoalHit,
+                                    since: nil,
+                                    until: nil,
+                                    within: nil,
+                                    where_: .pred(
+                                        op: "eq",
+                                        key: "goal_id",
+                                        value: .string("signup_completed")
+                                    )
+                                ),
+                            ])
+                        )
+                    ),
+                    exitPolicy: nil
+                )
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                expect(journey.convertedAt).to(beNil())
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_started",
+                    goalLabel: nil,
+                    screenId: "screen-1"
+                )
+
+                let journeyAfterFirstGoal = await service.getActiveJourneys(for: distinctId).first {
+                    $0.id == journey.id
+                }
+                expect(journeyAfterFirstGoal?.convertedAt).to(beNil())
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_completed",
+                    goalLabel: nil,
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    (await service.getActiveJourneys(for: distinctId).first {
+                        $0.id == journey.id
+                    })?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
             it("routes goal-driven closures through dismissal hooks and flow dismissal tracking") {
                 let dismissFollowUp = Interaction(
                     id: "dismiss-follow-up",

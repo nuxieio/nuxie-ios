@@ -792,6 +792,7 @@ public actor JourneyService: JourneyServiceProtocol {
       properties: trackedEvent.properties,
       timestamp: trackedEvent.timestamp
     )
+    await eventService.storePreparedEventInHistory(localScopedEvent)
 
     let campaigns = if let cachedCampaigns {
       cachedCampaigns

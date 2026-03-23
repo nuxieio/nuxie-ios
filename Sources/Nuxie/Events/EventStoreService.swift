@@ -16,6 +16,11 @@ protocol EventStoreProtocol {
     ///   - distinctId: Distinct ID (optional)
     /// - Throws: EventStorageError if storage fails
     func storeEvent(name: String, properties: [String: Any], distinctId: String) async throws
+
+    /// Store a fully prepared event with a stable id for local history queries.
+    /// - Parameter event: Event to insert
+    /// - Throws: EventStorageError if storage fails
+    func storePreparedEvent(_ event: StoredEvent) async throws
     
     /// Get recent events for analysis
     /// - Parameter limit: Maximum events to return (default: 100)
@@ -180,6 +185,11 @@ final class EventStore: EventStoreProtocol {
         LogDebug("Stored event: \(name) (user: \(NuxieLogger.shared.logDistinctID(distinctId)))")
         
         // Trigger cleanup if we're over the limit
+        try await performCleanupIfNeeded()
+    }
+
+    func storePreparedEvent(_ event: StoredEvent) async throws {
+        try await eventStore.insertEvent(event)
         try await performCleanupIfNeeded()
     }
     
