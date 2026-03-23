@@ -364,7 +364,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal([campaignId, "camp-notifications"].sorted()), timeout: .seconds(2))
             }
 
-            it("marks journeys converted when scoped goal actions fire") {
+            it("completes presented journeys when scoped goal actions fire") {
                 let campaign = makeCampaign(
                     goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
                     exitPolicy: ExitPolicy(mode: .onGoal)
@@ -382,9 +382,9 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     screenId: "screen-1"
                 )
 
-                let activeJourneys = await service.getActiveJourneys(for: distinctId)
-                expect(activeJourneys.map(\.id)).to(equal([journey.id]))
-                expect(activeJourneys.first?.convertedAt).toNot(beNil())
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).isEmpty
+                }.toEventually(beTrue(), timeout: .seconds(2))
                 expect(mocks.eventService.trackForTriggerCalls.last?.properties?["journey_id"] as? String)
                     .to(equal(journey.id))
                 expect(mocks.eventService.trackForTriggerCalls.last?.properties?["campaign_id"] as? String)
@@ -395,14 +395,6 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     .to(equal("Signed Up"))
                 expect(mocks.eventService.trackForTriggerCalls.last?.properties?["journeyId"]).to(beNil())
                 expect(mocks.eventService.trackForTriggerCalls.last?.properties?["goalId"]).to(beNil())
-
-                let dismissController = controller!
-                await MainActor.run {
-                    dismissController.runtimeDelegate?.flowViewControllerDidRequestDismiss(
-                        dismissController,
-                        reason: .userDismissed
-                    )
-                }
 
                 await expect {
                     journeyStore.getCompletions(for: distinctId).last?.exitReason

@@ -793,6 +793,10 @@ public actor JourneyService: JourneyServiceProtocol {
         )
       }
     }
+    if let campaign = campaigns?.first(where: { $0.id == journey.campaignId }),
+       await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
+      completeJourney(journey, reason: .goalMet)
+    }
     await handleScopedGatePlan(response?.gatePlan())
   }
 
@@ -1309,6 +1313,19 @@ public actor JourneyService: JourneyServiceProtocol {
 
   private func shouldDeferExitDecision() async -> Bool {
     await flowPresentationService.isFlowPresented
+  }
+
+  private func shouldCompletePresentedScopedGoalJourney(
+    _ journey: Journey,
+    campaign: Campaign
+  ) async -> Bool {
+    guard journey.status.isLive, journey.convertedAt != nil else {
+      return false
+    }
+    guard await shouldDeferExitDecision() else {
+      return false
+    }
+    return await exitDecision(journey, campaign) == .goalMet
   }
 
   // MARK: - Reentry Policy
