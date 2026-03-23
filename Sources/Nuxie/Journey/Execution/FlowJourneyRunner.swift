@@ -1,6 +1,23 @@
 import Foundation
 import FactoryKit
 
+private final class SerialTaskQueue {
+    private let lock = NSLock()
+    private var tail: Task<Void, Never>?
+
+    func enqueue(_ operation: @escaping () async -> Void) {
+        let previous: Task<Void, Never>?
+        lock.lock()
+        previous = tail
+        let next = Task {
+            _ = await previous?.value
+            await operation()
+        }
+        tail = next
+        lock.unlock()
+    }
+}
+
 final class FlowJourneyRunner {
     private static let currentDeviceTimezoneToken = "__current_device__"
 
@@ -60,6 +77,7 @@ final class FlowJourneyRunner {
     private var activeRequest: ActionRequest?
     private var activeIndex: Int = 0
     private var isProcessing = false
+    private var needsQueueDrain = false
     private var isPaused = false
     private var pendingNotificationPermissionRequests = 0
     private var pendingRequestPermissionRequests = 0
@@ -67,6 +85,7 @@ final class FlowJourneyRunner {
     private var deferredDismissReason: CloseReason?
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
+    private let deferredTaskQueue = SerialTaskQueue()
     private var didWarnConverters = false
 
     init(
@@ -442,15 +461,26 @@ final class FlowJourneyRunner {
     }
 
     private func processQueue(resumeContext: ResumeContext?) async -> RunOutcome? {
-        if isProcessing { return nil }
+        if isProcessing {
+            needsQueueDrain = true
+            return nil
+        }
         isProcessing = true
+        needsQueueDrain = false
         defer { isProcessing = false }
 
         var resumeContext = resumeContext
 
         while !isPaused {
             if activeRequest == nil {
-                guard !actionQueue.isEmpty else { return nil }
+                if actionQueue.isEmpty {
+                    if needsQueueDrain {
+                        needsQueueDrain = false
+                        await Task.yield()
+                        continue
+                    }
+                    return nil
+                }
                 activeRequest = actionQueue.removeFirst()
                 activeIndex = 0
             }
@@ -1566,16 +1596,19 @@ final class FlowJourneyRunner {
                 debounceTasks[key] = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(debounceMs) * 1_000_000)
                     guard let self else { return }
-                    self.enqueueActions(
-                        interaction.actions,
-                        context: TriggerContext(
-                            screenId: screenId,
-                            componentId: nil,
-                            interactionId: interaction.id,
-                            instanceId: instanceId
+                    self.deferredTaskQueue.enqueue { [weak self] in
+                        guard let self else { return }
+                        self.enqueueActions(
+                            interaction.actions,
+                            context: TriggerContext(
+                                screenId: screenId,
+                                componentId: nil,
+                                interactionId: interaction.id,
+                                instanceId: instanceId
+                            )
                         )
-                    )
-                    _ = await self.processQueue(resumeContext: nil)
+                        _ = await self.processQueue(resumeContext: nil)
+                    }
                 }
             } else {
                 enqueueActions(
@@ -1604,9 +1637,12 @@ final class FlowJourneyRunner {
         triggerResetTasks[key] = Task { [weak self] in
             await Task.yield()
             guard let self else { return }
-            _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
-            self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
-            self.sendViewModelTrigger(path: path, value: 0, instanceId: instanceId)
+            self.deferredTaskQueue.enqueue { [weak self] in
+                guard let self else { return }
+                _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
+                self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
+                self.sendViewModelTrigger(path: path, value: 0, instanceId: instanceId)
+            }
         }
     }
 
