@@ -538,12 +538,12 @@ final class FlowJourneyRunner {
                 let result = await handleExperiment(experiment, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
+            case .goal(let goal):
+                let result = await handleGoal(goal, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .sendEvent(let sendEvent):
                 await handleSendEvent(sendEvent, context: context)
-                trackAction(action, context: context, error: nil)
-                return .continue
-            case .goal(let goal):
-                await handleGoal(goal, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
             case .updateCustomer(let updateCustomer):
@@ -937,9 +937,9 @@ final class FlowJourneyRunner {
     private func handleGoal(
         _ action: GoalAction,
         context: TriggerContext
-    ) async {
+    ) async -> ActionResult {
         let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !goalId.isEmpty else { return }
+        guard !goalId.isEmpty else { return .continue }
         let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
 
         let trimmedLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -947,7 +947,7 @@ final class FlowJourneyRunner {
 
         if let onGoalHit {
             await onGoalHit(goalId, goalLabel, resolvedScreenId)
-            return
+            return journey.status.isLive ? .continue : .stopSequence
         }
 
         eventService.track(
@@ -961,6 +961,7 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
+        return journey.status.isLive ? .continue : .stopSequence
     }
     private func handleUpdateCustomer(
         _ action: UpdateCustomerAction,
@@ -1690,24 +1691,6 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
-    }
-
-    private func handleGoal(_ action: GoalAction, context: TriggerContext) async -> GoalActionResolution {
-        let goalId = action.goalId.isEmpty ? "primary" : action.goalId
-        eventService.track(
-            JourneyEvents.journeyGoalHit,
-            properties: JourneyEvents.journeyGoalHitProperties(
-                journey: journey,
-                screenId: context.screenId ?? journey.flowState.currentScreenId,
-                interactionId: context.interactionId,
-                goalId: goalId,
-                goalLabel: action.label
-            ),
-            userProperties: nil,
-            userPropertiesSetOnce: nil
-        )
-        return await onGoalActionHit?(goalId, action.label)
-            ?? GoalActionResolution(shouldExit: false)
     }
 
     private func sendViewModelInit() {

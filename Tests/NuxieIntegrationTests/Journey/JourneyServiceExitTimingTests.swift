@@ -409,6 +409,85 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
+            it("starts matching campaigns from scoped goal actions") {
+                let goalCampaign = makeCampaign(
+                    id: "camp-goal-trigger",
+                    flowId: "flow-goal-trigger",
+                    trigger: .event(EventTriggerConfig(eventName: JourneyEvents.journeyGoalHit, condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow()
+                let goalFlow = makeFlow(flowId: "flow-goal-trigger")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, goalCampaign],
+                    flows: [primaryFlow, goalFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId).sorted()
+                }.toEventually(equal([campaignId, "camp-goal-trigger"].sorted()), timeout: .seconds(2))
+            }
+
+            it("feeds scoped goal actions into all active journeys for goal evaluation") {
+                let primaryCampaign = makeCampaign(
+                    id: "camp-primary-goal",
+                    flowId: "flow-primary-goal",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let secondaryCampaign = makeCampaign(
+                    id: "camp-secondary-goal",
+                    flowId: "flow-secondary-goal",
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: nil
+                )
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, secondaryCampaign],
+                    flows: [
+                        makeFlow(flowId: "flow-primary-goal"),
+                        makeFlow(flowId: "flow-secondary-goal"),
+                    ]
+                )
+                await service.initialize()
+
+                _ = await service.handleEventForTrigger(
+                    NuxieEvent(id: "evt_goal_scope", name: "paywall_trigger", distinctId: distinctId)
+                )
+
+                let activeJourneys = await service.getActiveJourneys(for: distinctId)
+                let primaryJourney = activeJourneys.first(where: { $0.campaignId == "camp-primary-goal" })
+                let secondaryJourney = activeJourneys.first(where: { $0.campaignId == "camp-secondary-goal" })
+                expect(primaryJourney).toNot(beNil())
+                expect(secondaryJourney?.convertedAt).to(beNil())
+
+                await service.handleScopedGoalEvent(
+                    journeyId: primaryJourney!.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    (await service.getActiveJourneys(for: distinctId).first {
+                        $0.id == secondaryJourney?.id
+                    })?.convertedAt
+                }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
             it("replays scoped notification outcomes into newly started journeys") {
                 let notificationCampaign = makeCampaign(
                     id: "camp-notifications-replay",
@@ -1025,6 +1104,37 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         journeyId: journey.id
                     )
                 }
+
+                await expect {
+                    await MainActor.run {
+                        orderingPresentationService.wasFlowPresented("gate-flow")
+                    }
+                }.toEventually(beTrue(), timeout: .seconds(2))
+            }
+
+            it("honors gate plans from scoped goal actions") {
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: OrderingRecorder())
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: journeyStore)
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "show_flow",
+                    flowId: "gate-flow"
+                )
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
 
                 await expect {
                     await MainActor.run {
