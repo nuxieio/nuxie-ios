@@ -4,16 +4,27 @@ import FactoryKit
 private final class SerialTaskQueue {
     private let lock = NSLock()
     private var tail: Task<Void, Never>?
+    private var tailGeneration: UInt64 = 0
 
     func enqueue(_ operation: @escaping () async -> Void) {
-        let previous: Task<Void, Never>?
         lock.lock()
-        previous = tail
-        let next = Task {
+        let previous = tail
+        tailGeneration += 1
+        let generation = tailGeneration
+        let next = Task { [weak self] in
             _ = await previous?.value
             await operation()
+            self?.finish(generation: generation)
         }
         tail = next
+        lock.unlock()
+    }
+
+    private func finish(generation: UInt64) {
+        lock.lock()
+        if tailGeneration == generation {
+            tail = nil
+        }
         lock.unlock()
     }
 }
