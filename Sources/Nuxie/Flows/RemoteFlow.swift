@@ -877,16 +877,21 @@ public struct GoalAction: Codable {
         case type
         case goalId
         case label
-        case legacyId = "id"
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decodeIfPresent(String.self, forKey: .type) ?? "goal"
-        goalId =
-            try container.decodeIfPresent(String.self, forKey: .goalId)
-            ?? container.decodeIfPresent(String.self, forKey: .legacyId)
-            ?? "primary"
+        let decodedGoalId = try container.decode(String.self, forKey: .goalId)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !decodedGoalId.isEmpty else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .goalId,
+                in: container,
+                debugDescription: "goal actions require a non-empty goalId"
+            )
+        }
+        goalId = decodedGoalId
         label = try container.decodeIfPresent(String.self, forKey: .label)
     }
 

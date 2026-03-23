@@ -65,6 +65,7 @@ public enum PresentationState: Equatable {
 
 public enum CloseReason: Equatable {
     case userDismissed
+    case goalMet
     case purchaseCompleted
     case timeout
     case error(Error)
@@ -72,6 +73,7 @@ public enum CloseReason: Equatable {
     public static func == (lhs: CloseReason, rhs: CloseReason) -> Bool {
         switch (lhs, rhs) {
         case (.userDismissed, .userDismissed),
+             (.goalMet, .goalMet),
              (.purchaseCompleted, .purchaseCompleted),
              (.timeout, .timeout):
             return true

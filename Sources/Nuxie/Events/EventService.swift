@@ -86,6 +86,10 @@ public protocol EventServiceProtocol {
     userPropertiesSetOnce: [String: Any]?
   ) async -> [String: Any]
 
+  /// Persist a fully prepared trigger event into local history without re-enqueuing it.
+  /// Used when journey evaluation needs the hit to remain queryable across future passes.
+  func storePreparedEventInHistory(_ event: NuxieEvent) async
+
   /// Track an event and return both the enriched event and server response
   /// Used for trigger flows that need gate plans and local evaluation
   /// - Parameters:
@@ -526,6 +530,16 @@ public class EventService: EventServiceProtocol {
       userProperties: userProperties,
       userPropertiesSetOnce: userPropertiesSetOnce
     )
+  }
+
+  public func storePreparedEventInHistory(_ event: NuxieEvent) async {
+    await ready.wait()
+
+    do {
+      try await eventStore.storePreparedEvent(makeStoredEvent(from: event))
+    } catch {
+      LogWarning("Failed to store prepared event locally: \(error)")
+    }
   }
 
   /// Reassign events from one user to another (for anonymous → identified transitions)
@@ -1088,6 +1102,23 @@ public class EventService: EventServiceProtocol {
     return events.contains { event in
       now.timeIntervalSince(event.timestamp) <= within
     }
+  }
+
+  private func makeStoredEvent(from event: NuxieEvent) -> StoredEvent {
+    (try? StoredEvent(
+      id: event.id,
+      name: event.name,
+      properties: event.properties,
+      timestamp: event.timestamp,
+      distinctId: event.distinctId
+    )) ?? StoredEvent(
+      id: event.id,
+      name: event.name,
+      properties: Data(),
+      timestamp: event.timestamp,
+      distinctId: event.distinctId,
+      sessionId: event.properties["$session_id"] as? String
+    )
   }
 
 }

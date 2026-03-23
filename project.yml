@@ -62,13 +62,11 @@ targets:
       GENERATE_INFOPLIST_FILE: YES
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
-      
-  NuxieSDKUnitTests:
-    type: bundle.unit-test
+
+  NuxieTestSupportiOS:
+    type: framework
     platform: iOS
     sources:
-      - path: Tests/NuxieUnitTests
-        name: NuxieUnitTests
       - path: Tests/NuxieTestSupport
         name: NuxieTestSupport
     dependencies:
@@ -77,9 +75,55 @@ targets:
       - package: Nimble
       - package: Factory
         product: FactoryKit
+      - sdk: XCTest.framework
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.testsupport.ios
+      PRODUCT_NAME: NuxieTestSupport
+      PRODUCT_MODULE_NAME: NuxieTestSupport
+      ENABLE_TESTABILITY: YES
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+
+  NuxieTestSupportMac:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Tests/NuxieTestSupport
+        name: NuxieTestSupport
+    dependencies:
+      - target: NuxieSDKMac
+      - package: Quick
+      - package: Nimble
+      - package: Factory
+        product: FactoryKit
+      - sdk: XCTest.framework
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.testsupport.macos
+      PRODUCT_NAME: NuxieTestSupport
+      PRODUCT_MODULE_NAME: NuxieTestSupport
+      ENABLE_TESTABILITY: YES
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+      
+  NuxieSDKUnitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/NuxieUnitTests
+        name: NuxieUnitTests
+    dependencies:
+      - target: NuxieSDK
+      - target: NuxieTestSupportiOS
+      - package: Quick
+      - package: Nimble
+      - package: Factory
+        product: FactoryKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.unittests
       TEST_HOST: ""
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SWIFT_PACKAGE
       GENERATE_INFOPLIST_FILE: YES
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
@@ -94,10 +138,9 @@ targets:
     sources:
       - path: Tests/NuxieUnitTests
         name: NuxieUnitTests
-      - path: Tests/NuxieTestSupport
-        name: NuxieTestSupport
     dependencies:
       - target: NuxieSDKMac
+      - target: NuxieTestSupportMac
       - package: Quick
       - package: Nimble
       - package: Factory
@@ -105,6 +148,7 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.macos.unittests
       TEST_HOST: ""
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SWIFT_PACKAGE
       GENERATE_INFOPLIST_FILE: YES
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
@@ -119,10 +163,9 @@ targets:
     sources:
       - path: Tests/NuxieIntegrationTests
         name: NuxieIntegrationTests
-      - path: Tests/NuxieTestSupport
-        name: NuxieTestSupport
     dependencies:
       - target: NuxieSDK
+      - target: NuxieTestSupportiOS
       - package: Quick
       - package: Nimble
       - package: Factory
@@ -130,6 +173,7 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.integrationtests
       TEST_HOST: ""
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SWIFT_PACKAGE
       GENERATE_INFOPLIST_FILE: YES
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
@@ -144,13 +188,12 @@ targets:
     sources:
       - path: Tests/NuxieE2ETests
         name: NuxieE2ETests
-      - path: Tests/NuxieTestSupport
-        name: NuxieTestSupport
     resources:
       - path: Tests/NuxieE2ETests/Fixtures/experiment-ab-compiled-bundle
         type: folder
     dependencies:
       - target: NuxieSDK
+      - target: NuxieTestSupportiOS
       - package: Quick
       - package: Nimble
       - package: Factory
@@ -158,6 +201,7 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.e2etests
       TEST_HOST: ""
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SWIFT_PACKAGE
       GENERATE_INFOPLIST_FILE: YES
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""

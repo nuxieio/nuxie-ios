@@ -1,14 +1,36 @@
 import Foundation
 import FactoryKit
 
+private final class SerialTaskQueue {
+    private let lock = NSLock()
+    private var tail: Task<Void, Never>?
+    private var tailGeneration: UInt64 = 0
+
+    func enqueue(_ operation: @escaping () async -> Void) {
+        lock.lock()
+        let previous = tail
+        tailGeneration += 1
+        let generation = tailGeneration
+        let next = Task { [weak self] in
+            _ = await previous?.value
+            await operation()
+            self?.finish(generation: generation)
+        }
+        tail = next
+        lock.unlock()
+    }
+
+    private func finish(generation: UInt64) {
+        lock.lock()
+        if tailGeneration == generation {
+            tail = nil
+        }
+        lock.unlock()
+    }
+}
+
 final class FlowJourneyRunner {
     private static let currentDeviceTimezoneToken = "__current_device__"
-
-    struct GoalActionResolution {
-        let shouldExit: Bool
-
-        static let `continue` = GoalActionResolution(shouldExit: false)
-    }
 
     struct TriggerContext {
         let screenId: String?
@@ -45,6 +67,7 @@ final class FlowJourneyRunner {
     private let flow: Flow
     private let remoteFlow: RemoteFlow
     private let viewModels: FlowViewModelRuntime
+    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -56,7 +79,6 @@ final class FlowJourneyRunner {
 
     weak var viewController: FlowViewController?
     var onShowScreen: ((String, AnyCodable?) async -> Void)?
-    var onGoalActionHit: ((String, String?) async -> GoalActionResolution)?
     private(set) var isRuntimeReady = false
 
     private var interactionsById: [String: [Interaction]] = [:]
@@ -66,6 +88,7 @@ final class FlowJourneyRunner {
     private var activeRequest: ActionRequest?
     private var activeIndex: Int = 0
     private var isProcessing = false
+    private var needsQueueDrain = false
     private var isPaused = false
     private var pendingNotificationPermissionRequests = 0
     private var pendingRequestPermissionRequests = 0
@@ -73,12 +96,14 @@ final class FlowJourneyRunner {
     private var deferredDismissReason: CloseReason?
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
+    private let deferredTaskQueue = SerialTaskQueue()
     private var didWarnConverters = false
 
     init(
         journey: Journey,
         campaign: Campaign,
         flow: Flow,
+        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)? = nil,
         viewController: FlowViewController? = nil
     ) {
         self.journey = journey
@@ -86,6 +111,7 @@ final class FlowJourneyRunner {
         self.flow = flow
         self.remoteFlow = flow.remoteFlow
         self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
+        self.onGoalHit = onGoalHit
         self.viewController = viewController
 
         self.interactionsById = flow.remoteFlow.interactions
@@ -446,15 +472,26 @@ final class FlowJourneyRunner {
     }
 
     private func processQueue(resumeContext: ResumeContext?) async -> RunOutcome? {
-        if isProcessing { return nil }
+        if isProcessing {
+            needsQueueDrain = true
+            return nil
+        }
         isProcessing = true
+        needsQueueDrain = false
         defer { isProcessing = false }
 
         var resumeContext = resumeContext
 
         while !isPaused {
             if activeRequest == nil {
-                guard !actionQueue.isEmpty else { return nil }
+                if actionQueue.isEmpty {
+                    if needsQueueDrain {
+                        needsQueueDrain = false
+                        await Task.yield()
+                        continue
+                    }
+                    return nil
+                }
                 activeRequest = actionQueue.removeFirst()
                 activeIndex = 0
             }
@@ -542,14 +579,14 @@ final class FlowJourneyRunner {
                 let result = await handleExperiment(experiment, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
+            case .goal(let goal):
+                let result = await handleGoal(goal, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .sendEvent(let sendEvent):
                 await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
-            case .goal(let goal):
-                let result = await handleGoal(goal, context: context)
-                trackAction(action, context: context, error: nil)
-                return result.shouldExit ? .exit(.goalMet) : .continue
             case .updateCustomer(let updateCustomer):
                 handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
@@ -938,6 +975,36 @@ final class FlowJourneyRunner {
         )
     }
 
+    private func handleGoal(
+        _ action: GoalAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goalId.isEmpty else { return .continue }
+        let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
+
+        let trimmedLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let goalLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
+
+        if let onGoalHit {
+            await onGoalHit(goalId, goalLabel, resolvedScreenId, context.interactionId)
+            return (journey.status.isLive && deferredDismissReason == nil) ? .continue : .stopSequence
+        }
+
+        eventService.track(
+            JourneyEvents.journeyGoalHit,
+            properties: JourneyEvents.journeyGoalHitProperties(
+                journey: journey,
+                screenId: resolvedScreenId,
+                interactionId: context.interactionId,
+                goalId: goalId,
+                goalLabel: goalLabel
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+        return journey.status.isLive ? .continue : .stopSequence
+    }
     private func handleUpdateCustomer(
         _ action: UpdateCustomerAction,
         context: TriggerContext
@@ -1541,16 +1608,19 @@ final class FlowJourneyRunner {
                 debounceTasks[key] = Task { [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(debounceMs) * 1_000_000)
                     guard let self else { return }
-                    self.enqueueActions(
-                        interaction.actions,
-                        context: TriggerContext(
-                            screenId: screenId,
-                            componentId: nil,
-                            interactionId: interaction.id,
-                            instanceId: instanceId
+                    self.deferredTaskQueue.enqueue { [weak self] in
+                        guard let self else { return }
+                        self.enqueueActions(
+                            interaction.actions,
+                            context: TriggerContext(
+                                screenId: screenId,
+                                componentId: nil,
+                                interactionId: interaction.id,
+                                instanceId: instanceId
+                            )
                         )
-                    )
-                    _ = await self.processQueue(resumeContext: nil)
+                        _ = await self.processQueue(resumeContext: nil)
+                    }
                 }
             } else {
                 enqueueActions(
@@ -1579,9 +1649,12 @@ final class FlowJourneyRunner {
         triggerResetTasks[key] = Task { [weak self] in
             await Task.yield()
             guard let self else { return }
-            _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
-            self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
-            self.sendViewModelTrigger(path: path, value: 0, instanceId: instanceId)
+            self.deferredTaskQueue.enqueue { [weak self] in
+                guard let self else { return }
+                _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
+                self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
+                self.sendViewModelTrigger(path: path, value: 0, instanceId: instanceId)
+            }
         }
     }
 
@@ -1666,24 +1739,6 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
-    }
-
-    private func handleGoal(_ action: GoalAction, context: TriggerContext) async -> GoalActionResolution {
-        let goalId = action.goalId.isEmpty ? "primary" : action.goalId
-        eventService.track(
-            JourneyEvents.journeyGoalHit,
-            properties: JourneyEvents.journeyGoalHitProperties(
-                journey: journey,
-                screenId: context.screenId ?? journey.flowState.currentScreenId,
-                interactionId: context.interactionId,
-                goalId: goalId,
-                goalLabel: action.label
-            ),
-            userProperties: nil,
-            userPropertiesSetOnce: nil
-        )
-        return await onGoalActionHit?(goalId, action.label)
-            ?? GoalActionResolution(shouldExit: false)
     }
 
     private func sendViewModelInit() {

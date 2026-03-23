@@ -51,7 +51,6 @@ public protocol JourneyServiceProtocol: AnyObject {
 }
 
 public actor JourneyService: JourneyServiceProtocol {
-  private static let explicitGoalHitsContextKey = "__explicit_goal_hits"
 
   // MARK: - Dependencies
 
@@ -326,7 +325,7 @@ public actor JourneyService: JourneyServiceProtocol {
     for journey in journeys {
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
       await evaluateGoalIfNeeded(journey, campaign: campaign)
-      if !(await shouldDeferExitDecision()) {
+      if !(await shouldDeferExitDecision(for: journey)) {
         if let reason = await exitDecision(journey, campaign) {
           completeJourney(journey, reason: reason)
         }
@@ -536,6 +535,8 @@ public actor JourneyService: JourneyServiceProtocol {
     switch reason {
     case .userDismissed:
       userInfo["reason"] = "user_dismissed"
+    case .goalMet:
+      userInfo["reason"] = "goal_met"
     case .purchaseCompleted:
       userInfo["reason"] = "purchase_completed"
     case .timeout:
@@ -558,6 +559,8 @@ public actor JourneyService: JourneyServiceProtocol {
     switch reason {
     case .userDismissed:
       method = "user"
+    case .goalMet:
+      method = "goal_met"
     case .purchaseCompleted:
       method = "purchase_completed"
     case .timeout:
@@ -670,11 +673,145 @@ public actor JourneyService: JourneyServiceProtocol {
       properties: trackedEvent.properties,
       timestamp: trackedEvent.timestamp
     )
+    let trackedTransientEvent = makeStoredEvent(from: scopedEvent)
 
     let campaigns = if let cachedCampaigns {
       cachedCampaigns
     } else {
       await getAllCampaigns(for: scopedEvent.distinctId)
+    }
+    if let campaigns {
+      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let startedJourneyIds = Set(results.compactMap { result -> String? in
+        guard case .started(let startedJourney) = result else { return nil }
+        return startedJourney.id
+      })
+      if !startedJourneyIds.isEmpty {
+        let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+          uniqueKeysWithValues: startedJourneyIds.map { ($0, [trackedTransientEvent]) }
+        )
+        await processActiveJourneys(
+          for: scopedEvent,
+          campaigns: campaigns,
+          transientEventsByJourneyId: transientEventsByJourneyId,
+          restrictedToJourneyIds: startedJourneyIds
+        )
+      }
+    }
+    await handleScopedGatePlan(response?.gatePlan())
+  }
+
+  func handleScopedGoalEvent(
+    journeyId: String,
+    goalId: String,
+    goalLabel: String?,
+    screenId: String?,
+    interactionId: String? = nil
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId] else {
+      return
+    }
+
+    let scopedDistinctId = journey.distinctId
+    let properties = JourneyEvents.journeyGoalHitProperties(
+      journey: journey,
+      screenId: screenId,
+      interactionId: interactionId,
+      goalId: goalId,
+      goalLabel: goalLabel
+    )
+    let enrichedProperties = await eventService.prepareTriggerProperties(
+      properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+    let localScopedEvent = NuxieEvent(
+      name: JourneyEvents.journeyGoalHit,
+      distinctId: scopedDistinctId,
+      properties: enrichedProperties,
+      timestamp: dateProvider.now()
+    )
+    let cachedCampaigns: [Campaign]? = await getAllCampaigns(for: scopedDistinctId)
+    let transientEvent = makeStoredEvent(from: localScopedEvent)
+    let sourceCampaign = sourceScopedGoalCampaign(
+      for: journey,
+      campaigns: cachedCampaigns
+    )
+    let sourceJourneyCompleted = await processSourceScopedGoalJourneyEvent(
+      journey,
+      campaign: sourceCampaign,
+      event: localScopedEvent,
+      transientEvent: transientEvent,
+      shouldDispatchToRunner: false
+    )
+    let otherActiveJourneyIds = Set(
+      await getActiveJourneys(for: localScopedEvent.distinctId)
+        .map(\.id)
+        .filter { $0 != journey.id }
+    )
+    if !otherActiveJourneyIds.isEmpty {
+      let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+        uniqueKeysWithValues: otherActiveJourneyIds.map { ($0, [transientEvent]) }
+      )
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: cachedCampaigns ?? [],
+        transientEventsByJourneyId: transientEventsByJourneyId,
+        restrictedToJourneyIds: otherActiveJourneyIds,
+        allowSnapshotFallback: true
+      )
+    }
+
+    let trackedEvent: NuxieEvent
+    let response: EventResponse?
+    do {
+      let tracked = try await eventService.trackForTrigger(
+        JourneyEvents.journeyGoalHit,
+        properties: properties,
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        persistToHistory: false,
+        distinctIdOverride: scopedDistinctId
+      )
+      trackedEvent = tracked.0
+      response = tracked.1
+    } catch {
+      LogWarning("JourneyService: Failed to track scoped goal event: \(error)")
+      trackedEvent = NuxieEvent(
+        name: JourneyEvents.journeyGoalHit,
+        distinctId: scopedDistinctId,
+        properties: enrichedProperties
+      )
+      response = nil
+    }
+
+    let scopedEvent = NuxieEvent(
+      id: trackedEvent.id,
+      name: trackedEvent.name,
+      distinctId: scopedDistinctId,
+      properties: trackedEvent.properties,
+      timestamp: trackedEvent.timestamp
+    )
+    await eventService.storePreparedEventInHistory(localScopedEvent)
+
+    let campaigns = if let cachedCampaigns {
+      cachedCampaigns
+    } else {
+      await getAllCampaigns(for: scopedEvent.distinctId)
+    }
+    let resolvedSourceCampaign = sourceScopedGoalCampaign(
+      for: journey,
+      campaigns: campaigns ?? cachedCampaigns
+    )
+    var sourceJourneyStillCompleted = sourceJourneyCompleted
+    if !sourceJourneyStillCompleted {
+      sourceJourneyStillCompleted = await processSourceScopedGoalJourneyEvent(
+        journey,
+        campaign: resolvedSourceCampaign,
+        event: scopedEvent,
+        transientEvent: transientEvent,
+        shouldDispatchToRunner: true
+      )
     }
     if let campaigns {
       let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
@@ -694,7 +831,11 @@ public actor JourneyService: JourneyServiceProtocol {
         )
       }
     }
-    await handleScopedGatePlan(response?.gatePlan())
+    await handleScopedGatePlan(
+      response?.gatePlan(),
+      sourceJourney: journey,
+      sourceCampaign: resolvedSourceCampaign
+    )
   }
 
   fileprivate func handleUnsupportedScopedRequestPermission(
@@ -750,6 +891,8 @@ public actor JourneyService: JourneyServiceProtocol {
     switch reason {
     case .userDismissed:
       return .dismissed
+    case .goalMet:
+      return .goalMet
     case .error:
       return .error
     case .purchaseCompleted, .timeout:
@@ -765,6 +908,96 @@ public actor JourneyService: JourneyServiceProtocol {
     completeJourney(journey, reason: dismissalExitReason(for: reason))
   }
 
+  private func processSourceScopedGoalJourneyEvent(
+    _ journey: Journey,
+    campaign: Campaign?,
+    event: NuxieEvent,
+    transientEvent: StoredEvent,
+    shouldDispatchToRunner: Bool
+  ) async -> Bool {
+    if let campaign {
+      await evaluateGoalIfNeeded(
+        journey,
+        campaign: campaign,
+        transientEvents: [transientEvent]
+      )
+      if !(await shouldDeferExitDecision(for: journey)) {
+        if let reason = await exitDecision(journey, campaign) {
+          completeJourney(journey, reason: reason)
+          return true
+        }
+      }
+      if await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
+        if let controller = flowRunners[journey.id]?.viewController {
+          await handleRuntimeDismiss(
+            journeyId: journey.id,
+            reason: .goalMet,
+            controller: controller
+          )
+          await flowPresentationService.dismissCurrentFlow(reason: .goalMet)
+        } else {
+          await flowPresentationService.dismissCurrentFlow()
+          completeJourney(journey, reason: .goalMet)
+        }
+        return true
+      }
+    }
+    guard shouldDispatchToRunner else {
+      return !journey.status.isLive
+    }
+    guard journey.status.isLive else {
+      return true
+    }
+
+    if let pending = journey.flowState.pendingAction, pending.kind == .waitUntil {
+      if let runner = flowRunners[journey.id] {
+        let outcome = await runner.resumePendingAction(reason: .event(event), event: event)
+        handleOutcome(outcome, journey: journey)
+      }
+      return !journey.status.isLive
+    }
+
+    if let runner = flowRunners[journey.id] {
+      let outcome = await runner.dispatchEventTrigger(event)
+      handleOutcome(outcome, journey: journey)
+    }
+    return !journey.status.isLive
+  }
+
+  private func sourceScopedGoalCampaign(
+    for journey: Journey,
+    campaigns: [Campaign]?
+  ) -> Campaign? {
+    if let campaign = campaigns?.first(where: { $0.id == journey.campaignId }) {
+      return campaign
+    }
+    guard journey.goalSnapshot != nil || journey.exitPolicySnapshot != nil else {
+      return nil
+    }
+
+    // Use the journey snapshots so scoped goal completion still works after
+    // the profile cache ages out for a long-lived presented flow.
+    return Campaign(
+      id: journey.campaignId,
+      name: "Journey Snapshot",
+      flowId: journey.flowId,
+      flowNumber: 0,
+      flowName: nil,
+      reentry: .everyTime,
+      publishedAt: journey.startedAt.ISO8601Format(),
+      trigger: journey.triggerSnapshot ?? .event(
+        EventTriggerConfig(
+          eventName: JourneyEvents.journeyGoalHit,
+          condition: nil
+        )
+      ),
+      goal: journey.goalSnapshot,
+      exitPolicy: journey.exitPolicySnapshot,
+      conversionAnchor: journey.conversionAnchor.rawValue,
+      campaignType: nil
+    )
+  }
+
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
     if let existing = flowRunners[journey.id] {
       return existing
@@ -774,7 +1007,20 @@ public actor JourneyService: JourneyServiceProtocol {
 
     do {
       let flow = try await flowService.fetchFlow(id: flowId)
-      let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+      let runner = FlowJourneyRunner(
+        journey: journey,
+        campaign: campaign,
+        flow: flow,
+        onGoalHit: { [weak self, journeyId = journey.id] goalId, goalLabel, screenId, interactionId in
+          await self?.handleScopedGoalEvent(
+            journeyId: journeyId,
+            goalId: goalId,
+            goalLabel: goalLabel,
+            screenId: screenId,
+            interactionId: interactionId
+          )
+        }
+      )
 
       runner.onShowScreen = { [weak self, weak runner] (screenId: String, transition: AnyCodable?) async in
         guard let self else { return }
@@ -790,13 +1036,6 @@ public actor JourneyService: JourneyServiceProtocol {
           }
         }
       }
-      runner.onGoalActionHit = { [weak self, weak journey] goalId, _ in
-        guard let self, let journey else {
-          return FlowJourneyRunner.GoalActionResolution(shouldExit: false)
-        }
-        return await self.handleExplicitGoalActionHit(journey: journey, goalId: goalId)
-      }
-
       flowRunners[journey.id] = runner
 
       _ = try? await presentFlowIfNeeded(flowId: flowId, journey: journey)
@@ -1028,7 +1267,8 @@ public actor JourneyService: JourneyServiceProtocol {
     for event: NuxieEvent,
     campaigns: [Campaign],
     transientEventsByJourneyId: [String: [StoredEvent]],
-    restrictedToJourneyIds: Set<String>? = nil
+    restrictedToJourneyIds: Set<String>? = nil,
+    allowSnapshotFallback: Bool = false
   ) async {
     let journeys = await getActiveJourneys(for: event.distinctId)
     let eventJourneyId = event.properties["journey_id"] as? String
@@ -1037,21 +1277,24 @@ public actor JourneyService: JourneyServiceProtocol {
       if let restrictedToJourneyIds, !restrictedToJourneyIds.contains(journey.id) {
         continue
       }
-      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
+      let campaign = campaigns.first(where: { $0.id == journey.campaignId }) ??
+        (allowSnapshotFallback ? sourceScopedGoalCampaign(for: journey, campaigns: campaigns) : nil)
 
       if eventJourneyId == journey.id, let runner = flowRunners[journey.id] {
         runner.handleScopedSystemPermissionEvent(event.name)
       }
 
-      await evaluateGoalIfNeeded(
-        journey,
-        campaign: campaign,
-        transientEvents: transientEventsByJourneyId[journey.id] ?? []
-      )
-      if !(await shouldDeferExitDecision()) {
-        if let reason = await exitDecision(journey, campaign) {
-          completeJourney(journey, reason: reason)
-          continue
+      if let campaign {
+        await evaluateGoalIfNeeded(
+          journey,
+          campaign: campaign,
+          transientEvents: transientEventsByJourneyId[journey.id] ?? []
+        )
+        if !(await shouldDeferExitDecision(for: journey)) {
+          if let reason = await exitDecision(journey, campaign) {
+            completeJourney(journey, reason: reason)
+            continue
+          }
         }
       }
 
@@ -1070,7 +1313,33 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  private func handleScopedGatePlan(_ plan: GatePlan?) async {
+  private func closeSourceJourneyBeforeScopedGateFlowIfNeeded(
+    journey: Journey?,
+    campaign: Campaign?
+  ) async {
+    guard let journey, journey.status.isLive else { return }
+    guard await flowPresentationService.presentedJourneyId == journey.id else { return }
+
+    let closeReason: CloseReason = journey.convertedAt != nil ? .goalMet : .userDismissed
+    if let controller = flowRunners[journey.id]?.viewController {
+      await handleRuntimeDismiss(
+        journeyId: journey.id,
+        reason: closeReason,
+        controller: controller
+      )
+      await flowPresentationService.dismissCurrentFlow(reason: closeReason)
+      return
+    }
+
+    await flowPresentationService.dismissCurrentFlow(reason: closeReason)
+    completeJourney(journey, reason: dismissalExitReason(for: closeReason))
+  }
+
+  private func handleScopedGatePlan(
+    _ plan: GatePlan?,
+    sourceJourney: Journey? = nil,
+    sourceCampaign: Campaign? = nil
+  ) async {
     guard let plan else { return }
 
     switch plan.decision {
@@ -1079,6 +1348,10 @@ public actor JourneyService: JourneyServiceProtocol {
 
     case .showFlow:
       guard let flowId = plan.flowId else { return }
+      await closeSourceJourneyBeforeScopedGateFlowIfNeeded(
+        journey: sourceJourney,
+        campaign: sourceCampaign
+      )
       _ = try? await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
 
     case .requireFeature:
@@ -1107,6 +1380,10 @@ public actor JourneyService: JourneyServiceProtocol {
       }
 
       guard let flowId = plan.flowId else { return }
+      await closeSourceJourneyBeforeScopedGateFlowIfNeeded(
+        journey: sourceJourney,
+        campaign: sourceCampaign
+      )
       _ = try? await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
     }
   }
@@ -1145,208 +1422,23 @@ public actor JourneyService: JourneyServiceProtocol {
       transientEvents: transientEvents
     )
     if result.met, let at = result.at {
-      latchGoalConversion(journey: journey, at: at)
-    }
-  }
+      journey.convertedAt = at
+      journey.updatedAt = dateProvider.now()
+      persistJourney(journey)
 
-  private func handleExplicitGoalActionHit(
-    journey: Journey,
-    goalId: String,
-  ) -> FlowJourneyRunner.GoalActionResolution {
-    let hitAt = dateProvider.now()
-    let didRecordHit = recordExplicitGoalHit(goalId, at: hitAt, journey: journey)
-
-    if journey.convertedAt != nil {
-      if didRecordHit {
-        persistJourney(journey)
-      }
-      return FlowJourneyRunner.GoalActionResolution(
-        shouldExit: shouldExitOnGoal(journey),
+      eventService.track(
+        JourneyEvents.journeyGoalMet,
+        properties: [
+          "journey_id": journey.id,
+          "campaign_id": journey.campaignId,
+          "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
+          "met_at": at.timeIntervalSince1970,
+          "window_seconds": journey.conversionWindow,
+        ],
+        userProperties: nil,
+        userPropertiesSetOnce: nil
       )
     }
-
-    guard
-      let goal = journey.goalSnapshot,
-      let explicitGoalIds = compiledExplicitGoalIds(from: goal)
-    else {
-      if didRecordHit {
-        persistJourney(journey)
-      }
-      return FlowJourneyRunner.GoalActionResolution(shouldExit: false)
-    }
-
-    let metAt: Date?
-    switch goal.kind {
-    case .event:
-      metAt =
-        explicitGoalIds.count == 1 &&
-        explicitGoalIds.first == goalId &&
-        isWithinGoalWindow(hitAt, journey: journey)
-        ? explicitGoalHitTimestamps(for: journey)[goalId]
-        : nil
-    case .attribute:
-      guard isWithinGoalWindow(hitAt, journey: journey) else {
-        metAt = nil
-        break
-      }
-      let goalHits = explicitGoalHitTimestamps(for: journey)
-      let requiredHits = explicitGoalIds.compactMap { goalHits[$0] }
-      metAt =
-        requiredHits.count == explicitGoalIds.count
-        ? requiredHits.max()
-        : nil
-    case .segmentEnter, .segmentLeave:
-      metAt = nil
-    }
-
-    guard let metAt else {
-      if didRecordHit {
-        persistJourney(journey)
-      }
-      return FlowJourneyRunner.GoalActionResolution(shouldExit: false)
-    }
-
-    latchGoalConversion(journey: journey, at: metAt)
-    return FlowJourneyRunner.GoalActionResolution(
-      shouldExit: shouldExitOnGoal(journey),
-    )
-  }
-
-  private func latchGoalConversion(journey: Journey, at: Date) {
-    guard journey.convertedAt == nil else { return }
-
-    journey.convertedAt = at
-    journey.updatedAt = dateProvider.now()
-    persistJourney(journey)
-
-    eventService.track(
-      JourneyEvents.journeyGoalMet,
-      properties: [
-        "journey_id": journey.id,
-        "campaign_id": journey.campaignId,
-        "goal_kind": journey.goalSnapshot?.kind.rawValue ?? "",
-        "met_at": at.timeIntervalSince1970,
-        "window_seconds": journey.conversionWindow,
-      ],
-      userProperties: nil,
-      userPropertiesSetOnce: nil
-    )
-  }
-
-  private func shouldExitOnGoal(_ journey: Journey) -> Bool {
-    switch journey.exitPolicySnapshot?.mode ?? .never {
-    case .onGoal, .onGoalOrStop:
-      return true
-    case .never, .onStopMatching:
-      return false
-    }
-  }
-
-  private func isWithinGoalWindow(_ at: Date, journey: Journey) -> Bool {
-    guard journey.conversionWindow > 0 else { return true }
-    return at <= journey.conversionAnchorAt.addingTimeInterval(journey.conversionWindow)
-  }
-
-  private func explicitGoalHitTimestamps(for journey: Journey) -> [String: Date] {
-    guard let raw = journey.getContext(Self.explicitGoalHitsContextKey) as? [String: Any] else {
-      return [:]
-    }
-
-    return raw.reduce(into: [String: Date]()) { result, entry in
-      switch entry.value {
-      case let seconds as Double:
-        result[entry.key] = Date(timeIntervalSince1970: seconds)
-      case let seconds as Float:
-        result[entry.key] = Date(timeIntervalSince1970: TimeInterval(seconds))
-      case let seconds as Int:
-        result[entry.key] = Date(timeIntervalSince1970: TimeInterval(seconds))
-      case let seconds as NSNumber:
-        result[entry.key] = Date(timeIntervalSince1970: seconds.doubleValue)
-      default:
-        break
-      }
-    }
-  }
-
-  @discardableResult
-  private func recordExplicitGoalHit(_ goalId: String, at: Date, journey: Journey) -> Bool {
-    var goalHits = explicitGoalHitTimestamps(for: journey)
-    guard goalHits[goalId] == nil else { return false }
-
-    goalHits[goalId] = at
-    journey.setContext(
-      Self.explicitGoalHitsContextKey,
-      value: goalHits.mapValues { $0.timeIntervalSince1970 },
-    )
-    return true
-  }
-
-  private func compiledExplicitGoalIds(from goal: GoalConfig) -> [String]? {
-    switch goal.kind {
-    case .event:
-      guard goal.eventName == JourneyEvents.journeyGoalHit else { return nil }
-      guard let goalId = compiledExplicitGoalId(from: goal.eventFilter?.expr) else {
-        return nil
-      }
-      return [goalId]
-    case .attribute:
-      guard let expr = goal.attributeExpr?.expr else { return nil }
-      return compiledExplicitGoalIds(fromAttributeExpr: expr)
-    case .segmentEnter, .segmentLeave:
-      return nil
-    }
-  }
-
-  private func compiledExplicitGoalIds(fromAttributeExpr expr: IRExpr) -> [String]? {
-    guard case .and(let args) = expr else { return nil }
-
-    var goalIds: [String] = []
-    for arg in args {
-      guard
-        case .eventsExists(let name, _, _, _, let whereExpr) = arg,
-        name == JourneyEvents.journeyGoalHit,
-        let goalId = compiledExplicitGoalId(from: whereExpr)
-      else {
-        return nil
-      }
-      goalIds.append(goalId)
-    }
-
-    return goalIds.isEmpty ? nil : goalIds
-  }
-
-  private func compiledExplicitGoalId(from expr: IRExpr?) -> String? {
-    guard let expr else { return nil }
-
-    let predicates: [IRExpr]
-    switch expr {
-    case .pred(_, _, _):
-      predicates = [expr]
-    case .predAnd(let args):
-      predicates = args
-    default:
-      return nil
-    }
-
-    var goalId: String?
-    var hasJourneyScope = false
-
-    for predicate in predicates {
-      guard case .pred(let op, let key, let value) = predicate, op == "eq" else {
-        continue
-      }
-      switch (key, value) {
-      case ("goal_id", .string(let value)?):
-        goalId = value
-      case ("journey_id", .journeyId?):
-        hasJourneyScope = true
-      default:
-        break
-      }
-    }
-
-    guard hasJourneyScope else { return nil }
-    return goalId
   }
 
   private func makeStoredEvent(from event: NuxieEvent) -> StoredEvent {
@@ -1387,8 +1479,24 @@ public actor JourneyService: JourneyServiceProtocol {
     return nil
   }
 
-  private func shouldDeferExitDecision() async -> Bool {
-    await flowPresentationService.isFlowPresented
+  private func shouldDeferExitDecision(for journey: Journey) async -> Bool {
+    guard await flowPresentationService.isFlowPresented else {
+      return false
+    }
+    return await flowPresentationService.presentedJourneyId == journey.id
+  }
+
+  private func shouldCompletePresentedScopedGoalJourney(
+    _ journey: Journey,
+    campaign: Campaign
+  ) async -> Bool {
+    guard journey.status.isLive, journey.convertedAt != nil else {
+      return false
+    }
+    guard await shouldDeferExitDecision(for: journey) else {
+      return false
+    }
+    return await exitDecision(journey, campaign) == .goalMet
   }
 
   // MARK: - Reentry Policy
