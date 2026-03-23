@@ -98,6 +98,9 @@ public class Journey: Codable {
     /// Snapshot of exit policy at journey start
     public var exitPolicySnapshot: ExitPolicy?
 
+    /// Snapshot of campaign trigger at journey start
+    public var triggerSnapshot: CampaignTrigger?
+
     /// Conversion window in seconds
     public var conversionWindow: TimeInterval
 
@@ -134,6 +137,7 @@ public class Journey: Codable {
         self.updatedAt = now
 
         // Snapshot goal and exit policy
+        self.triggerSnapshot = campaign.trigger
         self.goalSnapshot = campaign.goal
         self.exitPolicySnapshot = campaign.exitPolicy
 

@@ -705,7 +705,8 @@ public actor JourneyService: JourneyServiceProtocol {
     journeyId: String,
     goalId: String,
     goalLabel: String?,
-    screenId: String?
+    screenId: String?,
+    interactionId: String? = nil
   ) async {
     guard let journey = inMemoryJourneysById[journeyId] else {
       return
@@ -715,6 +716,7 @@ public actor JourneyService: JourneyServiceProtocol {
     let properties = JourneyEvents.journeyGoalHitProperties(
       journey: journey,
       screenId: screenId,
+      interactionId: interactionId,
       goalId: goalId,
       goalLabel: goalLabel
     )
@@ -800,6 +802,16 @@ public actor JourneyService: JourneyServiceProtocol {
       for: journey,
       campaigns: campaigns ?? cachedCampaigns
     )
+    var sourceJourneyStillCompleted = sourceJourneyCompleted
+    if !sourceJourneyStillCompleted {
+      sourceJourneyStillCompleted = await processSourceScopedGoalJourneyEvent(
+        journey,
+        campaign: resolvedSourceCampaign,
+        event: scopedEvent,
+        transientEvent: transientEvent,
+        shouldDispatchToRunner: true
+      )
+    }
     if let campaigns {
       let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
       let startedJourneyIds = Set(results.compactMap { result -> String? in
@@ -818,16 +830,11 @@ public actor JourneyService: JourneyServiceProtocol {
         )
       }
     }
-    if !sourceJourneyCompleted {
-      _ = await processSourceScopedGoalJourneyEvent(
-        journey,
-        campaign: resolvedSourceCampaign,
-        event: scopedEvent,
-        transientEvent: transientEvent,
-        shouldDispatchToRunner: true
-      )
-    }
-    await handleScopedGatePlan(response?.gatePlan())
+    await handleScopedGatePlan(
+      response?.gatePlan(),
+      sourceJourney: journey,
+      sourceCampaign: resolvedSourceCampaign
+    )
   }
 
   fileprivate func handleUnsupportedScopedRequestPermission(
@@ -977,7 +984,7 @@ public actor JourneyService: JourneyServiceProtocol {
       flowName: nil,
       reentry: .everyTime,
       publishedAt: journey.startedAt.ISO8601Format(),
-      trigger: .event(
+      trigger: journey.triggerSnapshot ?? .event(
         EventTriggerConfig(
           eventName: JourneyEvents.journeyGoalHit,
           condition: nil
@@ -1003,12 +1010,13 @@ public actor JourneyService: JourneyServiceProtocol {
         journey: journey,
         campaign: campaign,
         flow: flow,
-        onGoalHit: { [weak self, journeyId = journey.id] goalId, goalLabel, screenId in
+        onGoalHit: { [weak self, journeyId = journey.id] goalId, goalLabel, screenId, interactionId in
           await self?.handleScopedGoalEvent(
             journeyId: journeyId,
             goalId: goalId,
             goalLabel: goalLabel,
-            screenId: screenId
+            screenId: screenId,
+            interactionId: interactionId
           )
         }
       )
@@ -1304,7 +1312,33 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  private func handleScopedGatePlan(_ plan: GatePlan?) async {
+  private func closeSourceJourneyBeforeScopedGateFlowIfNeeded(
+    journey: Journey?,
+    campaign: Campaign?
+  ) async {
+    guard let journey, journey.status.isLive else { return }
+    guard await flowPresentationService.presentedJourneyId == journey.id else { return }
+
+    let closeReason: CloseReason = journey.convertedAt != nil ? .goalMet : .userDismissed
+    if let controller = flowRunners[journey.id]?.viewController {
+      await handleRuntimeDismiss(
+        journeyId: journey.id,
+        reason: closeReason,
+        controller: controller
+      )
+      await flowPresentationService.dismissCurrentFlow(reason: closeReason)
+      return
+    }
+
+    await flowPresentationService.dismissCurrentFlow(reason: closeReason)
+    completeJourney(journey, reason: dismissalExitReason(for: closeReason))
+  }
+
+  private func handleScopedGatePlan(
+    _ plan: GatePlan?,
+    sourceJourney: Journey? = nil,
+    sourceCampaign: Campaign? = nil
+  ) async {
     guard let plan else { return }
 
     switch plan.decision {
@@ -1313,6 +1347,10 @@ public actor JourneyService: JourneyServiceProtocol {
 
     case .showFlow:
       guard let flowId = plan.flowId else { return }
+      await closeSourceJourneyBeforeScopedGateFlowIfNeeded(
+        journey: sourceJourney,
+        campaign: sourceCampaign
+      )
       _ = try? await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
 
     case .requireFeature:
@@ -1341,6 +1379,10 @@ public actor JourneyService: JourneyServiceProtocol {
       }
 
       guard let flowId = plan.flowId else { return }
+      await closeSourceJourneyBeforeScopedGateFlowIfNeeded(
+        journey: sourceJourney,
+        campaign: sourceCampaign
+      )
       _ = try? await flowPresentationService.presentFlow(flowId, from: nil, runtimeDelegate: nil)
     }
   }

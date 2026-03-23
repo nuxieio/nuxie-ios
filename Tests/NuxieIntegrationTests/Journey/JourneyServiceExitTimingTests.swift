@@ -42,7 +42,7 @@ private final class OrderingJourneyStore: MockJourneyStore {
     }
 }
 
-private final class OrderingFlowPresentationService: MockFlowPresentationService {
+private class OrderingFlowPresentationService: MockFlowPresentationService {
     private let recorder: OrderingRecorder
 
     init(recorder: OrderingRecorder) {
@@ -79,6 +79,54 @@ private final class OrderingFlowPresentationService: MockFlowPresentationService
             runtimeDelegate: runtimeDelegate,
             colorSchemeMode: colorSchemeMode
         )
+    }
+}
+
+private final class DismissingOrderingFlowPresentationService: OrderingFlowPresentationService {
+    private let dismissalRecorder: OrderingRecorder
+
+    override init(recorder: OrderingRecorder) {
+        self.dismissalRecorder = recorder
+        super.init(recorder: recorder)
+    }
+
+    @discardableResult
+    @MainActor
+    override func presentFlow(
+        _ flowId: String,
+        from journey: Journey?,
+        runtimeDelegate: FlowRuntimeDelegate?
+    ) async throws -> FlowViewController {
+        if isPresentingFlow {
+            await dismissCurrentFlow()
+            dismissalRecorder.append("dismiss-before-present")
+        }
+        return try await super.presentFlow(flowId, from: journey, runtimeDelegate: runtimeDelegate)
+    }
+}
+
+private final class OrderingMockFlowViewController: MockFlowViewController {
+    private let recorder: OrderingRecorder
+
+    init(mockFlowId: String, recorder: OrderingRecorder) {
+        self.recorder = recorder
+        super.init(mockFlowId: mockFlowId)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func sendRuntimeMessage(
+        type: String,
+        payload: [String: Any] = [:],
+        replyTo: String? = nil,
+        completion: ((Any?, Error?) -> Void)? = nil
+    ) {
+        if type == "runtime/navigate", let screenId = payload["screenId"] as? String {
+            recorder.append("navigate:\(screenId)")
+        }
+        completion?(nil, nil)
     }
 }
 
@@ -529,6 +577,76 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
+            it("preserves segment triggers in snapshot-backed sibling goal fallbacks") {
+                let primaryCampaign = makeCampaign(
+                    id: "camp-primary-fallback",
+                    flowId: "flow-primary-fallback",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let siblingCampaign = makeCampaign(
+                    id: "camp-sibling-fallback",
+                    flowId: "flow-sibling-fallback",
+                    goal: nil,
+                    exitPolicy: ExitPolicy(mode: .onGoalOrStop)
+                )
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, siblingCampaign],
+                    flows: [
+                        makeFlow(flowId: "flow-primary-fallback"),
+                        makeFlow(flowId: "flow-sibling-fallback"),
+                    ]
+                )
+                await service.initialize()
+
+                _ = await service.handleEventForTrigger(
+                    NuxieEvent(id: "evt_segment_fallback", name: "paywall_trigger", distinctId: distinctId)
+                )
+
+                let activeJourneys = await service.getActiveJourneys(for: distinctId)
+                let primaryJourney = activeJourneys.first { $0.campaignId == "camp-primary-fallback" }
+                let siblingJourney = activeJourneys.first { $0.campaignId == "camp-sibling-fallback" }
+                expect(primaryJourney).toNot(beNil())
+                expect(siblingJourney).toNot(beNil())
+
+                siblingJourney?.triggerSnapshot = .segment(
+                    SegmentTriggerConfig(
+                        condition: IREnvelope(
+                            ir_version: 1,
+                            engine_min: nil,
+                            compiled_at: nil,
+                            expr: .segment(op: "in", id: "premium", within: nil)
+                        )
+                    )
+                )
+
+                await MainActor.run {
+                    mocks.flowPresentationService.presentedFlows = [
+                        (flowId: "flow-primary-fallback", journey: primaryJourney!)
+                    ]
+                    mocks.flowPresentationService.isPresentingFlow = true
+                }
+                await mocks.profileService.clearCache(distinctId: distinctId)
+                await mocks.segmentService.setMembership("premium", isMember: false)
+
+                await service.handleScopedGoalEvent(
+                    journeyId: primaryJourney!.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).contains { $0.id == siblingJourney?.id }
+                }.toEventually(beFalse(), timeout: .seconds(2))
+                await expect {
+                    journeyStore.getCompletions(for: distinctId)
+                        .last { $0.journeyId == siblingJourney?.id }?
+                        .exitReason
+                }.toEventually(equal(.triggerUnmatched), timeout: .seconds(2))
+            }
+
             it("replays source goal-hit interactions after the scoped profile cache expires") {
                 let goalHitFollowUp = Interaction(
                     id: "goal-hit-follow-up",
@@ -631,6 +749,56 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     await service.getActiveJourneys(for: distinctId).map(\.campaignId).sorted()
                 }.toEventually(equal([campaignId, "camp-goal-trigger"].sorted()), timeout: .seconds(2))
+            }
+
+            it("dispatches source goal-hit interactions before starting goal-triggered flows") {
+                let ordering = OrderingRecorder()
+                let orderingPresentationService = DismissingOrderingFlowPresentationService(recorder: ordering)
+                let sourceController = OrderingMockFlowViewController(mockFlowId: flowId, recorder: ordering)
+                orderingPresentationService.mockViewControllers[flowId] = sourceController
+                orderingPresentationService.mockViewControllers["flow-goal-trigger"] =
+                    MockFlowViewController(mockFlowId: "flow-goal-trigger")
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: journeyStore)
+
+                let goalHitFollowUp = Interaction(
+                    id: "goal-hit-follow-up",
+                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    actions: [
+                        .navigate(NavigateAction(screenId: "screen-2", transition: nil))
+                    ],
+                    enabled: true
+                )
+                let goalCampaign = makeCampaign(
+                    id: "camp-goal-trigger",
+                    flowId: "flow-goal-trigger",
+                    trigger: .event(EventTriggerConfig(eventName: JourneyEvents.journeyGoalHit, condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let primaryFlow = makeFlow(interactions: ["__global__": [goalHitFollowUp]])
+                let goalFlow = makeFlow(flowId: "flow-goal-trigger")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, goalCampaign],
+                    flows: [primaryFlow, goalFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+                ordering.clear()
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    ordering.events
+                }.toEventually(equal(["navigate:screen-2", "dismiss-before-present", "present:flow-goal-trigger"]), timeout: .seconds(2))
             }
 
             it("primes newly started journeys from the tracked scoped goal event") {
@@ -1576,6 +1744,43 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     await MainActor.run {
                         orderingPresentationService.wasFlowPresented("gate-flow")
                     }
+                }.toEventually(beTrue(), timeout: .seconds(2))
+            }
+
+            it("closes the source journey before presenting goal gate-plan flows") {
+                let ordering = OrderingRecorder()
+                let orderingStore = OrderingJourneyStore(recorder: ordering)
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: ordering)
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: orderingStore)
+                journeyStore = orderingStore
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "show_flow",
+                    flowId: "gate-flow"
+                )
+
+                ordering.clear()
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    ordering.events
+                }.toEventually(equal(["complete:\(campaignId)", "present:gate-flow"]), timeout: .seconds(2))
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).isEmpty
                 }.toEventually(beTrue(), timeout: .seconds(2))
             }
 

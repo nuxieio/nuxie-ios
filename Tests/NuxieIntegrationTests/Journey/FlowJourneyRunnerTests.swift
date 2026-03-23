@@ -1647,6 +1647,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(goalEvent?.properties?["campaign_id"] as? String).to(equal(campaign.id))
                 expect(goalEvent?.properties?["goal_id"] as? String).to(equal("signup_complete"))
                 expect(goalEvent?.properties?["goal_label"] as? String).to(equal("Signed Up"))
+                expect(goalEvent?.properties?["interaction_id"] as? String).to(equal("start"))
                 expect(goalEvent?.properties?["journeyId"]).to(beNil())
                 expect(goalEvent?.properties?["campaignId"]).to(beNil())
                 expect(goalEvent?.properties?["goalId"]).to(beNil())
@@ -1669,7 +1670,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     journey: journey,
                     campaign: campaign,
                     flow: flow,
-                    onGoalHit: { _, _, _ in
+                    onGoalHit: { _, _, _, _ in
                         journey.complete(reason: .goalMet)
                     }
                 )
@@ -1697,7 +1698,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     journey: journey,
                     campaign: campaign,
                     flow: flow,
-                    onGoalHit: { _, _, _ in
+                    onGoalHit: { _, _, _, _ in
                         runner.deferDismiss(reason: .goalMet)
                     }
                 )

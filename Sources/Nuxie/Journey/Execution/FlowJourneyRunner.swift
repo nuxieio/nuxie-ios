@@ -67,7 +67,7 @@ final class FlowJourneyRunner {
     private let flow: Flow
     private let remoteFlow: RemoteFlow
     private let viewModels: FlowViewModelRuntime
-    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)?
+    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -103,7 +103,7 @@ final class FlowJourneyRunner {
         journey: Journey,
         campaign: Campaign,
         flow: Flow,
-        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)? = nil,
+        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)? = nil,
         viewController: FlowViewController? = nil
     ) {
         self.journey = journey
@@ -987,7 +987,7 @@ final class FlowJourneyRunner {
         let goalLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
 
         if let onGoalHit {
-            await onGoalHit(goalId, goalLabel, resolvedScreenId)
+            await onGoalHit(goalId, goalLabel, resolvedScreenId, context.interactionId)
             return (journey.status.isLive && deferredDismissReason == nil) ? .continue : .stopSequence
         }
 
@@ -996,6 +996,7 @@ final class FlowJourneyRunner {
             properties: JourneyEvents.journeyGoalHitProperties(
                 journey: journey,
                 screenId: resolvedScreenId,
+                interactionId: context.interactionId,
                 goalId: goalId,
                 goalLabel: goalLabel
             ),
