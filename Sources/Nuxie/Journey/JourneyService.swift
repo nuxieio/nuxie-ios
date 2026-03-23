@@ -727,16 +727,22 @@ public actor JourneyService: JourneyServiceProtocol {
     let cachedCampaigns: [Campaign]? = await getAllCampaigns(for: scopedDistinctId)
     let transientEvent = makeStoredEvent(from: localScopedEvent)
     if let cachedCampaigns {
-      let activeJourneyIds = await getActiveJourneys(for: localScopedEvent.distinctId).map(\.id)
-      let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
-        uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
+      let otherActiveJourneyIds = Set(
+        await getActiveJourneys(for: localScopedEvent.distinctId)
+          .map(\.id)
+          .filter { $0 != journey.id }
       )
-      await processActiveJourneys(
-        for: localScopedEvent,
-        campaigns: cachedCampaigns,
-        transientEventsByJourneyId: transientEventsByJourneyId,
-        restrictedToJourneyIds: nil
-      )
+      if !otherActiveJourneyIds.isEmpty {
+        let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+          uniqueKeysWithValues: otherActiveJourneyIds.map { ($0, [transientEvent]) }
+        )
+        await processActiveJourneys(
+          for: localScopedEvent,
+          campaigns: cachedCampaigns,
+          transientEventsByJourneyId: transientEventsByJourneyId,
+          restrictedToJourneyIds: otherActiveJourneyIds
+        )
+      }
     }
 
     let trackedEvent: NuxieEvent
@@ -792,10 +798,14 @@ public actor JourneyService: JourneyServiceProtocol {
           restrictedToJourneyIds: startedJourneyIds
         )
       }
-    }
-    if let campaign = campaigns?.first(where: { $0.id == journey.campaignId }),
-       await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
-      completeJourney(journey, reason: .goalMet)
+      if let campaign = campaigns.first(where: { $0.id == journey.campaignId }) {
+        _ = await processSourceScopedGoalJourneyEvent(
+          journey,
+          campaign: campaign,
+          event: scopedEvent,
+          transientEvent: transientEvent
+        )
+      }
     }
     await handleScopedGatePlan(response?.gatePlan())
   }
@@ -866,6 +876,47 @@ public actor JourneyService: JourneyServiceProtocol {
           journey.status.isLive,
           let reason = runner.consumeDeferredDismissReasonIfReady() else { return }
     completeJourney(journey, reason: dismissalExitReason(for: reason))
+  }
+
+  private func processSourceScopedGoalJourneyEvent(
+    _ journey: Journey,
+    campaign: Campaign,
+    event: NuxieEvent,
+    transientEvent: StoredEvent
+  ) async -> Bool {
+    await evaluateGoalIfNeeded(
+      journey,
+      campaign: campaign,
+      transientEvents: [transientEvent]
+    )
+    if !(await shouldDeferExitDecision()) {
+      if let reason = await exitDecision(journey, campaign) {
+        completeJourney(journey, reason: reason)
+        return true
+      }
+    }
+    if await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
+      await flowPresentationService.dismissCurrentFlow()
+      completeJourney(journey, reason: .goalMet)
+      return true
+    }
+    guard journey.status.isLive else {
+      return true
+    }
+
+    if let pending = journey.flowState.pendingAction, pending.kind == .waitUntil {
+      if let runner = flowRunners[journey.id] {
+        let outcome = await runner.resumePendingAction(reason: .event(event), event: event)
+        handleOutcome(outcome, journey: journey)
+      }
+      return !journey.status.isLive
+    }
+
+    if let runner = flowRunners[journey.id] {
+      let outcome = await runner.dispatchEventTrigger(event)
+      handleOutcome(outcome, journey: journey)
+    }
+    return !journey.status.isLive
   }
 
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {

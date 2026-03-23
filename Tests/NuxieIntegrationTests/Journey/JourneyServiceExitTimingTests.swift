@@ -385,6 +385,9 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     await service.getActiveJourneys(for: distinctId).isEmpty
                 }.toEventually(beTrue(), timeout: .seconds(2))
+                await expect {
+                    await MainActor.run { mocks.flowPresentationService.dismissCurrentFlowCallCount }
+                }.toEventually(equal(1), timeout: .seconds(2))
                 expect(mocks.eventService.trackForTriggerCalls.last?.properties?["journey_id"] as? String)
                     .to(equal(journey.id))
                 expect(mocks.eventService.trackForTriggerCalls.last?.properties?["campaign_id"] as? String)
@@ -399,6 +402,44 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     journeyStore.getCompletions(for: distinctId).last?.exitReason
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
+            }
+
+            it("does not replay scoped goal actions back into the source journey after goal completion") {
+                let goalHitFollowUp = Interaction(
+                    id: "goal-hit-follow-up",
+                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "should_not_run",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+                let campaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow(interactions: ["__global__": [goalHitFollowUp]])
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+                try? await Task.sleep(nanoseconds: 200_000_000)
+
+                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("should_not_run"))
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).isEmpty
+                }.toEventually(beTrue(), timeout: .seconds(2))
             }
 
             it("starts matching campaigns from scoped goal actions") {
