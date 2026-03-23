@@ -1626,6 +1626,32 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let trackedEvents = mocks.eventService.trackedEvents.map(\.name)
                 expect(trackedEvents).to(contain("custom_event"))
             }
+
+            it("tracks goal actions with standard journey property keys") {
+                let flowId = "flow-goal-action"
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [
+                        .goal(GoalAction(goalId: " signup_complete ", label: " Signed Up "))
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                _ = await runner.handleRuntimeReady()
+
+                let goalEvent = mocks.eventService.trackedEvents.last { $0.name == JourneyEvents.journeyGoalHit }
+                expect(goalEvent?.properties?["journey_id"] as? String).to(equal(journey.id))
+                expect(goalEvent?.properties?["campaign_id"] as? String).to(equal(campaign.id))
+                expect(goalEvent?.properties?["goal_id"] as? String).to(equal("signup_complete"))
+                expect(goalEvent?.properties?["goal_label"] as? String).to(equal("Signed Up"))
+                expect(goalEvent?.properties?["journeyId"]).to(beNil())
+                expect(goalEvent?.properties?["campaignId"]).to(beNil())
+                expect(goalEvent?.properties?["goalId"]).to(beNil())
+                expect(goalEvent?.properties?["goalLabel"]).to(beNil())
+            }
         }
     }
 }

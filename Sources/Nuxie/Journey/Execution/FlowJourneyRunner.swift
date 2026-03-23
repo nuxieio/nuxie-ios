@@ -39,6 +39,7 @@ final class FlowJourneyRunner {
     private let flow: Flow
     private let remoteFlow: RemoteFlow
     private let viewModels: FlowViewModelRuntime
+    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -72,6 +73,7 @@ final class FlowJourneyRunner {
         journey: Journey,
         campaign: Campaign,
         flow: Flow,
+        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)? = nil,
         viewController: FlowViewController? = nil
     ) {
         self.journey = journey
@@ -79,6 +81,7 @@ final class FlowJourneyRunner {
         self.flow = flow
         self.remoteFlow = flow.remoteFlow
         self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
+        self.onGoalHit = onGoalHit
         self.viewController = viewController
 
         self.interactionsById = flow.remoteFlow.interactions
@@ -937,24 +940,24 @@ final class FlowJourneyRunner {
     ) async {
         let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goalId.isEmpty else { return }
+        let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
 
-        var properties: [String: Any] = [
-            "journeyId": journey.id,
-            "campaignId": journey.campaignId,
-            "goalId": goalId,
-        ]
-        if let screenId = context.screenId ?? journey.flowState.currentScreenId {
-            properties["screenId"] = screenId
-        }
+        let trimmedLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let goalLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
 
-        let goalLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !goalLabel.isEmpty {
-            properties["goalLabel"] = goalLabel
+        if let onGoalHit {
+            await onGoalHit(goalId, goalLabel, resolvedScreenId)
+            return
         }
 
         eventService.track(
             JourneyEvents.journeyGoalHit,
-            properties: properties,
+            properties: JourneyEvents.journeyGoalHitProperties(
+                journey: journey,
+                screenId: resolvedScreenId,
+                goalId: goalId,
+                goalLabel: goalLabel
+            ),
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
