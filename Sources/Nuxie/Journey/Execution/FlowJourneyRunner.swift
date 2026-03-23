@@ -539,9 +539,9 @@ final class FlowJourneyRunner {
                 trackAction(action, context: context, error: nil)
                 return result
             case .goal(let goal):
-                await handleGoal(goal, context: context)
+                let result = await handleGoal(goal, context: context)
                 trackAction(action, context: context, error: nil)
-                return .continue
+                return result
             case .sendEvent(let sendEvent):
                 await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
@@ -937,9 +937,9 @@ final class FlowJourneyRunner {
     private func handleGoal(
         _ action: GoalAction,
         context: TriggerContext
-    ) async {
+    ) async -> ActionResult {
         let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !goalId.isEmpty else { return }
+        guard !goalId.isEmpty else { return .continue }
         let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
 
         let trimmedLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -947,7 +947,7 @@ final class FlowJourneyRunner {
 
         if let onGoalHit {
             await onGoalHit(goalId, goalLabel, resolvedScreenId)
-            return
+            return journey.status.isLive ? .continue : .stopSequence
         }
 
         eventService.track(
@@ -961,6 +961,7 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
+        return journey.status.isLive ? .continue : .stopSequence
     }
 
     private func handleUpdateCustomer(

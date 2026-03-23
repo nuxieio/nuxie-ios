@@ -702,11 +702,11 @@ public actor JourneyService: JourneyServiceProtocol {
     goalLabel: String?,
     screenId: String?
   ) async {
-    guard let journey = inMemoryJourneysById[journeyId],
-          let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) else {
+    guard let journey = inMemoryJourneysById[journeyId] else {
       return
     }
 
+    let scopedDistinctId = journey.distinctId
     let properties = JourneyEvents.journeyGoalHitProperties(
       journey: journey,
       screenId: screenId,
@@ -720,42 +720,80 @@ public actor JourneyService: JourneyServiceProtocol {
     )
     let localScopedEvent = NuxieEvent(
       name: JourneyEvents.journeyGoalHit,
-      distinctId: journey.distinctId,
+      distinctId: scopedDistinctId,
       properties: enrichedProperties,
       timestamp: dateProvider.now()
     )
+    let cachedCampaigns: [Campaign]? = await getAllCampaigns(for: scopedDistinctId)
     let transientEvent = makeStoredEvent(from: localScopedEvent)
-
-    await evaluateGoalIfNeeded(journey, campaign: campaign, transientEvents: [transientEvent])
-
-    let exitReason: JourneyExitReason?
-    if await shouldDeferExitDecision() {
-      exitReason = nil
-    } else {
-      exitReason = await exitDecision(journey, campaign)
+    if let cachedCampaigns {
+      let activeJourneyIds = await getActiveJourneys(for: localScopedEvent.distinctId).map(\.id)
+      let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+        uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
+      )
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: cachedCampaigns,
+        transientEventsByJourneyId: transientEventsByJourneyId,
+        restrictedToJourneyIds: nil
+      )
     }
 
+    let trackedEvent: NuxieEvent
+    let response: EventResponse?
     do {
-      _ = try await eventService.trackForTrigger(
+      let tracked = try await eventService.trackForTrigger(
         JourneyEvents.journeyGoalHit,
         properties: properties,
         userProperties: nil,
         userPropertiesSetOnce: nil,
         persistToHistory: false,
-        distinctIdOverride: journey.distinctId
+        distinctIdOverride: scopedDistinctId
       )
+      trackedEvent = tracked.0
+      response = tracked.1
     } catch {
       LogWarning("JourneyService: Failed to track scoped goal event: \(error)")
+      trackedEvent = NuxieEvent(
+        name: JourneyEvents.journeyGoalHit,
+        distinctId: scopedDistinctId,
+        properties: enrichedProperties
+      )
+      response = nil
     }
 
-    if let exitReason {
-      completeJourney(journey, reason: exitReason)
-      return
-    }
+    let scopedEvent = NuxieEvent(
+      id: trackedEvent.id,
+      name: trackedEvent.name,
+      distinctId: scopedDistinctId,
+      properties: trackedEvent.properties,
+      timestamp: trackedEvent.timestamp
+    )
 
-    if journey.status.isLive {
-      persistJourney(journey)
+    let campaigns = if let cachedCampaigns {
+      cachedCampaigns
+    } else {
+      await getAllCampaigns(for: scopedEvent.distinctId)
     }
+    if let campaigns {
+      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let startedJourneyIds = Set(results.compactMap { result -> String? in
+        guard case .started(let startedJourney) = result else { return nil }
+        return startedJourney.id
+      })
+      if !startedJourneyIds.isEmpty {
+        let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+          uniqueKeysWithValues: startedJourneyIds.map { ($0, [transientEvent]) }
+        )
+        await processActiveJourneys(
+          for: scopedEvent,
+          campaigns: campaigns,
+          transientEventsByJourneyId: transientEventsByJourneyId,
+          restrictedToJourneyIds: startedJourneyIds
+        )
+      }
+    }
+    await handleScopedGatePlan(response?.gatePlan())
   }
 
   fileprivate func handleUnsupportedScopedRequestPermission(
