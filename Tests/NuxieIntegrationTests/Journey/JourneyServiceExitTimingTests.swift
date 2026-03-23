@@ -474,6 +474,47 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal([campaignId, "camp-goal-trigger"].sorted()), timeout: .seconds(2))
             }
 
+            it("dismisses the source flow before starting goal-triggered flows") {
+                let goalCampaign = makeCampaign(
+                    id: "camp-goal-trigger",
+                    flowId: "flow-goal-trigger",
+                    trigger: .event(EventTriggerConfig(eventName: JourneyEvents.journeyGoalHit, condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let primaryCampaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let primaryFlow = makeFlow()
+                let goalFlow = makeFlow(flowId: "flow-goal-trigger")
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, goalCampaign],
+                    flows: [primaryFlow, goalFlow]
+                )
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId)
+                }.toEventually(equal(["camp-goal-trigger"]), timeout: .seconds(2))
+                await expect {
+                    await MainActor.run { mocks.flowPresentationService.dismissedFlows.last }
+                }.toEventually(equal(flowId), timeout: .seconds(2))
+                await expect {
+                    await MainActor.run { mocks.flowPresentationService.presentedFlows.last?.flowId }
+                }.toEventually(equal("flow-goal-trigger"), timeout: .seconds(2))
+            }
+
             it("feeds scoped goal actions into all active journeys for goal evaluation") {
                 let primaryCampaign = makeCampaign(
                     id: "camp-primary-goal",

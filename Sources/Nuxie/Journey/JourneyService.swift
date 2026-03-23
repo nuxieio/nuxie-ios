@@ -781,6 +781,18 @@ public actor JourneyService: JourneyServiceProtocol {
     } else {
       await getAllCampaigns(for: scopedEvent.distinctId)
     }
+    let sourceCampaign = campaigns?.first(where: { $0.id == journey.campaignId })
+    let sourceJourneyCompleted = if let sourceCampaign {
+      await processSourceScopedGoalJourneyEvent(
+        journey,
+        campaign: sourceCampaign,
+        event: scopedEvent,
+        transientEvent: transientEvent,
+        shouldDispatchToRunner: false
+      )
+    } else {
+      false
+    }
     if let campaigns {
       let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
       let startedJourneyIds = Set(results.compactMap { result -> String? in
@@ -798,12 +810,13 @@ public actor JourneyService: JourneyServiceProtocol {
           restrictedToJourneyIds: startedJourneyIds
         )
       }
-      if let campaign = campaigns.first(where: { $0.id == journey.campaignId }) {
+      if !sourceJourneyCompleted, let campaign = sourceCampaign {
         _ = await processSourceScopedGoalJourneyEvent(
           journey,
           campaign: campaign,
           event: scopedEvent,
-          transientEvent: transientEvent
+          transientEvent: transientEvent,
+          shouldDispatchToRunner: true
         )
       }
     }
@@ -882,7 +895,8 @@ public actor JourneyService: JourneyServiceProtocol {
     _ journey: Journey,
     campaign: Campaign,
     event: NuxieEvent,
-    transientEvent: StoredEvent
+    transientEvent: StoredEvent,
+    shouldDispatchToRunner: Bool
   ) async -> Bool {
     await evaluateGoalIfNeeded(
       journey,
@@ -899,6 +913,9 @@ public actor JourneyService: JourneyServiceProtocol {
       await flowPresentationService.dismissCurrentFlow()
       completeJourney(journey, reason: .goalMet)
       return true
+    }
+    guard shouldDispatchToRunner else {
+      return !journey.status.isLive
     }
     guard journey.status.isLive else {
       return true
