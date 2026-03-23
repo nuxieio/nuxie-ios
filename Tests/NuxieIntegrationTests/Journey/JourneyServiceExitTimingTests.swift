@@ -404,6 +404,70 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
+            it("completes presented journeys before scoped goal tracking returns") {
+                let campaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                mocks.eventService.trackForTriggerDelayNanoseconds = 750_000_000
+
+                let scopedGoalTask = Task {
+                    await service.handleScopedGoalEvent(
+                        journeyId: journey.id,
+                        goalId: "signup_complete",
+                        goalLabel: "Signed Up",
+                        screenId: "screen-1"
+                    )
+                }
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).isEmpty
+                }.toEventually(beTrue(), timeout: .milliseconds(250))
+                await expect {
+                    await MainActor.run { mocks.flowPresentationService.dismissCurrentFlowCallCount }
+                }.toEventually(equal(1), timeout: .milliseconds(250))
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .milliseconds(250))
+
+                await scopedGoalTask.value
+            }
+
+            it("uses journey snapshots when scoped goal actions outlive the cached profile") {
+                let campaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                await mocks.profileService.clearCache(distinctId: distinctId)
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).isEmpty
+                }.toEventually(beTrue(), timeout: .seconds(2))
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.journeyId
+                }.toEventually(equal(journey.id), timeout: .seconds(2))
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
+            }
+
             it("does not replay scoped goal actions back into the source journey after goal completion") {
                 let goalHitFollowUp = Interaction(
                     id: "goal-hit-follow-up",

@@ -726,6 +726,21 @@ public actor JourneyService: JourneyServiceProtocol {
     )
     let cachedCampaigns: [Campaign]? = await getAllCampaigns(for: scopedDistinctId)
     let transientEvent = makeStoredEvent(from: localScopedEvent)
+    let sourceCampaign = sourceScopedGoalCampaign(
+      for: journey,
+      campaigns: cachedCampaigns
+    )
+    let sourceJourneyCompleted = if let sourceCampaign {
+      await processSourceScopedGoalJourneyEvent(
+        journey,
+        campaign: sourceCampaign,
+        event: localScopedEvent,
+        transientEvent: transientEvent,
+        shouldDispatchToRunner: false
+      )
+    } else {
+      false
+    }
     if let cachedCampaigns {
       let otherActiveJourneyIds = Set(
         await getActiveJourneys(for: localScopedEvent.distinctId)
@@ -781,18 +796,10 @@ public actor JourneyService: JourneyServiceProtocol {
     } else {
       await getAllCampaigns(for: scopedEvent.distinctId)
     }
-    let sourceCampaign = campaigns?.first(where: { $0.id == journey.campaignId })
-    let sourceJourneyCompleted = if let sourceCampaign {
-      await processSourceScopedGoalJourneyEvent(
-        journey,
-        campaign: sourceCampaign,
-        event: scopedEvent,
-        transientEvent: transientEvent,
-        shouldDispatchToRunner: false
-      )
-    } else {
-      false
-    }
+    let resolvedSourceCampaign = sourceScopedGoalCampaign(
+      for: journey,
+      campaigns: campaigns ?? cachedCampaigns
+    )
     if let campaigns {
       let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
       let startedJourneyIds = Set(results.compactMap { result -> String? in
@@ -810,15 +817,15 @@ public actor JourneyService: JourneyServiceProtocol {
           restrictedToJourneyIds: startedJourneyIds
         )
       }
-      if !sourceJourneyCompleted, let campaign = sourceCampaign {
-        _ = await processSourceScopedGoalJourneyEvent(
-          journey,
-          campaign: campaign,
-          event: scopedEvent,
-          transientEvent: transientEvent,
-          shouldDispatchToRunner: true
-        )
-      }
+    }
+    if !sourceJourneyCompleted, let campaign = resolvedSourceCampaign {
+      _ = await processSourceScopedGoalJourneyEvent(
+        journey,
+        campaign: campaign,
+        event: scopedEvent,
+        transientEvent: transientEvent,
+        shouldDispatchToRunner: true
+      )
     }
     await handleScopedGatePlan(response?.gatePlan())
   }
@@ -934,6 +941,40 @@ public actor JourneyService: JourneyServiceProtocol {
       handleOutcome(outcome, journey: journey)
     }
     return !journey.status.isLive
+  }
+
+  private func sourceScopedGoalCampaign(
+    for journey: Journey,
+    campaigns: [Campaign]?
+  ) -> Campaign? {
+    if let campaign = campaigns?.first(where: { $0.id == journey.campaignId }) {
+      return campaign
+    }
+    guard journey.goalSnapshot != nil || journey.exitPolicySnapshot != nil else {
+      return nil
+    }
+
+    // Use the journey snapshots so scoped goal completion still works after
+    // the profile cache ages out for a long-lived presented flow.
+    return Campaign(
+      id: journey.campaignId,
+      name: "Journey Snapshot",
+      flowId: journey.flowId,
+      flowNumber: 0,
+      flowName: nil,
+      reentry: .everyTime,
+      publishedAt: journey.startedAt.ISO8601Format(),
+      trigger: .event(
+        EventTriggerConfig(
+          eventName: JourneyEvents.journeyGoalHit,
+          condition: nil
+        )
+      ),
+      goal: journey.goalSnapshot,
+      exitPolicy: journey.exitPolicySnapshot,
+      conversionAnchor: journey.conversionAnchor.rawValue,
+      campaignType: nil
+    )
   }
 
   private func ensureRunner(for journey: Journey, campaign: Campaign) async -> FlowJourneyRunner? {
