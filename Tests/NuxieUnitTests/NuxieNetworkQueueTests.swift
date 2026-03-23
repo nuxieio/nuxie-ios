@@ -499,7 +499,7 @@ final class NuxieNetworkQueueTests: AsyncSpec {
 
                 it("should back off when a partial batch makes no progress") {
                     queue = NuxieNetworkQueue(
-                        flushAt: 2,
+                        flushAt: 20,
                         maxRetries: 3,
                         baseRetryDelay: 0.1,
                         apiClient: mockApi

@@ -3,6 +3,9 @@ import Quick
 import Nimble
 import FactoryKit
 @testable import Nuxie
+#if SWIFT_PACKAGE
+@testable import NuxieTestSupport
+#endif
 
 private final class NoOpFeatureService: FeatureServiceProtocol {
     func getCached(featureId: String, entityId: String?) async -> FeatureAccess? { nil }
@@ -195,6 +198,9 @@ final class GoalEvaluatorTests: AsyncSpec {
             it("does not load event history for non-event attribute goals") {
                 let now = Date(timeIntervalSince1970: 50)
                 dateProvider.setCurrentDate(now)
+                let identityService = MockIdentityService()
+                identityService.setUserProperty("plan", value: "pro")
+                Container.shared.identityService.register { identityService }
 
                 let goal = GoalConfig(
                     kind: .attribute,
