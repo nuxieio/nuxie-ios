@@ -404,6 +404,64 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
+            it("routes goal-driven closures through dismissal hooks and flow dismissal tracking") {
+                let dismissFollowUp = Interaction(
+                    id: "dismiss-follow-up",
+                    trigger: .event(eventName: SystemEventNames.screenDismissed, filter: nil),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "dismiss_hook_ran",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+                let campaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow(interactions: ["__global__": [dismissFollowUp]])
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                let dismissNotifications = OrderingRecorder()
+                let observer = NotificationCenter.default.addObserver(
+                    forName: .nuxieDismiss,
+                    object: nil,
+                    queue: nil
+                ) { notification in
+                    if let reason = notification.userInfo?["reason"] as? String {
+                        dismissNotifications.append(reason)
+                    }
+                }
+                defer {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
+                await expect {
+                    mocks.eventService.trackedEvents.map(\.name)
+                }.toEventually(contain(JourneyEvents.flowDismissed), timeout: .seconds(2))
+                await expect {
+                    mocks.eventService.trackedEvents.map(\.name)
+                }.toEventually(contain("dismiss_hook_ran"), timeout: .seconds(2))
+                await expect {
+                    dismissNotifications.events.last
+                }.toEventually(equal("goal_met"), timeout: .seconds(2))
+            }
+
             it("completes presented journeys before scoped goal tracking returns") {
                 let campaign = makeCampaign(
                     goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
@@ -624,6 +682,57 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         $0.id == secondaryJourney?.id
                     })?.convertedAt
                 }.toEventuallyNot(beNil(), timeout: .seconds(2))
+            }
+
+            it("re-evaluates sibling goal exits while another flow stays presented") {
+                let primaryCampaign = makeCampaign(
+                    id: "camp-primary-presented",
+                    flowId: "flow-primary-presented",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let siblingCampaign = makeCampaign(
+                    id: "camp-sibling-goal",
+                    flowId: "flow-sibling-goal",
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, siblingCampaign],
+                    flows: [
+                        makeFlow(flowId: "flow-primary-presented"),
+                        makeFlow(flowId: "flow-sibling-goal"),
+                    ]
+                )
+
+                let siblingJourney = Journey(campaign: siblingCampaign, distinctId: distinctId)
+                siblingJourney.status = .active
+                try? journeyStore.saveJourney(siblingJourney)
+
+                await service.initialize()
+
+                let primaryJourney = await service.startJourney(
+                    for: primaryCampaign,
+                    distinctId: distinctId
+                )
+                expect(primaryJourney).toNot(beNil())
+
+                await service.handleScopedGoalEvent(
+                    journeyId: primaryJourney!.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId).sorted()
+                }.toEventually(equal(["camp-primary-presented"]), timeout: .seconds(2))
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).first(where: {
+                        $0.journeyId == siblingJourney.id
+                    })?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
             it("replays scoped notification outcomes into newly started journeys") {

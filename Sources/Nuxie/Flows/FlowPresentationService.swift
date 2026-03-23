@@ -18,9 +18,11 @@ protocol FlowPresentationServiceProtocol: AnyObject {
     
     /// Dismiss the currently presented flow
     @MainActor func dismissCurrentFlow() async
+    @MainActor func dismissCurrentFlow(reason: CloseReason) async
     
     /// Check if a flow is currently presented
     @MainActor var isFlowPresented: Bool { get }
+    @MainActor var presentedJourneyId: String? { get }
     
     /// Called when app becomes active - starts grace period
     @MainActor func onAppBecameActive()
@@ -62,6 +64,10 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
     
     var isFlowPresented: Bool {
         currentWindow?.isPresenting ?? false
+    }
+
+    var presentedJourneyId: String? {
+        currentJourney?.id
     }
 
     @discardableResult
@@ -173,6 +179,18 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         // Clean up window and state
         await cleanupPresentation()
     }
+
+    func dismissCurrentFlow(reason: CloseReason) async {
+        guard let window = currentWindow else {
+            LogDebug("FlowPresentationService: No flow to dismiss")
+            return
+        }
+
+        LogInfo("FlowPresentationService: Dismissing current flow with reason \(reason)")
+
+        await window.dismiss()
+        await handleFlowDismissal(reason: reason)
+    }
     
     func onAppBecameActive() {
         LogDebug("FlowPresentationService: App became active, starting grace period")
@@ -198,6 +216,14 @@ final class FlowPresentationService: FlowPresentationServiceProtocol {
         if let journey = journey {
             switch reason {
             case .userDismissed:
+                eventService.track(
+                    JourneyEvents.flowDismissed,
+                    properties: JourneyEvents.flowDismissedProperties(flowId: flowId, journey: journey),
+                    userProperties: nil,
+                    userPropertiesSetOnce: nil
+                )
+
+            case .goalMet:
                 eventService.track(
                     JourneyEvents.flowDismissed,
                     properties: JourneyEvents.flowDismissedProperties(flowId: flowId, journey: journey),

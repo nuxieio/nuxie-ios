@@ -325,7 +325,7 @@ public actor JourneyService: JourneyServiceProtocol {
     for journey in journeys {
       guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
       await evaluateGoalIfNeeded(journey, campaign: campaign)
-      if !(await shouldDeferExitDecision()) {
+      if !(await shouldDeferExitDecision(for: journey)) {
         if let reason = await exitDecision(journey, campaign) {
           completeJourney(journey, reason: reason)
         }
@@ -535,6 +535,8 @@ public actor JourneyService: JourneyServiceProtocol {
     switch reason {
     case .userDismissed:
       userInfo["reason"] = "user_dismissed"
+    case .goalMet:
+      userInfo["reason"] = "goal_met"
     case .purchaseCompleted:
       userInfo["reason"] = "purchase_completed"
     case .timeout:
@@ -557,6 +559,8 @@ public actor JourneyService: JourneyServiceProtocol {
     switch reason {
     case .userDismissed:
       method = "user"
+    case .goalMet:
+      method = "goal_met"
     case .purchaseCompleted:
       method = "purchase_completed"
     case .timeout:
@@ -883,6 +887,8 @@ public actor JourneyService: JourneyServiceProtocol {
     switch reason {
     case .userDismissed:
       return .dismissed
+    case .goalMet:
+      return .goalMet
     case .error:
       return .error
     case .purchaseCompleted, .timeout:
@@ -910,15 +916,24 @@ public actor JourneyService: JourneyServiceProtocol {
       campaign: campaign,
       transientEvents: [transientEvent]
     )
-    if !(await shouldDeferExitDecision()) {
+    if !(await shouldDeferExitDecision(for: journey)) {
       if let reason = await exitDecision(journey, campaign) {
         completeJourney(journey, reason: reason)
         return true
       }
     }
     if await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
-      await flowPresentationService.dismissCurrentFlow()
-      completeJourney(journey, reason: .goalMet)
+      if let controller = flowRunners[journey.id]?.viewController {
+        await handleRuntimeDismiss(
+          journeyId: journey.id,
+          reason: .goalMet,
+          controller: controller
+        )
+        await flowPresentationService.dismissCurrentFlow(reason: .goalMet)
+      } else {
+        await flowPresentationService.dismissCurrentFlow()
+        completeJourney(journey, reason: .goalMet)
+      }
       return true
     }
     guard shouldDispatchToRunner else {
@@ -1265,7 +1280,7 @@ public actor JourneyService: JourneyServiceProtocol {
         campaign: campaign,
         transientEvents: transientEventsByJourneyId[journey.id] ?? []
       )
-      if !(await shouldDeferExitDecision()) {
+      if !(await shouldDeferExitDecision(for: journey)) {
         if let reason = await exitDecision(journey, campaign) {
           completeJourney(journey, reason: reason)
           continue
@@ -1419,8 +1434,11 @@ public actor JourneyService: JourneyServiceProtocol {
     return nil
   }
 
-  private func shouldDeferExitDecision() async -> Bool {
-    await flowPresentationService.isFlowPresented
+  private func shouldDeferExitDecision(for journey: Journey) async -> Bool {
+    guard await flowPresentationService.isFlowPresented else {
+      return false
+    }
+    return await flowPresentationService.presentedJourneyId == journey.id
   }
 
   private func shouldCompletePresentedScopedGoalJourney(
@@ -1430,7 +1448,7 @@ public actor JourneyService: JourneyServiceProtocol {
     guard journey.status.isLive, journey.convertedAt != nil else {
       return false
     }
-    guard await shouldDeferExitDecision() else {
+    guard await shouldDeferExitDecision(for: journey) else {
       return false
     }
     return await exitDecision(journey, campaign) == .goalMet

@@ -1,4 +1,5 @@
 import Foundation
+import FactoryKit
 @testable import Nuxie
 
 /// Mock implementation of FlowPresentationService for testing
@@ -28,6 +29,12 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
     @MainActor
     public var isFlowPresented: Bool {
         return isPresentingFlow
+    }
+
+    @MainActor
+    public var presentedJourneyId: String? {
+        guard isPresentingFlow else { return nil }
+        return presentedFlows.last?.journey?.id
     }
     
     @discardableResult
@@ -87,6 +94,50 @@ public class MockFlowPresentationService: FlowPresentationServiceProtocol {
             dismissedFlows.append(lastFlow.flowId)
         }
         
+        isPresentingFlow = false
+    }
+
+    @MainActor
+    public func dismissCurrentFlow(reason: CloseReason) async {
+        dismissCurrentFlowCallCount += 1
+
+        if let lastFlow = presentedFlows.last {
+            dismissedFlows.append(lastFlow.flowId)
+            if let journey = lastFlow.journey {
+                let eventService = Container.shared.eventService()
+                switch reason {
+                case .userDismissed, .goalMet:
+                    eventService.track(
+                        JourneyEvents.flowDismissed,
+                        properties: JourneyEvents.flowDismissedProperties(flowId: lastFlow.flowId, journey: journey),
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil
+                    )
+                case .purchaseCompleted:
+                    eventService.track(
+                        JourneyEvents.flowPurchased,
+                        properties: JourneyEvents.flowPurchasedProperties(flowId: lastFlow.flowId, journey: journey, productId: nil),
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil
+                    )
+                case .timeout:
+                    eventService.track(
+                        JourneyEvents.flowTimedOut,
+                        properties: JourneyEvents.flowTimedOutProperties(flowId: lastFlow.flowId, journey: journey),
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil
+                    )
+                case .error(let error):
+                    eventService.track(
+                        JourneyEvents.flowErrored,
+                        properties: JourneyEvents.flowErroredProperties(flowId: lastFlow.flowId, journey: journey, errorMessage: error.localizedDescription),
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil
+                    )
+                }
+            }
+        }
+
         isPresentingFlow = false
     }
     
