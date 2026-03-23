@@ -526,6 +526,40 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
 
+            it("replays source goal-hit interactions after the scoped profile cache expires") {
+                let goalHitFollowUp = Interaction(
+                    id: "goal-hit-follow-up",
+                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "goal_follow_up",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow(interactions: ["__global__": [goalHitFollowUp]])
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+                await mocks.profileService.clearCache(distinctId: distinctId)
+
+                await service.handleScopedGoalEvent(
+                    journeyId: journey.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    mocks.eventService.trackedEvents.map(\.name)
+                }.toEventually(contain("goal_follow_up"), timeout: .seconds(2))
+            }
+
             it("does not replay scoped goal actions back into the source journey after goal completion") {
                 let goalHitFollowUp = Interaction(
                     id: "goal-hit-follow-up",
@@ -728,6 +762,59 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     await service.getActiveJourneys(for: distinctId).map(\.campaignId).sorted()
                 }.toEventually(equal(["camp-primary-presented"]), timeout: .seconds(2))
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).first(where: {
+                        $0.journeyId == siblingJourney.id
+                    })?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
+            }
+
+            it("re-evaluates sibling goal exits from journey snapshots after the cache expires") {
+                let primaryCampaign = makeCampaign(
+                    id: "camp-primary-stale",
+                    flowId: "flow-primary-stale",
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let siblingCampaign = makeCampaign(
+                    id: "camp-sibling-stale",
+                    flowId: "flow-sibling-stale",
+                    goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+
+                await primeProfile(
+                    campaigns: [primaryCampaign, siblingCampaign],
+                    flows: [
+                        makeFlow(flowId: "flow-primary-stale"),
+                        makeFlow(flowId: "flow-sibling-stale"),
+                    ]
+                )
+
+                let siblingJourney = Journey(campaign: siblingCampaign, distinctId: distinctId)
+                siblingJourney.status = .active
+                try? journeyStore.saveJourney(siblingJourney)
+
+                await service.initialize()
+
+                let primaryJourney = await service.startJourney(
+                    for: primaryCampaign,
+                    distinctId: distinctId
+                )
+                expect(primaryJourney).toNot(beNil())
+
+                await mocks.profileService.clearCache(distinctId: distinctId)
+
+                await service.handleScopedGoalEvent(
+                    journeyId: primaryJourney!.id,
+                    goalId: "signup_complete",
+                    goalLabel: "Signed Up",
+                    screenId: "screen-1"
+                )
+
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId).sorted()
+                }.toEventually(equal(["camp-primary-stale"]), timeout: .seconds(2))
                 await expect {
                     journeyStore.getCompletions(for: distinctId).first(where: {
                         $0.journeyId == siblingJourney.id

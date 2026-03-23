@@ -734,34 +734,29 @@ public actor JourneyService: JourneyServiceProtocol {
       for: journey,
       campaigns: cachedCampaigns
     )
-    let sourceJourneyCompleted = if let sourceCampaign {
-      await processSourceScopedGoalJourneyEvent(
-        journey,
-        campaign: sourceCampaign,
-        event: localScopedEvent,
-        transientEvent: transientEvent,
-        shouldDispatchToRunner: false
+    let sourceJourneyCompleted = await processSourceScopedGoalJourneyEvent(
+      journey,
+      campaign: sourceCampaign,
+      event: localScopedEvent,
+      transientEvent: transientEvent,
+      shouldDispatchToRunner: false
+    )
+    let otherActiveJourneyIds = Set(
+      await getActiveJourneys(for: localScopedEvent.distinctId)
+        .map(\.id)
+        .filter { $0 != journey.id }
+    )
+    if !otherActiveJourneyIds.isEmpty {
+      let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+        uniqueKeysWithValues: otherActiveJourneyIds.map { ($0, [transientEvent]) }
       )
-    } else {
-      false
-    }
-    if let cachedCampaigns {
-      let otherActiveJourneyIds = Set(
-        await getActiveJourneys(for: localScopedEvent.distinctId)
-          .map(\.id)
-          .filter { $0 != journey.id }
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: cachedCampaigns ?? [],
+        transientEventsByJourneyId: transientEventsByJourneyId,
+        restrictedToJourneyIds: otherActiveJourneyIds,
+        allowSnapshotFallback: true
       )
-      if !otherActiveJourneyIds.isEmpty {
-        let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
-          uniqueKeysWithValues: otherActiveJourneyIds.map { ($0, [transientEvent]) }
-        )
-        await processActiveJourneys(
-          for: localScopedEvent,
-          campaigns: cachedCampaigns,
-          transientEventsByJourneyId: transientEventsByJourneyId,
-          restrictedToJourneyIds: otherActiveJourneyIds
-        )
-      }
     }
 
     let trackedEvent: NuxieEvent
@@ -822,10 +817,10 @@ public actor JourneyService: JourneyServiceProtocol {
         )
       }
     }
-    if !sourceJourneyCompleted, let campaign = resolvedSourceCampaign {
+    if !sourceJourneyCompleted {
       _ = await processSourceScopedGoalJourneyEvent(
         journey,
-        campaign: campaign,
+        campaign: resolvedSourceCampaign,
         event: scopedEvent,
         transientEvent: transientEvent,
         shouldDispatchToRunner: true
@@ -906,35 +901,37 @@ public actor JourneyService: JourneyServiceProtocol {
 
   private func processSourceScopedGoalJourneyEvent(
     _ journey: Journey,
-    campaign: Campaign,
+    campaign: Campaign?,
     event: NuxieEvent,
     transientEvent: StoredEvent,
     shouldDispatchToRunner: Bool
   ) async -> Bool {
-    await evaluateGoalIfNeeded(
-      journey,
-      campaign: campaign,
-      transientEvents: [transientEvent]
-    )
-    if !(await shouldDeferExitDecision(for: journey)) {
-      if let reason = await exitDecision(journey, campaign) {
-        completeJourney(journey, reason: reason)
+    if let campaign {
+      await evaluateGoalIfNeeded(
+        journey,
+        campaign: campaign,
+        transientEvents: [transientEvent]
+      )
+      if !(await shouldDeferExitDecision(for: journey)) {
+        if let reason = await exitDecision(journey, campaign) {
+          completeJourney(journey, reason: reason)
+          return true
+        }
+      }
+      if await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
+        if let controller = flowRunners[journey.id]?.viewController {
+          await handleRuntimeDismiss(
+            journeyId: journey.id,
+            reason: .goalMet,
+            controller: controller
+          )
+          await flowPresentationService.dismissCurrentFlow(reason: .goalMet)
+        } else {
+          await flowPresentationService.dismissCurrentFlow()
+          completeJourney(journey, reason: .goalMet)
+        }
         return true
       }
-    }
-    if await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
-      if let controller = flowRunners[journey.id]?.viewController {
-        await handleRuntimeDismiss(
-          journeyId: journey.id,
-          reason: .goalMet,
-          controller: controller
-        )
-        await flowPresentationService.dismissCurrentFlow(reason: .goalMet)
-      } else {
-        await flowPresentationService.dismissCurrentFlow()
-        completeJourney(journey, reason: .goalMet)
-      }
-      return true
     }
     guard shouldDispatchToRunner else {
       return !journey.status.isLive
@@ -1260,7 +1257,8 @@ public actor JourneyService: JourneyServiceProtocol {
     for event: NuxieEvent,
     campaigns: [Campaign],
     transientEventsByJourneyId: [String: [StoredEvent]],
-    restrictedToJourneyIds: Set<String>? = nil
+    restrictedToJourneyIds: Set<String>? = nil,
+    allowSnapshotFallback: Bool = false
   ) async {
     let journeys = await getActiveJourneys(for: event.distinctId)
     let eventJourneyId = event.properties["journey_id"] as? String
@@ -1269,7 +1267,9 @@ public actor JourneyService: JourneyServiceProtocol {
       if let restrictedToJourneyIds, !restrictedToJourneyIds.contains(journey.id) {
         continue
       }
-      guard let campaign = campaigns.first(where: { $0.id == journey.campaignId }) else { continue }
+      let campaign = campaigns.first(where: { $0.id == journey.campaignId }) ??
+        (allowSnapshotFallback ? sourceScopedGoalCampaign(for: journey, campaigns: campaigns) : nil)
+      guard let campaign else { continue }
 
       if eventJourneyId == journey.id, let runner = flowRunners[journey.id] {
         runner.handleScopedSystemPermissionEvent(event.name)
