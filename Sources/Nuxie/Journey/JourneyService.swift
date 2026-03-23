@@ -697,6 +697,110 @@ public actor JourneyService: JourneyServiceProtocol {
     await handleScopedGatePlan(response?.gatePlan())
   }
 
+  func handleScopedGoalEvent(
+    journeyId: String,
+    goalId: String,
+    goalLabel: String?,
+    screenId: String?
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId] else {
+      return
+    }
+
+    let scopedDistinctId = journey.distinctId
+    let properties = JourneyEvents.journeyGoalHitProperties(
+      journey: journey,
+      screenId: screenId,
+      goalId: goalId,
+      goalLabel: goalLabel
+    )
+    let enrichedProperties = await eventService.prepareTriggerProperties(
+      properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+    let localScopedEvent = NuxieEvent(
+      name: JourneyEvents.journeyGoalHit,
+      distinctId: scopedDistinctId,
+      properties: enrichedProperties,
+      timestamp: dateProvider.now()
+    )
+    let cachedCampaigns: [Campaign]? = await getAllCampaigns(for: scopedDistinctId)
+    let transientEvent = makeStoredEvent(from: localScopedEvent)
+    if let cachedCampaigns {
+      let activeJourneyIds = await getActiveJourneys(for: localScopedEvent.distinctId).map(\.id)
+      let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+        uniqueKeysWithValues: activeJourneyIds.map { ($0, [transientEvent]) }
+      )
+      await processActiveJourneys(
+        for: localScopedEvent,
+        campaigns: cachedCampaigns,
+        transientEventsByJourneyId: transientEventsByJourneyId,
+        restrictedToJourneyIds: nil
+      )
+    }
+
+    let trackedEvent: NuxieEvent
+    let response: EventResponse?
+    do {
+      let tracked = try await eventService.trackForTrigger(
+        JourneyEvents.journeyGoalHit,
+        properties: properties,
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        persistToHistory: false,
+        distinctIdOverride: scopedDistinctId
+      )
+      trackedEvent = tracked.0
+      response = tracked.1
+    } catch {
+      LogWarning("JourneyService: Failed to track scoped goal event: \(error)")
+      trackedEvent = NuxieEvent(
+        name: JourneyEvents.journeyGoalHit,
+        distinctId: scopedDistinctId,
+        properties: enrichedProperties
+      )
+      response = nil
+    }
+
+    let scopedEvent = NuxieEvent(
+      id: trackedEvent.id,
+      name: trackedEvent.name,
+      distinctId: scopedDistinctId,
+      properties: trackedEvent.properties,
+      timestamp: trackedEvent.timestamp
+    )
+
+    let campaigns = if let cachedCampaigns {
+      cachedCampaigns
+    } else {
+      await getAllCampaigns(for: scopedEvent.distinctId)
+    }
+    if let campaigns {
+      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let startedJourneyIds = Set(results.compactMap { result -> String? in
+        guard case .started(let startedJourney) = result else { return nil }
+        return startedJourney.id
+      })
+      if !startedJourneyIds.isEmpty {
+        let transientEventsByJourneyId: [String: [StoredEvent]] = Dictionary(
+          uniqueKeysWithValues: startedJourneyIds.map { ($0, [transientEvent]) }
+        )
+        await processActiveJourneys(
+          for: scopedEvent,
+          campaigns: campaigns,
+          transientEventsByJourneyId: transientEventsByJourneyId,
+          restrictedToJourneyIds: startedJourneyIds
+        )
+      }
+    }
+    if let campaign = campaigns?.first(where: { $0.id == journey.campaignId }),
+       await shouldCompletePresentedScopedGoalJourney(journey, campaign: campaign) {
+      completeJourney(journey, reason: .goalMet)
+    }
+    await handleScopedGatePlan(response?.gatePlan())
+  }
+
   fileprivate func handleUnsupportedScopedRequestPermission(
     journeyId: String,
     permissionType: String,
@@ -774,7 +878,19 @@ public actor JourneyService: JourneyServiceProtocol {
 
     do {
       let flow = try await flowService.fetchFlow(id: flowId)
-      let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+      let runner = FlowJourneyRunner(
+        journey: journey,
+        campaign: campaign,
+        flow: flow,
+        onGoalHit: { [weak self, journeyId = journey.id] goalId, goalLabel, screenId in
+          await self?.handleScopedGoalEvent(
+            journeyId: journeyId,
+            goalId: goalId,
+            goalLabel: goalLabel,
+            screenId: screenId
+          )
+        }
+      )
 
       runner.onShowScreen = { [weak self, weak runner] (screenId: String, transition: AnyCodable?) async in
         guard let self else { return }
@@ -1389,6 +1505,19 @@ public actor JourneyService: JourneyServiceProtocol {
 
   private func shouldDeferExitDecision() async -> Bool {
     await flowPresentationService.isFlowPresented
+  }
+
+  private func shouldCompletePresentedScopedGoalJourney(
+    _ journey: Journey,
+    campaign: Campaign
+  ) async -> Bool {
+    guard journey.status.isLive, journey.convertedAt != nil else {
+      return false
+    }
+    guard await shouldDeferExitDecision() else {
+      return false
+    }
+    return await exitDecision(journey, campaign) == .goalMet
   }
 
   // MARK: - Reentry Policy

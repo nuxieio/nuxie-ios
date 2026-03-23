@@ -45,6 +45,7 @@ final class FlowJourneyRunner {
     private let flow: Flow
     private let remoteFlow: RemoteFlow
     private let viewModels: FlowViewModelRuntime
+    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -79,6 +80,7 @@ final class FlowJourneyRunner {
         journey: Journey,
         campaign: Campaign,
         flow: Flow,
+        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?) async -> Void)? = nil,
         viewController: FlowViewController? = nil
     ) {
         self.journey = journey
@@ -86,6 +88,7 @@ final class FlowJourneyRunner {
         self.flow = flow
         self.remoteFlow = flow.remoteFlow
         self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
+        self.onGoalHit = onGoalHit
         self.viewController = viewController
 
         self.interactionsById = flow.remoteFlow.interactions
@@ -542,6 +545,10 @@ final class FlowJourneyRunner {
                 let result = await handleExperiment(experiment, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
+            case .goal(let goal):
+                let result = await handleGoal(goal, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .sendEvent(let sendEvent):
                 await handleSendEvent(sendEvent, context: context)
                 trackAction(action, context: context, error: nil)
@@ -936,6 +943,36 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
+    }
+
+    private func handleGoal(
+        _ action: GoalAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        let goalId = action.goalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goalId.isEmpty else { return .continue }
+        let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
+
+        let trimmedLabel = action.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let goalLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
+
+        if let onGoalHit {
+            await onGoalHit(goalId, goalLabel, resolvedScreenId)
+            return journey.status.isLive ? .continue : .stopSequence
+        }
+
+        eventService.track(
+            JourneyEvents.journeyGoalHit,
+            properties: JourneyEvents.journeyGoalHitProperties(
+                journey: journey,
+                screenId: resolvedScreenId,
+                goalId: goalId,
+                goalLabel: goalLabel
+            ),
+            userProperties: nil,
+            userPropertiesSetOnce: nil
+        )
+        return journey.status.isLive ? .continue : .stopSequence
     }
 
     private func handleUpdateCustomer(
@@ -2091,6 +2128,7 @@ private extension InteractionAction {
         case .waitUntil: return "wait_until"
         case .condition: return "condition"
         case .experiment: return "experiment"
+        case .goal: return "goal"
         case .sendEvent: return "send_event"
         case .goal: return "goal"
         case .updateCustomer: return "update_customer"
