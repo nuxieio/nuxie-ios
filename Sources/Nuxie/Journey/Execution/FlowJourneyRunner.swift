@@ -1138,9 +1138,21 @@ final class FlowJourneyRunner {
         return true
     }
 
+    private func responseCacheKey(
+        responseSchemaId: String,
+        schemaVersion: Int
+    ) -> String {
+        "\(responseSchemaId):\(schemaVersion)"
+    }
+
     private func updateJourneyResponseCache(_ response: ResponseRecordPayload) {
         var existing = (journey.getContext("responses") as? [String: Any]) ?? [:]
-        existing[response.responseSchemaId] = [
+        existing[
+            responseCacheKey(
+                responseSchemaId: response.responseSchemaId,
+                schemaVersion: response.schemaVersion
+            )
+        ] = [
             "responseId": response.id,
             "responseSchemaId": response.responseSchemaId,
             "schemaVersion": response.schemaVersion,

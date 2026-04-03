@@ -551,8 +551,6 @@ public actor JourneyService: JourneyServiceProtocol {
       userInfo: userInfo
     )
 
-    await runner.abandonResponseDraftsIfNeeded()
-
     var properties: [String: Any] = [:]
     if let screenId = journey.flowState.currentScreenId {
       properties["screen_id"] = screenId
@@ -578,6 +576,7 @@ public actor JourneyService: JourneyServiceProtocol {
     )
     let outcome = await runner.dispatchEventTrigger(event)
     handleOutcome(outcome, journey: journey)
+    await runner.abandonResponseDraftsIfNeeded()
 
     if journey.status.isLive,
        let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) {
