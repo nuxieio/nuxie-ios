@@ -542,6 +542,8 @@ public enum InteractionAction: Codable {
     case sendEvent(SendEventAction)
     case goal(GoalAction)
     case updateCustomer(UpdateCustomerAction)
+    case setResponseField(SetResponseFieldAction)
+    case submitResponse(SubmitResponseAction)
     case purchase(PurchaseAction)
     case restore(RestoreAction)
     case requestNotifications(RequestNotificationsAction)
@@ -577,6 +579,8 @@ public enum InteractionAction: Codable {
         case sendEvent = "send_event"
         case goal
         case updateCustomer = "update_customer"
+        case setResponseField = "set_response_field"
+        case submitResponse = "submit_response"
         case purchase
         case restore
         case requestNotifications = "request_notifications"
@@ -621,6 +625,10 @@ public enum InteractionAction: Codable {
             self = .goal(try GoalAction(from: decoder))
         case .updateCustomer:
             self = .updateCustomer(try UpdateCustomerAction(from: decoder))
+        case .setResponseField:
+            self = .setResponseField(try SetResponseFieldAction(from: decoder))
+        case .submitResponse:
+            self = .submitResponse(try SubmitResponseAction(from: decoder))
         case .purchase:
             self = .purchase(try PurchaseAction(from: decoder))
         case .restore:
@@ -689,6 +697,10 @@ public enum InteractionAction: Codable {
         case .goal(let action):
             try action.encode(to: encoder)
         case .updateCustomer(let action):
+            try action.encode(to: encoder)
+        case .setResponseField(let action):
+            try action.encode(to: encoder)
+        case .submitResponse(let action):
             try action.encode(to: encoder)
         case .purchase(let action):
             try action.encode(to: encoder)
@@ -910,6 +922,44 @@ public struct UpdateCustomerAction: Codable {
     public init(type: String = "update_customer", attributes: [String: AnyCodable]) {
         self.type = type
         self.attributes = attributes
+    }
+}
+
+public struct SetResponseFieldAction: Codable {
+    public let type: String
+    public let responseSchemaId: String
+    public let schemaVersion: Int?
+    public let key: String
+    public let value: AnyCodable
+
+    public init(
+        type: String = "set_response_field",
+        responseSchemaId: String,
+        schemaVersion: Int? = nil,
+        key: String,
+        value: AnyCodable
+    ) {
+        self.type = type
+        self.responseSchemaId = responseSchemaId
+        self.schemaVersion = schemaVersion
+        self.key = key
+        self.value = value
+    }
+}
+
+public struct SubmitResponseAction: Codable {
+    public let type: String
+    public let responseSchemaId: String
+    public let schemaVersion: Int?
+
+    public init(
+        type: String = "submit_response",
+        responseSchemaId: String,
+        schemaVersion: Int? = nil
+    ) {
+        self.type = type
+        self.responseSchemaId = responseSchemaId
+        self.schemaVersion = schemaVersion
     }
 }
 

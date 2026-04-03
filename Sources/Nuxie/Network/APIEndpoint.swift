@@ -7,6 +7,9 @@ enum APIEndpoint {
     case flow(String) // flowId
     case checkFeature(FeatureCheckRequest)
     case purchase(PurchaseRequest)
+    case responseField(ResponseFieldRequest)
+    case responseSubmit(ResponseSubmitRequest)
+    case responseAbandon(ResponseAbandonRequest)
 
     var path: String {
         switch self {
@@ -22,12 +25,18 @@ enum APIEndpoint {
             return "/entitled"
         case .purchase:
             return "/purchase"
+        case .responseField:
+            return "/response/field"
+        case .responseSubmit:
+            return "/response/submit"
+        case .responseAbandon:
+            return "/response/abandon"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .profile, .event, .batch, .checkFeature, .purchase:
+        case .profile, .event, .batch, .checkFeature, .purchase, .responseField, .responseSubmit, .responseAbandon:
             return .POST
         case .flow:
             return .GET
@@ -36,7 +45,7 @@ enum APIEndpoint {
 
     var authMethod: AuthMethod {
         switch self {
-        case .profile, .event, .batch, .checkFeature, .purchase:
+        case .profile, .event, .batch, .checkFeature, .purchase, .responseField, .responseSubmit, .responseAbandon:
             return .apiKeyInBody
         case .flow:
             return .apiKeyInQuery

@@ -323,3 +323,54 @@ struct APIErrorResponse: Codable {
     let code: String?
     let details: [String: AnyCodable]?
 }
+
+// MARK: - Response Collection Responses
+
+public struct ResponseRecordPayload: Codable {
+    public let id: String
+    public let campaignId: String
+    public let journeySessionId: String
+    public let customerId: String
+    public let responseSchemaId: String
+    public let responseSchemaVersionId: String
+    public let schemaVersion: Int
+    public let state: String
+    public let values: [String: AnyCodable]
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let submittedAt: Date?
+    public let abandonedAt: Date?
+}
+
+public struct ResponseSchemaFieldPayload: Codable {
+    public let key: String
+    public let type: String
+    public let options: [String]?
+    public let min: Double?
+    public let max: Double?
+}
+
+public struct ResponseSchemaVersionPayload: Codable {
+    public let id: String
+    public let responseSchemaId: String
+    public let versionSeq: Int
+    public let fields: [ResponseSchemaFieldPayload]
+    public let createdAt: Date
+    public let updatedAt: Date
+}
+
+public struct ResponseWriteResponse: Codable {
+    public let status: String
+    public let response: ResponseRecordPayload?
+    public let version: ResponseSchemaVersionPayload?
+}
+
+public struct ResponseSubmitResponse: Codable {
+    public let status: String
+    public let response: ResponseRecordPayload?
+}
+
+public struct ResponseAbandonResponse: Codable {
+    public let status: String
+    public let responses: [ResponseRecordPayload]
+}

@@ -125,6 +125,33 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
     func syncTransaction(transactionJwt: String, distinctId: String) async throws -> PurchaseResponse {
         return PurchaseResponse(success: true, customerId: distinctId, features: nil, error: nil)
     }
+
+    func setResponseField(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?,
+        key: String,
+        value: Any
+    ) async throws -> ResponseWriteResponse {
+        return ResponseWriteResponse(status: "ok", response: nil, version: nil)
+    }
+
+    func submitResponse(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?
+    ) async throws -> ResponseSubmitResponse {
+        return ResponseSubmitResponse(status: "ok", response: nil)
+    }
+
+    func abandonResponses(
+        distinctId: String,
+        journeySessionId: String
+    ) async throws -> ResponseAbandonResponse {
+        return ResponseAbandonResponse(status: "ok", responses: [])
+    }
     func reset() {
         sendBatchCalled = false
         sendBatchCallCount = 0

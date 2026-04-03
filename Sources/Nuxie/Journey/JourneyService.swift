@@ -576,6 +576,9 @@ public actor JourneyService: JourneyServiceProtocol {
     )
     let outcome = await runner.dispatchEventTrigger(event)
     handleOutcome(outcome, journey: journey)
+    if runner.shouldAbandonResponseDraftsAfterDismiss() {
+      await runner.abandonResponseDraftsIfNeeded()
+    }
 
     if journey.status.isLive,
        let campaign = await getCampaign(id: journey.campaignId, for: journey.distinctId) {

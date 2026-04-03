@@ -21,6 +21,19 @@ public actor MockNuxieApi: NuxieApiProtocol {
     )
     public var checkFeatureResponse: FeatureCheckResult?
     public var trackEventResponse: EventResponse?
+    public var responseWriteResponse = ResponseWriteResponse(
+        status: "ok",
+        response: nil,
+        version: nil
+    )
+    public var responseSubmitResponse = ResponseSubmitResponse(
+        status: "ok",
+        response: nil
+    )
+    public var responseAbandonResponse = ResponseAbandonResponse(
+        status: "ok",
+        responses: []
+    )
 
     // Call tracking
     public var fetchProfileCallCount = 0
@@ -41,6 +54,24 @@ public actor MockNuxieApi: NuxieApiProtocol {
         properties: [String: Any]?,
         value: Double?,
         entityId: String?
+    )?
+    public private(set) var lastResponseFieldCall: (
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?,
+        key: String,
+        value: Any
+    )?
+    public private(set) var lastResponseSubmitCall: (
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?
+    )?
+    public private(set) var lastResponseAbandonCall: (
+        distinctId: String,
+        journeySessionId: String
     )?
     
     public init() {
@@ -270,6 +301,52 @@ public actor MockNuxieApi: NuxieApiProtocol {
             error: nil
         )
     }
+
+    public func setResponseField(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?,
+        key: String,
+        value: Any
+    ) async throws -> ResponseWriteResponse {
+        lastResponseFieldCall = (
+            distinctId: distinctId,
+            journeySessionId: journeySessionId,
+            responseSchemaId: responseSchemaId,
+            schemaVersion: schemaVersion,
+            key: key,
+            value: value
+        )
+        return responseWriteResponse
+    }
+
+    public func submitResponse(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?
+    ) async throws -> ResponseSubmitResponse {
+        lastResponseSubmitCall = (
+            distinctId: distinctId,
+            journeySessionId: journeySessionId,
+            responseSchemaId: responseSchemaId,
+            schemaVersion: schemaVersion
+        )
+        return responseSubmitResponse
+    }
+
+    public func abandonResponses(
+        distinctId: String,
+        journeySessionId: String
+    ) async throws -> ResponseAbandonResponse {
+        lastResponseAbandonCall = (
+            distinctId: distinctId,
+            journeySessionId: journeySessionId
+        )
+        return responseAbandonResponse
+    }
+
     // Test helpers
     public func reset() {
         shouldFailProfile = false
@@ -287,7 +364,13 @@ public actor MockNuxieApi: NuxieApiProtocol {
         lastTimeoutUsed = nil
         sentEvents.removeAll()
         lastTrackEventCall = nil
+        lastResponseFieldCall = nil
+        lastResponseSubmitCall = nil
+        lastResponseAbandonCall = nil
         checkFeatureResponse = nil
+        responseWriteResponse = ResponseWriteResponse(status: "ok", response: nil, version: nil)
+        responseSubmitResponse = ResponseSubmitResponse(status: "ok", response: nil)
+        responseAbandonResponse = ResponseAbandonResponse(status: "ok", responses: [])
 
         // Reset profileResponse to default
         setupDefaultProfileResponse()
