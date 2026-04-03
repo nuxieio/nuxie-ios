@@ -1178,7 +1178,7 @@ final class FlowJourneyRunner {
         guard responseContextMatches(
             runtimeContext,
             responseSchemaId: response.responseSchemaId,
-            schemaVersion: nil
+            schemaVersion: response.schemaVersion
         ) else {
             return
         }
@@ -1269,7 +1269,8 @@ final class FlowJourneyRunner {
             let result = try await apiClient.submitResponse(
                 distinctId: journey.distinctId,
                 journeySessionId: journey.id,
-                responseSchemaId: action.responseSchemaId
+                responseSchemaId: action.responseSchemaId,
+                schemaVersion: action.schemaVersion
             )
             if let response = result.response {
                 updateJourneyResponseCache(response)

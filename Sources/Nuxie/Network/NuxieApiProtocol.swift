@@ -53,7 +53,8 @@ public protocol NuxieApiProtocol: AnyObject {
     func submitResponse(
         distinctId: String,
         journeySessionId: String,
-        responseSchemaId: String
+        responseSchemaId: String,
+        schemaVersion: Int?
     ) async throws -> ResponseSubmitResponse
 
     func abandonResponses(

@@ -140,7 +140,8 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
     func submitResponse(
         distinctId: String,
         journeySessionId: String,
-        responseSchemaId: String
+        responseSchemaId: String,
+        schemaVersion: Int?
     ) async throws -> ResponseSubmitResponse {
         return ResponseSubmitResponse(status: "ok", response: nil)
     }

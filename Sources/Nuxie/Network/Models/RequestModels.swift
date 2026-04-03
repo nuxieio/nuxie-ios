@@ -166,11 +166,13 @@ struct ResponseSubmitRequest: Codable {
     let distinctId: String
     let journeySessionId: String
     let responseSchemaId: String
+    let schemaVersion: Int?
 
     enum CodingKeys: String, CodingKey {
         case distinctId = "distinct_id"
         case journeySessionId = "journey_session_id"
         case responseSchemaId = "response_schema_id"
+        case schemaVersion = "schema_version"
     }
 }
 

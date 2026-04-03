@@ -66,7 +66,8 @@ public actor MockNuxieApi: NuxieApiProtocol {
     public private(set) var lastResponseSubmitCall: (
         distinctId: String,
         journeySessionId: String,
-        responseSchemaId: String
+        responseSchemaId: String,
+        schemaVersion: Int?
     )?
     public private(set) var lastResponseAbandonCall: (
         distinctId: String,
@@ -323,12 +324,14 @@ public actor MockNuxieApi: NuxieApiProtocol {
     public func submitResponse(
         distinctId: String,
         journeySessionId: String,
-        responseSchemaId: String
+        responseSchemaId: String,
+        schemaVersion: Int?
     ) async throws -> ResponseSubmitResponse {
         lastResponseSubmitCall = (
             distinctId: distinctId,
             journeySessionId: journeySessionId,
-            responseSchemaId: responseSchemaId
+            responseSchemaId: responseSchemaId,
+            schemaVersion: schemaVersion
         )
         return responseSubmitResponse
     }

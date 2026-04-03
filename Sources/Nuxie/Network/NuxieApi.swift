@@ -442,12 +442,14 @@ extension NuxieApi {
     public func submitResponse(
         distinctId: String,
         journeySessionId: String,
-        responseSchemaId: String
+        responseSchemaId: String,
+        schemaVersion: Int?
     ) async throws -> ResponseSubmitResponse {
         let request = ResponseSubmitRequest(
             distinctId: distinctId,
             journeySessionId: journeySessionId,
-            responseSchemaId: responseSchemaId
+            responseSchemaId: responseSchemaId,
+            schemaVersion: schemaVersion
         )
 
         return try await self.request(
