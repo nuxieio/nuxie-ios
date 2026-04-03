@@ -40,4 +40,24 @@ public protocol NuxieApiProtocol: AnyObject {
         transactionJwt: String,
         distinctId: String
     ) async throws -> PurchaseResponse
+
+    func setResponseField(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?,
+        key: String,
+        value: Any
+    ) async throws -> ResponseWriteResponse
+
+    func submitResponse(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String
+    ) async throws -> ResponseSubmitResponse
+
+    func abandonResponses(
+        distinctId: String,
+        journeySessionId: String
+    ) async throws -> ResponseAbandonResponse
 }

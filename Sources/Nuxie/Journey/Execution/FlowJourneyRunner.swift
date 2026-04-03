@@ -31,12 +31,26 @@ private final class SerialTaskQueue {
 
 final class FlowJourneyRunner {
     private static let currentDeviceTimezoneToken = "__current_device__"
+    private static let responseRootViewModelName = "vm"
+    private static let responseRootPropertyName = "response"
+    private static let responseValuesPropertyName = "values"
 
     struct TriggerContext {
         let screenId: String?
         let componentId: String?
         let interactionId: String?
         let instanceId: String?
+    }
+
+    private struct ResponseRuntimeContext {
+        let screenId: String?
+        let instanceId: String?
+        let schemaId: String?
+        let schemaVersion: Int?
+        let state: String?
+        let schemaIdPath: VmPathRef
+        let schemaVersionPath: VmPathRef
+        let statePath: VmPathRef
     }
 
     enum RunOutcome {
@@ -74,6 +88,7 @@ final class FlowJourneyRunner {
     @Injected(\.segmentService) private var segmentService: SegmentServiceProtocol
     @Injected(\.featureService) private var featureService: FeatureServiceProtocol
     @Injected(\.profileService) private var profileService: ProfileServiceProtocol
+    @Injected(\.nuxieApi) private var apiClient: NuxieApiProtocol
     @Injected(\.dateProvider) private var dateProvider: DateProviderProtocol
     @Injected(\.irRuntime) private var irRuntime: IRRuntime
 
@@ -591,6 +606,14 @@ final class FlowJourneyRunner {
                 handleUpdateCustomer(updateCustomer, context: context)
                 trackAction(action, context: context, error: nil)
                 return .continue
+            case .setResponseField(let setResponseField):
+                let result = await handleSetResponseField(setResponseField, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
+            case .submitResponse(let submitResponse):
+                let result = await handleSubmitResponse(submitResponse, context: context)
+                trackAction(action, context: context, error: nil)
+                return result
             case .purchase(let purchase):
                 let result = await handlePurchase(purchase, context: context)
                 trackAction(action, context: context, error: nil)
@@ -1026,6 +1049,276 @@ final class FlowJourneyRunner {
             userProperties: nil,
             userPropertiesSetOnce: nil
         )
+    }
+
+    private func responseNameHash(_ value: String) -> Int {
+        let fnvOffsetBasis: UInt32 = 0x811c9dc5
+        let fnvPrime: UInt32 = 0x01000193
+        if value.isEmpty { return Int(fnvOffsetBasis) }
+
+        var hash = fnvOffsetBasis
+        for byte in value.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* fnvPrime
+        }
+        return Int(hash)
+    }
+
+    private func responsePath(_ segments: [String]) -> VmPathRef {
+        let pathIds = ([Self.responseRootViewModelName] + segments)
+            .map(responseNameHash)
+        return .ids(VmPathIds(pathIds: pathIds, nameBased: true))
+    }
+
+    private func responseValueAsInt(_ value: Any?) -> Int? {
+        if let int = value as? Int {
+            return int
+        }
+        if let number = value as? NSNumber {
+            return number.intValue
+        }
+        return nil
+    }
+
+    private func makeResponseRuntimeContext(
+        _ context: TriggerContext
+    ) -> ResponseRuntimeContext {
+        let screenId = context.screenId ?? journey.flowState.currentScreenId
+        let instanceId = context.instanceId
+        let schemaIdPath = responsePath([
+            Self.responseRootPropertyName,
+            "schemaId",
+        ])
+        let schemaVersionPath = responsePath([
+            Self.responseRootPropertyName,
+            "schemaVersion",
+        ])
+        let statePath = responsePath([
+            Self.responseRootPropertyName,
+            "state",
+        ])
+
+        return ResponseRuntimeContext(
+            screenId: screenId,
+            instanceId: instanceId,
+            schemaId: viewModels.getValue(
+                path: schemaIdPath,
+                screenId: screenId,
+                instanceId: instanceId
+            ) as? String,
+            schemaVersion: responseValueAsInt(
+                viewModels.getValue(
+                    path: schemaVersionPath,
+                    screenId: screenId,
+                    instanceId: instanceId
+                )
+            ),
+            state: viewModels.getValue(
+                path: statePath,
+                screenId: screenId,
+                instanceId: instanceId
+            ) as? String,
+            schemaIdPath: schemaIdPath,
+            schemaVersionPath: schemaVersionPath,
+            statePath: statePath
+        )
+    }
+
+    private func responseContextMatches(
+        _ runtimeContext: ResponseRuntimeContext,
+        responseSchemaId: String,
+        schemaVersion: Int?
+    ) -> Bool {
+        guard runtimeContext.schemaId == responseSchemaId else { return false }
+        if let schemaVersion,
+           let runtimeSchemaVersion = runtimeContext.schemaVersion,
+           runtimeSchemaVersion != schemaVersion {
+            return false
+        }
+        return true
+    }
+
+    private func updateJourneyResponseCache(_ response: ResponseRecordPayload) {
+        var existing = (journey.getContext("responses") as? [String: Any]) ?? [:]
+        existing[response.responseSchemaId] = [
+            "responseId": response.id,
+            "responseSchemaId": response.responseSchemaId,
+            "schemaVersion": response.schemaVersion,
+            "state": response.state,
+            "values": response.values.mapValues(\.value),
+        ]
+        journey.setContext("responses", value: existing)
+    }
+
+    private func applyResponseRuntimeValuePatch(
+        path: VmPathRef,
+        value: Any,
+        context: ResponseRuntimeContext
+    ) {
+        _ = viewModels.setValue(
+            path: path,
+            value: value,
+            screenId: context.screenId,
+            instanceId: context.instanceId
+        )
+        sendViewModelPatch(
+            path: path,
+            value: value,
+            source: "host",
+            instanceId: context.instanceId
+        )
+    }
+
+    private func applyResponseRecordToRuntime(
+        _ response: ResponseRecordPayload,
+        context: TriggerContext,
+        touchedFieldKey: String? = nil
+    ) {
+        let runtimeContext = makeResponseRuntimeContext(context)
+        guard responseContextMatches(
+            runtimeContext,
+            responseSchemaId: response.responseSchemaId,
+            schemaVersion: nil
+        ) else {
+            return
+        }
+
+        applyResponseRuntimeValuePatch(
+            path: runtimeContext.statePath,
+            value: response.state,
+            context: runtimeContext
+        )
+        applyResponseRuntimeValuePatch(
+            path: runtimeContext.schemaVersionPath,
+            value: response.schemaVersion,
+            context: runtimeContext
+        )
+        if let touchedFieldKey,
+           let value = response.values[touchedFieldKey]?.value {
+            applyResponseRuntimeValuePatch(
+                path: responsePath([
+                    Self.responseRootPropertyName,
+                    Self.responseValuesPropertyName,
+                    touchedFieldKey,
+                ]),
+                value: value,
+                context: runtimeContext
+            )
+        }
+        journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+    }
+
+    private func handleSetResponseField(
+        _ action: SetResponseFieldAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        let resolvedValue = resolveValueRefs(action.value.value, context: context)
+        let runtimeContext = makeResponseRuntimeContext(context)
+        if responseContextMatches(
+            runtimeContext,
+            responseSchemaId: action.responseSchemaId,
+            schemaVersion: action.schemaVersion
+        ) {
+            let valuePath = responsePath([
+                Self.responseRootPropertyName,
+                Self.responseValuesPropertyName,
+                action.key,
+            ])
+            applyResponseRuntimeValuePatch(
+                path: valuePath,
+                value: resolvedValue,
+                context: runtimeContext
+            )
+            applyResponseRuntimeValuePatch(
+                path: runtimeContext.statePath,
+                value: "draft",
+                context: runtimeContext
+            )
+            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+        }
+
+        do {
+            let result = try await apiClient.setResponseField(
+                distinctId: journey.distinctId,
+                journeySessionId: journey.id,
+                responseSchemaId: action.responseSchemaId,
+                schemaVersion: action.schemaVersion,
+                key: action.key,
+                value: resolvedValue
+            )
+            if let response = result.response {
+                updateJourneyResponseCache(response)
+                applyResponseRecordToRuntime(
+                    response,
+                    context: context,
+                    touchedFieldKey: action.key
+                )
+            }
+        } catch {
+            LogWarning("FlowJourneyRunner: set_response_field failed: \(error.localizedDescription)")
+        }
+
+        return .continue
+    }
+
+    private func handleSubmitResponse(
+        _ action: SubmitResponseAction,
+        context: TriggerContext
+    ) async -> ActionResult {
+        do {
+            let result = try await apiClient.submitResponse(
+                distinctId: journey.distinctId,
+                journeySessionId: journey.id,
+                responseSchemaId: action.responseSchemaId
+            )
+            if let response = result.response {
+                updateJourneyResponseCache(response)
+                applyResponseRecordToRuntime(response, context: context)
+            }
+        } catch {
+            LogWarning("FlowJourneyRunner: submit_response failed: \(error.localizedDescription)")
+        }
+
+        return .continue
+    }
+
+    func abandonResponseDraftsIfNeeded() async {
+        guard let responses = journey.getContext("responses") as? [String: Any] else {
+            return
+        }
+
+        let hasDrafts = responses.values.contains { value in
+            guard let response = value as? [String: Any] else { return false }
+            guard let state = response["state"] as? String, state == "draft" else {
+                return false
+            }
+            guard let values = response["values"] as? [String: Any] else {
+                return false
+            }
+            return !values.isEmpty
+        }
+        guard hasDrafts else { return }
+
+        do {
+            let result = try await apiClient.abandonResponses(
+                distinctId: journey.distinctId,
+                journeySessionId: journey.id
+            )
+            for response in result.responses {
+                updateJourneyResponseCache(response)
+                applyResponseRecordToRuntime(
+                    response,
+                    context: TriggerContext(
+                        screenId: journey.flowState.currentScreenId,
+                        componentId: nil,
+                        interactionId: nil,
+                        instanceId: nil
+                    )
+                )
+            }
+        } catch {
+            LogWarning("FlowJourneyRunner: abandon response drafts failed: \(error.localizedDescription)")
+        }
     }
 
     private func handleCallDelegate(
@@ -2149,6 +2442,8 @@ private extension InteractionAction {
         case .sendEvent: return "send_event"
         case .goal: return "goal"
         case .updateCustomer: return "update_customer"
+        case .setResponseField: return "set_response_field"
+        case .submitResponse: return "submit_response"
         case .purchase: return "purchase"
         case .restore: return "restore"
         case .requestNotifications: return "request_notifications"

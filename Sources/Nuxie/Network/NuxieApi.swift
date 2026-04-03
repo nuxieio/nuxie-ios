@@ -414,4 +414,62 @@ extension NuxieApi {
             responseType: PurchaseResponse.self
         )
     }
+
+    public func setResponseField(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String,
+        schemaVersion: Int?,
+        key: String,
+        value: Any
+    ) async throws -> ResponseWriteResponse {
+        let request = ResponseFieldRequest(
+            distinctId: distinctId,
+            journeySessionId: journeySessionId,
+            responseSchemaId: responseSchemaId,
+            schemaVersion: schemaVersion,
+            key: key,
+            value: AnyCodable(value)
+        )
+
+        return try await self.request(
+            endpoint: .responseField(request),
+            body: request,
+            responseType: ResponseWriteResponse.self
+        )
+    }
+
+    public func submitResponse(
+        distinctId: String,
+        journeySessionId: String,
+        responseSchemaId: String
+    ) async throws -> ResponseSubmitResponse {
+        let request = ResponseSubmitRequest(
+            distinctId: distinctId,
+            journeySessionId: journeySessionId,
+            responseSchemaId: responseSchemaId
+        )
+
+        return try await self.request(
+            endpoint: .responseSubmit(request),
+            body: request,
+            responseType: ResponseSubmitResponse.self
+        )
+    }
+
+    public func abandonResponses(
+        distinctId: String,
+        journeySessionId: String
+    ) async throws -> ResponseAbandonResponse {
+        let request = ResponseAbandonRequest(
+            distinctId: distinctId,
+            journeySessionId: journeySessionId
+        )
+
+        return try await self.request(
+            endpoint: .responseAbandon(request),
+            body: request,
+            responseType: ResponseAbandonResponse.self
+        )
+    }
 }

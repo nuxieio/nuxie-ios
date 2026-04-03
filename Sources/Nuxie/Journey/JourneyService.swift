@@ -551,6 +551,8 @@ public actor JourneyService: JourneyServiceProtocol {
       userInfo: userInfo
     )
 
+    await runner.abandonResponseDraftsIfNeeded()
+
     var properties: [String: Any] = [:]
     if let screenId = journey.flowState.currentScreenId {
       properties["screen_id"] = screenId

@@ -141,3 +141,45 @@ struct EventRequest: Codable {
         case entityId
     }
 }
+
+// MARK: - Response Collection Requests
+
+struct ResponseFieldRequest: Codable {
+    let distinctId: String
+    let journeySessionId: String
+    let responseSchemaId: String
+    let schemaVersion: Int?
+    let key: String
+    let value: AnyCodable
+
+    enum CodingKeys: String, CodingKey {
+        case distinctId = "distinct_id"
+        case journeySessionId = "journey_session_id"
+        case responseSchemaId = "response_schema_id"
+        case schemaVersion = "schema_version"
+        case key
+        case value
+    }
+}
+
+struct ResponseSubmitRequest: Codable {
+    let distinctId: String
+    let journeySessionId: String
+    let responseSchemaId: String
+
+    enum CodingKeys: String, CodingKey {
+        case distinctId = "distinct_id"
+        case journeySessionId = "journey_session_id"
+        case responseSchemaId = "response_schema_id"
+    }
+}
+
+struct ResponseAbandonRequest: Codable {
+    let distinctId: String
+    let journeySessionId: String
+
+    enum CodingKeys: String, CodingKey {
+        case distinctId = "distinct_id"
+        case journeySessionId = "journey_session_id"
+    }
+}
