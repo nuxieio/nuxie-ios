@@ -113,6 +113,7 @@ final class FlowJourneyRunner {
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private let deferredTaskQueue = SerialTaskQueue()
     private var didAttemptResponseDraftWrite = false
+    private var didFailSetResponseField = false
     private var didFailSubmitResponse = false
     private var didWarnConverters = false
 
@@ -609,7 +610,7 @@ final class FlowJourneyRunner {
                 trackAction(action, context: context, error: nil)
                 return .continue
             case .setResponseField(let setResponseField):
-                let result = await handleSetResponseField(setResponseField, context: context)
+                let result = try await handleSetResponseField(setResponseField, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
             case .submitResponse(let submitResponse):
@@ -1225,7 +1226,7 @@ final class FlowJourneyRunner {
     private func handleSetResponseField(
         _ action: SetResponseFieldAction,
         context: TriggerContext
-    ) async -> ActionResult {
+    ) async throws -> ActionResult {
         let resolvedValue = resolveValueRefs(action.value.value, context: context)
         let runtimeContext = makeResponseRuntimeContext(context)
         if responseContextMatches(
@@ -1261,6 +1262,7 @@ final class FlowJourneyRunner {
                 key: action.key,
                 value: resolvedValue
             )
+            didFailSetResponseField = false
             if let response = result.response {
                 updateJourneyResponseCache(response)
                 applyResponseRecordToRuntime(
@@ -1270,7 +1272,9 @@ final class FlowJourneyRunner {
                 )
             }
         } catch {
+            didFailSetResponseField = true
             LogWarning("FlowJourneyRunner: set_response_field failed: \(error.localizedDescription)")
+            throw error
         }
 
         return .continue
@@ -1303,7 +1307,7 @@ final class FlowJourneyRunner {
     }
 
     func shouldAbandonResponseDraftsAfterDismiss() -> Bool {
-        !didFailSubmitResponse
+        !didFailSetResponseField && !didFailSubmitResponse
     }
 
     func abandonResponseDraftsIfNeeded() async {
