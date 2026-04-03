@@ -113,6 +113,7 @@ final class FlowJourneyRunner {
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private let deferredTaskQueue = SerialTaskQueue()
     private var didAttemptResponseDraftWrite = false
+    private var didFailSubmitResponse = false
     private var didWarnConverters = false
 
     init(
@@ -612,7 +613,7 @@ final class FlowJourneyRunner {
                 trackAction(action, context: context, error: nil)
                 return result
             case .submitResponse(let submitResponse):
-                let result = await handleSubmitResponse(submitResponse, context: context)
+                let result = try await handleSubmitResponse(submitResponse, context: context)
                 trackAction(action, context: context, error: nil)
                 return result
             case .purchase(let purchase):
@@ -1278,7 +1279,7 @@ final class FlowJourneyRunner {
     private func handleSubmitResponse(
         _ action: SubmitResponseAction,
         context: TriggerContext
-    ) async -> ActionResult {
+    ) async throws -> ActionResult {
         do {
             let result = try await apiClient.submitResponse(
                 distinctId: journey.distinctId,
@@ -1286,15 +1287,23 @@ final class FlowJourneyRunner {
                 responseSchemaId: action.responseSchemaId,
                 schemaVersion: action.schemaVersion
             )
+            didAttemptResponseDraftWrite = false
+            didFailSubmitResponse = false
             if let response = result.response {
                 updateJourneyResponseCache(response)
                 applyResponseRecordToRuntime(response, context: context)
             }
         } catch {
+            didFailSubmitResponse = true
             LogWarning("FlowJourneyRunner: submit_response failed: \(error.localizedDescription)")
+            throw error
         }
 
         return .continue
+    }
+
+    func shouldAbandonResponseDraftsAfterDismiss() -> Bool {
+        !didFailSubmitResponse
     }
 
     func abandonResponseDraftsIfNeeded() async {
