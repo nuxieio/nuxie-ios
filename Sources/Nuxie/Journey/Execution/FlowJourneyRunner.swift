@@ -112,6 +112,7 @@ final class FlowJourneyRunner {
     private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private let deferredTaskQueue = SerialTaskQueue()
+    private var didAttemptResponseDraftWrite = false
     private var didWarnConverters = false
 
     init(
@@ -1250,6 +1251,7 @@ final class FlowJourneyRunner {
         }
 
         do {
+            didAttemptResponseDraftWrite = true
             let result = try await apiClient.setResponseField(
                 distinctId: journey.distinctId,
                 journeySessionId: journey.id,
@@ -1296,11 +1298,8 @@ final class FlowJourneyRunner {
     }
 
     func abandonResponseDraftsIfNeeded() async {
-        guard let responses = journey.getContext("responses") as? [String: Any] else {
-            return
-        }
-
-        let hasDrafts = responses.values.contains { value in
+        let responses = journey.getContext("responses") as? [String: Any]
+        let hasDrafts = responses?.values.contains { value in
             guard let response = value as? [String: Any] else { return false }
             guard let state = response["state"] as? String, state == "draft" else {
                 return false
@@ -1309,14 +1308,15 @@ final class FlowJourneyRunner {
                 return false
             }
             return !values.isEmpty
-        }
-        guard hasDrafts else { return }
+        } ?? false
+        guard hasDrafts || didAttemptResponseDraftWrite else { return }
 
         do {
             let result = try await apiClient.abandonResponses(
                 distinctId: journey.distinctId,
                 journeySessionId: journey.id
             )
+            didAttemptResponseDraftWrite = false
             for response in result.responses {
                 updateJourneyResponseCache(response)
                 applyResponseRecordToRuntime(
