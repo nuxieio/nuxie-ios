@@ -59,6 +59,32 @@ final class E2EConfigurationTests: XCTestCase {
     XCTAssertEqual(configuration.flowId, E2EConfiguration.defaultFlowId)
   }
 
+  func testDirectoryArtifactPathResolvesLaunchConfig() {
+    let environment: [String: String] = [
+      E2EConfiguration.artifactEnvKey: "/tmp/scenario-release"
+    ]
+
+    let artifactJson = """
+    {
+      "publicApiKey": "pk_artifact_dir",
+      "ingestUrl": "http://artifact-dir.example",
+      "flowId": "flow_artifact_dir"
+    }
+    """
+
+    let configuration = E2EConfiguration.fromEnvironment(
+      environment: environment,
+      fileLoader: { path in
+        XCTAssertEqual(path, "/tmp/scenario-release/runtime/launch-config.json")
+        return artifactJson.data(using: .utf8)
+      }
+    )
+
+    XCTAssertEqual(configuration.apiKey, "pk_artifact_dir")
+    XCTAssertEqual(configuration.ingestUrlString, "http://artifact-dir.example")
+    XCTAssertEqual(configuration.flowId, "flow_artifact_dir")
+  }
+
   private func makeLoader(json: String) -> (String) -> Data? {
     { _ in json.data(using: .utf8) }
   }

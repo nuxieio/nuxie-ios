@@ -1,4 +1,4 @@
-.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-e2e-parity test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-e2e-parity test-e2e-hosted test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
@@ -30,6 +30,7 @@ TEST_SIMULATOR_NAME ?= $(if $(DEFAULT_SIMULATOR_NAME),$(DEFAULT_SIMULATOR_NAME),
 TEST_DESTINATION ?= platform=iOS Simulator,name=$(TEST_SIMULATOR_NAME),OS=$(TEST_SIMULATOR_OS)
 XCODEBUILD_TEST_FLAGS ?=
 PARITY_E2E_TEST_FLAGS ?= -only-testing:NuxieSDKE2ETests/FlowRuntimeE2ESpec
+HOSTED_E2E_TEST_FLAGS ?= -only-testing:NuxieSDKE2ETests/FlowRuntimeHostedArtifactE2ESpec
 
 # Default target
 help:
@@ -42,6 +43,7 @@ help:
 	@echo "  test-integration - Run integration tests"
 	@echo "  test-e2e         - Run end-to-end tests"
 	@echo "  test-e2e-parity  - Run Flow runtime parity E2E in react and rive modes"
+	@echo "  test-e2e-hosted  - Run hosted artifact Flow runtime E2E"
 	@echo "  test-all         - Run unit + integration + e2e tests"
 	@echo "  build-macos      - Build macOS framework target"
 	@echo "  coverage         - Run tests with code coverage (Swift Package Manager)"
@@ -114,6 +116,10 @@ test-e2e-parity:
 	NUXIE_E2E_ENABLE_NAVIGATION=1 \
 	NUXIE_E2E_PARITY_RENDERER=rive \
 	$(MAKE) --no-print-directory test-e2e XCODEBUILD_TEST_FLAGS='$(PARITY_E2E_TEST_FLAGS)'
+
+test-e2e-hosted:
+	@echo "Running Flow runtime hosted artifact E2E..."
+	@$(MAKE) --no-print-directory test-e2e XCODEBUILD_TEST_FLAGS='$(HOSTED_E2E_TEST_FLAGS)'
 
 test-all: test-unit test-integration test-e2e
 
