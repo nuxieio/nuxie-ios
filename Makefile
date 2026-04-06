@@ -10,9 +10,26 @@ SCHEME_E2E := NuxieSDKE2ETests
 SCHEME_MACOS := NuxieSDKMac
 SCHEME ?= $(SCHEME_UNIT)
 DERIVED_DATA := DerivedData
-TEST_DESTINATION ?= platform=iOS Simulator,name=iPhone 17 Pro,OS=26.1
+DEFAULT_SIMULATOR_OS := $(shell xcrun simctl list devices available 2>/dev/null | sed -n 's/^-- iOS \(.*\) --/\1/p' | sort -V | tail -1)
+DEFAULT_SIMULATOR_NAME := $(shell \
+	if [ -n "$(DEFAULT_SIMULATOR_OS)" ]; then \
+		xcrun simctl list devices available 2>/dev/null | awk -v ver="$(DEFAULT_SIMULATOR_OS)" '\
+			$$0 == "-- iOS " ver " --" { in_ver = 1; next } \
+			in_ver && /^-- / { exit } \
+			in_ver && /^[[:space:]]+iPhone 17 Pro \(/ { print "iPhone 17 Pro"; exit } \
+			in_ver && /^[[:space:]]+iPhone / { \
+				name = $$0; \
+				sub(/^[[:space:]]+/, "", name); \
+				sub(/ \([^)]+\) \((Shutdown|Booted)\)$$/, "", name); \
+				print name; \
+				exit \
+			}'; \
+	fi)
+TEST_SIMULATOR_OS ?= $(if $(DEFAULT_SIMULATOR_OS),$(DEFAULT_SIMULATOR_OS),26.3)
+TEST_SIMULATOR_NAME ?= $(if $(DEFAULT_SIMULATOR_NAME),$(DEFAULT_SIMULATOR_NAME),iPhone 17 Pro)
+TEST_DESTINATION ?= platform=iOS Simulator,name=$(TEST_SIMULATOR_NAME),OS=$(TEST_SIMULATOR_OS)
 XCODEBUILD_TEST_FLAGS ?=
-PARITY_E2E_TEST_FLAGS ?= -only-testing:NuxieE2ETests/FlowRuntimeE2ETests
+PARITY_E2E_TEST_FLAGS ?= -only-testing:NuxieSDKE2ETests/FlowRuntimeE2ESpec
 
 # Default target
 help:
