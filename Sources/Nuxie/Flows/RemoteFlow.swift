@@ -973,23 +973,6 @@ public struct PurchaseAction: Codable {
         self.placementIndex = placementIndex
         self.productId = productId
     }
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case placementIndex
-        case productId
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        type = try container.decodeIfPresent(String.self, forKey: .type) ?? "purchase"
-        placementIndex =
-            try container.decodeIfPresent(AnyCodable.self, forKey: .placementIndex) ??
-            AnyCodable(NSNull())
-        productId =
-            try container.decodeIfPresent(AnyCodable.self, forKey: .productId) ??
-            AnyCodable("")
-    }
 }
 
 public struct RestoreAction: Codable {

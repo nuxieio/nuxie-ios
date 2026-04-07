@@ -206,24 +206,6 @@ public final class FlowViewModelRuntime {
         return current
     }
 
-    func selectedPaywallProductId(screenId: String?, instanceId: String? = nil) -> String? {
-        for candidate in paywallCandidateInstances(screenId: screenId, instanceId: instanceId) {
-            if let selectedProductId = selectedPaywallProductId(in: candidate), !selectedProductId.isEmpty {
-                return selectedProductId
-            }
-        }
-        return nil
-    }
-
-    func selectedPaywallPlacementIndex(screenId: String?, instanceId: String? = nil) -> Int? {
-        for candidate in paywallCandidateInstances(screenId: screenId, instanceId: instanceId) {
-            if let selectedIndex = selectedPaywallSelectedIndex(in: candidate) {
-                return selectedIndex
-            }
-        }
-        return nil
-    }
-
     public func setListValue(
         path: VmPathRef,
         operation: String,
@@ -335,73 +317,6 @@ public final class FlowViewModelRuntime {
             }
         }
         return payload
-    }
-
-    private func paywallCandidateInstances(
-        screenId: String?,
-        instanceId: String?
-    ) -> [FlowViewModelInstanceState] {
-        var ordered: [FlowViewModelInstanceState] = []
-        var seen = Set<String>()
-
-        func appendInstance(id: String?) {
-            guard let id,
-                  let instance = instances[id],
-                  !seen.contains(id) else { return }
-            seen.insert(id)
-            ordered.append(instance)
-        }
-
-        appendInstance(id: instanceId)
-
-        if let screenId {
-            let defaults = screenDefaults[screenId]
-            appendInstance(id: defaults?.defaultInstanceId)
-
-            if let defaultViewModelId = defaults?.defaultViewModelId {
-                for candidateId in instancesByViewModel[defaultViewModelId] ?? [] {
-                    appendInstance(id: candidateId)
-                }
-            }
-        }
-
-        for candidateId in instances.keys.sorted() {
-            appendInstance(id: candidateId)
-        }
-
-        return ordered
-    }
-
-    private func selectedPaywallProductId(in instance: FlowViewModelInstanceState) -> String? {
-        guard let paywall = paywallDictionary(in: instance.values) else { return nil }
-
-        if let selectedProductId = paywall["selectedProductId"] as? String,
-           !selectedProductId.isEmpty {
-            return selectedProductId
-        }
-
-        guard let selectedIndex = selectedPaywallSelectedIndex(in: instance),
-              let productRefs = decodeArray(paywall["products"]),
-              selectedIndex >= 0,
-              selectedIndex < productRefs.count,
-              let productRef = decodeDictionary(productRefs[selectedIndex]),
-              let vmInstanceId = productRef["vmInstanceId"] as? String,
-              let productInstance = instances[vmInstanceId],
-              let productId = productInstance.values["productId"]?.value as? String,
-              !productId.isEmpty else {
-            return nil
-        }
-
-        return productId
-    }
-
-    private func selectedPaywallSelectedIndex(in instance: FlowViewModelInstanceState) -> Int? {
-        guard let paywall = paywallDictionary(in: instance.values) else { return nil }
-        return decodeInt(paywall["selectedIndex"])
-    }
-
-    private func paywallDictionary(in values: [String: AnyCodable]) -> [String: Any]? {
-        decodeDictionary(values["paywall"]?.value)
     }
 
     private func decodeDictionary(_ value: Any?) -> [String: Any]? {

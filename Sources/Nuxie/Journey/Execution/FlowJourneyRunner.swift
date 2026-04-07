@@ -1387,29 +1387,11 @@ final class FlowJourneyRunner {
         guard let controller = viewController else { return .continue }
         let resolvedProductId = resolveValueRefs(action.productId.value, context: context)
         let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
-        let productId: String?
-        if let explicitProductId = resolvedProductId as? String, !explicitProductId.isEmpty {
-            productId = explicitProductId
-        } else {
-            productId = viewModels.selectedPaywallProductId(
-                screenId: resolvedScreenId,
-                instanceId: context.instanceId
-            )
-        }
+        let productId = resolvedProductId as? String
         guard let productId, !productId.isEmpty else {
             return .continue
         }
-        let rawPlacementIndex = resolveValueRefs(action.placementIndex.value, context: context)
-        let placementIndex: Any
-        if rawPlacementIndex is NSNull,
-           let implicitPlacementIndex = viewModels.selectedPaywallPlacementIndex(
-                screenId: resolvedScreenId,
-                instanceId: context.instanceId
-           ) {
-            placementIndex = implicitPlacementIndex
-        } else {
-            placementIndex = rawPlacementIndex
-        }
+        let placementIndex = resolveValueRefs(action.placementIndex.value, context: context)
         await MainActor.run {
             controller.performPurchase(productId: productId, placementIndex: placementIndex)
         }
