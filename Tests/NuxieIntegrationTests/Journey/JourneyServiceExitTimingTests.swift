@@ -195,7 +195,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 status: "ok",
                 payload: ["gate": AnyCodable(gatePayload)],
                 customer: nil,
-                event: nil,
+                eventId: nil,
                 message: nil,
                 featuresMatched: nil,
                 usage: nil,

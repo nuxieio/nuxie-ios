@@ -147,7 +147,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                status: "ok",
 	                                payload: nil,
 	                                customer: nil,
-	                                event: EventResponse.EventInfo(id: "evt-1", processed: true),
+	                                eventId: "evt-1",
 	                                message: nil,
 	                                featuresMatched: nil,
 	                                usage: nil,
