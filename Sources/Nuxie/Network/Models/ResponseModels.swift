@@ -114,13 +114,80 @@ public struct ExperimentAssignment: Codable {
 
 // MARK: - Trigger Models
 
+private enum IRConditionCodingError: Error {
+    case invalidJSONString(String)
+}
+
+private extension KeyedDecodingContainer {
+    func decodeIREnvelopeIfPresent(forKey key: Key) throws -> IREnvelope? {
+        do {
+            if let envelope = try decodeIfPresent(IREnvelope.self, forKey: key) {
+                return envelope
+            }
+            return nil
+        } catch DecodingError.typeMismatch {
+            // Some backend surfaces still serialize IR envelopes as JSON strings.
+            // Fall through and decode the string payload into the expected envelope.
+        } catch DecodingError.valueNotFound {
+            return nil
+        }
+
+        guard let raw = try decodeIfPresent(String.self, forKey: key) else {
+            return nil
+        }
+        guard let data = raw.data(using: .utf8) else {
+            throw IRConditionCodingError.invalidJSONString(raw)
+        }
+        return try JSONDecoder().decode(IREnvelope.self, from: data)
+    }
+
+    func decodeIREnvelope(forKey key: Key) throws -> IREnvelope {
+        if let envelope = try decodeIREnvelopeIfPresent(forKey: key) {
+            return envelope
+        }
+        throw DecodingError.keyNotFound(
+            key,
+            DecodingError.Context(codingPath: codingPath, debugDescription: "Missing IREnvelope for key '\(key.stringValue)'")
+        )
+    }
+}
+
 public struct EventTriggerConfig: Codable {
     public let eventName: String
     public let condition: IREnvelope? // Optional IR condition for event properties
+
+    private enum CodingKeys: String, CodingKey {
+        case eventName
+        case condition
+    }
+
+    public init(eventName: String, condition: IREnvelope?) {
+        self.eventName = eventName
+        self.condition = condition
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        eventName = try container.decode(String.self, forKey: .eventName)
+        condition = try container.decodeIREnvelopeIfPresent(forKey: .condition)
+    }
 }
 
 public struct SegmentTriggerConfig: Codable {
     public let condition: IREnvelope // Required IR condition for segment membership
+
+    private enum CodingKeys: String, CodingKey {
+        case condition
+    }
+
+    public init(condition: IREnvelope) {
+        self.condition = condition
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        condition = try container.decodeIREnvelope(forKey: .condition)
+    }
 }
 
 public enum CampaignTrigger: Codable {
@@ -247,6 +314,25 @@ public struct Segment: Codable {
     public let id: String
     public let name: String
     public let condition: IREnvelope  // Compiled IR expression from backend
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case condition
+    }
+
+    public init(id: String, name: String, condition: IREnvelope) {
+        self.id = id
+        self.name = name
+        self.condition = condition
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        condition = try container.decodeIREnvelope(forKey: .condition)
+    }
 }
 
 public struct BuildManifest: Codable, Equatable {
@@ -285,6 +371,22 @@ public struct EventResponse: Codable {
     public struct EventInfo: Codable {
         public let id: String
         public let processed: Bool
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case processed
+        }
+
+        public init(id: String, processed: Bool = true) {
+            self.id = id
+            self.processed = processed
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            processed = try container.decodeIfPresent(Bool.self, forKey: .processed) ?? true
+        }
     }
 
     public struct Usage: Codable {

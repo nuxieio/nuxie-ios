@@ -14,7 +14,17 @@ public struct Flow {
     public var id: String { remoteFlow.id }
     public var name: String { remoteFlow.id }
     public var manifest: BuildManifest { remoteFlow.selectedBundle.manifest }
-    public var url: String { remoteFlow.selectedBundle.url }
+    public var url: String {
+        let rawURL = remoteFlow.selectedBundle.url
+        if URL(string: rawURL)?.scheme != nil {
+            return rawURL
+        }
+        if let apiEndpoint = NuxieSDK.shared.configuration?.apiEndpoint,
+           let resolvedURL = URL(string: rawURL, relativeTo: apiEndpoint)?.absoluteURL {
+            return resolvedURL.absoluteString
+        }
+        return rawURL
+    }
     
     // Validation
     public var isValid: Bool {

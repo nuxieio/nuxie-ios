@@ -11,9 +11,31 @@ SCHEME_MACOS := NuxieSDKMac
 SCHEME ?= $(SCHEME_UNIT)
 DERIVED_DATA := DerivedData
 DEFAULT_SIMULATOR_OS := $(shell xcrun simctl list devices available 2>/dev/null | sed -n 's/^-- iOS \(.*\) --/\1/p' | sort -V | tail -1)
+ifeq ($(origin TEST_SIMULATOR_OS), undefined)
+REQUESTED_SIMULATOR_OS := $(if $(DEFAULT_SIMULATOR_OS),$(DEFAULT_SIMULATOR_OS),26.3)
+else
+REQUESTED_SIMULATOR_OS := $(TEST_SIMULATOR_OS)
+endif
+RESOLVED_SIMULATOR_OS := $(shell \
+	requested="$(REQUESTED_SIMULATOR_OS)"; \
+	if [ -z "$$requested" ]; then \
+		exit 0; \
+	fi; \
+	available_versions=$$(xcrun simctl list devices available 2>/dev/null | sed -n 's/^-- iOS \(.*\) --/\1/p'); \
+	exact_match=$$(printf "%s\n" "$$available_versions" | awk -v req="$$requested" '$$0 == req { print; found = 1 } END { exit(found ? 0 : 1) }'); \
+	if [ -n "$$exact_match" ]; then \
+		echo "$$exact_match"; \
+	else \
+		prefix_match=$$(printf "%s\n" "$$available_versions" | awk -v req="$$requested" 'index($$0, req) == 1 { print }' | sort -V | tail -1); \
+		if [ -n "$$prefix_match" ]; then \
+			echo "$$prefix_match"; \
+		else \
+			echo "$$requested"; \
+		fi; \
+	fi)
 DEFAULT_SIMULATOR_NAME := $(shell \
-	if [ -n "$(DEFAULT_SIMULATOR_OS)" ]; then \
-		xcrun simctl list devices available 2>/dev/null | awk -v ver="$(DEFAULT_SIMULATOR_OS)" '\
+	if [ -n "$(TEST_SIMULATOR_OS)" ]; then \
+		xcrun simctl list devices available 2>/dev/null | awk -v ver="$(TEST_SIMULATOR_OS)" '\
 			$$0 == "-- iOS " ver " --" { in_ver = 1; next } \
 			in_ver && /^-- / { exit } \
 			in_ver && /^[[:space:]]+iPhone 17 Pro \(/ { print "iPhone 17 Pro"; exit } \
@@ -25,7 +47,7 @@ DEFAULT_SIMULATOR_NAME := $(shell \
 				exit \
 			}'; \
 	fi)
-TEST_SIMULATOR_OS ?= $(if $(DEFAULT_SIMULATOR_OS),$(DEFAULT_SIMULATOR_OS),26.3)
+TEST_SIMULATOR_OS := $(if $(RESOLVED_SIMULATOR_OS),$(RESOLVED_SIMULATOR_OS),$(REQUESTED_SIMULATOR_OS))
 TEST_SIMULATOR_NAME ?= $(if $(DEFAULT_SIMULATOR_NAME),$(DEFAULT_SIMULATOR_NAME),iPhone 17 Pro)
 TEST_DESTINATION ?= platform=iOS Simulator,name=$(TEST_SIMULATOR_NAME),OS=$(TEST_SIMULATOR_OS)
 XCODEBUILD_TEST_FLAGS ?=
