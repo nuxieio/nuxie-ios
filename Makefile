@@ -1,4 +1,4 @@
-.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-e2e-parity test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-e2e-parity test-e2e-hosted test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
@@ -10,10 +10,33 @@ SCHEME_E2E := NuxieSDKE2ETests
 SCHEME_MACOS := NuxieSDKMac
 SCHEME ?= $(SCHEME_UNIT)
 DERIVED_DATA := DerivedData
+HOSTED_E2E_ARTIFACT_PATH_FILE := $(CURDIR)/.hosted-e2e-artifact-path
 DEFAULT_SIMULATOR_OS := $(shell xcrun simctl list devices available 2>/dev/null | sed -n 's/^-- iOS \(.*\) --/\1/p' | sort -V | tail -1)
+ifeq ($(origin TEST_SIMULATOR_OS), undefined)
+REQUESTED_SIMULATOR_OS := $(if $(DEFAULT_SIMULATOR_OS),$(DEFAULT_SIMULATOR_OS),26.3)
+else
+REQUESTED_SIMULATOR_OS := $(TEST_SIMULATOR_OS)
+endif
+RESOLVED_SIMULATOR_OS := $(shell \
+	requested="$(REQUESTED_SIMULATOR_OS)"; \
+	if [ -z "$$requested" ]; then \
+		exit 0; \
+	fi; \
+	available_versions=$$(xcrun simctl list devices available 2>/dev/null | sed -n 's/^-- iOS \(.*\) --/\1/p'); \
+	exact_match=$$(printf "%s\n" "$$available_versions" | awk -v req="$$requested" '$$0 == req { print; found = 1 } END { exit(found ? 0 : 1) }'); \
+	if [ -n "$$exact_match" ]; then \
+		echo "$$exact_match"; \
+	else \
+		prefix_match=$$(printf "%s\n" "$$available_versions" | awk -v req="$$requested" 'index($$0, req) == 1 { print }' | sort -V | tail -1); \
+		if [ -n "$$prefix_match" ]; then \
+			echo "$$prefix_match"; \
+		else \
+			echo "$$requested"; \
+		fi; \
+	fi)
 DEFAULT_SIMULATOR_NAME := $(shell \
-	if [ -n "$(DEFAULT_SIMULATOR_OS)" ]; then \
-		xcrun simctl list devices available 2>/dev/null | awk -v ver="$(DEFAULT_SIMULATOR_OS)" '\
+	if [ -n "$(TEST_SIMULATOR_OS)" ]; then \
+		xcrun simctl list devices available 2>/dev/null | awk -v ver="$(TEST_SIMULATOR_OS)" '\
 			$$0 == "-- iOS " ver " --" { in_ver = 1; next } \
 			in_ver && /^-- / { exit } \
 			in_ver && /^[[:space:]]+iPhone 17 Pro \(/ { print "iPhone 17 Pro"; exit } \
@@ -25,11 +48,12 @@ DEFAULT_SIMULATOR_NAME := $(shell \
 				exit \
 			}'; \
 	fi)
-TEST_SIMULATOR_OS ?= $(if $(DEFAULT_SIMULATOR_OS),$(DEFAULT_SIMULATOR_OS),26.3)
+TEST_SIMULATOR_OS := $(if $(RESOLVED_SIMULATOR_OS),$(RESOLVED_SIMULATOR_OS),$(REQUESTED_SIMULATOR_OS))
 TEST_SIMULATOR_NAME ?= $(if $(DEFAULT_SIMULATOR_NAME),$(DEFAULT_SIMULATOR_NAME),iPhone 17 Pro)
 TEST_DESTINATION ?= platform=iOS Simulator,name=$(TEST_SIMULATOR_NAME),OS=$(TEST_SIMULATOR_OS)
 XCODEBUILD_TEST_FLAGS ?=
 PARITY_E2E_TEST_FLAGS ?= -only-testing:NuxieSDKE2ETests/FlowRuntimeE2ESpec
+HOSTED_E2E_TEST_FLAGS ?= -only-testing:NuxieSDKE2ETests/FlowRuntimeHostedArtifactE2ESpec
 
 # Default target
 help:
@@ -42,6 +66,7 @@ help:
 	@echo "  test-integration - Run integration tests"
 	@echo "  test-e2e         - Run end-to-end tests"
 	@echo "  test-e2e-parity  - Run Flow runtime parity E2E in react and rive modes"
+	@echo "  test-e2e-hosted  - Run hosted artifact Flow runtime E2E"
 	@echo "  test-all         - Run unit + integration + e2e tests"
 	@echo "  build-macos      - Build macOS framework target"
 	@echo "  coverage         - Run tests with code coverage (Swift Package Manager)"
@@ -114,6 +139,18 @@ test-e2e-parity:
 	NUXIE_E2E_ENABLE_NAVIGATION=1 \
 	NUXIE_E2E_PARITY_RENDERER=rive \
 	$(MAKE) --no-print-directory test-e2e XCODEBUILD_TEST_FLAGS='$(PARITY_E2E_TEST_FLAGS)'
+
+test-e2e-hosted:
+	@echo "Running Flow runtime hosted artifact E2E..."
+	@status=0; \
+	if [ -n "$$NUXIE_E2E_ARTIFACT_PATH" ]; then \
+		printf "%s\n" "$$NUXIE_E2E_ARTIFACT_PATH" > "$(HOSTED_E2E_ARTIFACT_PATH_FILE)"; \
+	else \
+		rm -f "$(HOSTED_E2E_ARTIFACT_PATH_FILE)"; \
+	fi; \
+	$(MAKE) --no-print-directory test-e2e XCODEBUILD_TEST_FLAGS='$(HOSTED_E2E_TEST_FLAGS)' || status=$$?; \
+	rm -f "$(HOSTED_E2E_ARTIFACT_PATH_FILE)"; \
+	exit $$status
 
 test-all: test-unit test-integration test-e2e
 

@@ -13,7 +13,7 @@ struct E2EConfiguration: Equatable {
   static let artifactEnvKey = "NUXIE_E2E_ARTIFACT_PATH"
 
   static let defaultApiKey = "pk_test_placeholder"
-  static let defaultIngestUrlString = "http://127.0.0.1:8084"
+  static let defaultIngestUrlString = "http://localhost:8084"
   static let defaultFlowId = "flow_placeholder"
 
   let apiKey: String
@@ -40,7 +40,7 @@ struct E2EConfiguration: Equatable {
 
     var artifact: E2EArtifact?
     if let artifactPath = nonEmpty(environment[artifactEnvKey]),
-       let data = fileLoader(artifactPath) {
+       let data = fileLoader(resolveArtifactFilePath(artifactPath)) {
       artifact = try? JSONDecoder().decode(E2EArtifact.self, from: data)
     }
 
@@ -68,5 +68,16 @@ struct E2EConfiguration: Equatable {
       return nil
     }
     return trimmed
+  }
+
+  private static func resolveArtifactFilePath(_ rawPath: String) -> String {
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: rawPath, isDirectory: &isDirectory),
+       isDirectory.boolValue {
+      return URL(fileURLWithPath: rawPath)
+        .appendingPathComponent("runtime/launch-config.json")
+        .path
+    }
+    return rawPath
   }
 }
