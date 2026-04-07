@@ -40,7 +40,7 @@ struct E2EConfiguration: Equatable {
 
     var artifact: E2EArtifact?
     if let artifactPath = nonEmpty(environment[artifactEnvKey]),
-       let data = fileLoader(artifactPath) {
+       let data = fileLoader(resolveArtifactFilePath(artifactPath)) {
       artifact = try? JSONDecoder().decode(E2EArtifact.self, from: data)
     }
 
@@ -68,5 +68,16 @@ struct E2EConfiguration: Equatable {
       return nil
     }
     return trimmed
+  }
+
+  private static func resolveArtifactFilePath(_ rawPath: String) -> String {
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: rawPath, isDirectory: &isDirectory),
+       isDirectory.boolValue {
+      return URL(fileURLWithPath: rawPath)
+        .appendingPathComponent("runtime/launch-config.json")
+        .path
+    }
+    return rawPath
   }
 }
