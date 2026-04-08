@@ -13,7 +13,7 @@ struct E2EConfiguration: Equatable {
   static let artifactEnvKey = "NUXIE_E2E_ARTIFACT_PATH"
 
   static let defaultApiKey = "pk_test_placeholder"
-  static let defaultIngestUrlString = "http://127.0.0.1:8084"
+  static let defaultIngestUrlString = "http://localhost:8084"
   static let defaultFlowId = "flow_placeholder"
 
   let apiKey: String

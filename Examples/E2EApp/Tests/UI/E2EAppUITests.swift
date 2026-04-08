@@ -14,7 +14,7 @@ final class E2EAppUITests: XCTestCase {
     if let ingestUrl = env["NUXIE_E2E_INGEST_URL"], !ingestUrl.isEmpty {
       app.launchEnvironment["NUXIE_E2E_INGEST_URL"] = ingestUrl
     } else {
-      app.launchEnvironment["NUXIE_E2E_INGEST_URL"] = "http://127.0.0.1:8084"
+      app.launchEnvironment["NUXIE_E2E_INGEST_URL"] = "http://localhost:8084"
     }
 
     if let flowId = env["NUXIE_E2E_FLOW_ID"], !flowId.isEmpty {

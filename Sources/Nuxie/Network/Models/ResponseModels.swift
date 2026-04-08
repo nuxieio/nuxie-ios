@@ -117,10 +117,19 @@ public struct ExperimentAssignment: Codable {
 public struct EventTriggerConfig: Codable {
     public let eventName: String
     public let condition: IREnvelope? // Optional IR condition for event properties
+
+    public init(eventName: String, condition: IREnvelope?) {
+        self.eventName = eventName
+        self.condition = condition
+    }
 }
 
 public struct SegmentTriggerConfig: Codable {
     public let condition: IREnvelope // Required IR condition for segment membership
+
+    public init(condition: IREnvelope) {
+        self.condition = condition
+    }
 }
 
 public enum CampaignTrigger: Codable {
@@ -247,6 +256,12 @@ public struct Segment: Codable {
     public let id: String
     public let name: String
     public let condition: IREnvelope  // Compiled IR expression from backend
+
+    public init(id: String, name: String, condition: IREnvelope) {
+        self.id = id
+        self.name = name
+        self.condition = condition
+    }
 }
 
 public struct BuildManifest: Codable, Equatable {
@@ -268,9 +283,13 @@ public struct EventResponse: Codable {
     public let status: String
     public let payload: [String: AnyCodable]?
     public let customer: Customer?
-    public let event: EventInfo?
+    public let eventId: String?
+    public let customerId: String?
     public let message: String?
     public let featuresMatched: Int?
+    public let deduped: Bool?
+    public let merged: Bool?
+    public let migratedDistinctIds: [String]?
     public let usage: Usage?
 
     // Journey-specific response fields (for $journey_start, $journey_node_executed, $journey_completed)
@@ -282,9 +301,34 @@ public struct EventResponse: Codable {
         public let properties: [String: AnyCodable]?
     }
 
-    public struct EventInfo: Codable {
-        public let id: String
-        public let processed: Bool
+    public init(
+        status: String,
+        payload: [String: AnyCodable]? = nil,
+        customer: Customer? = nil,
+        eventId: String? = nil,
+        customerId: String? = nil,
+        message: String? = nil,
+        featuresMatched: Int? = nil,
+        deduped: Bool? = nil,
+        merged: Bool? = nil,
+        migratedDistinctIds: [String]? = nil,
+        usage: Usage? = nil,
+        journey: JourneyInfo? = nil,
+        execution: ExecutionResult? = nil
+    ) {
+        self.status = status
+        self.payload = payload
+        self.customer = customer
+        self.eventId = eventId
+        self.customerId = customerId
+        self.message = message
+        self.featuresMatched = featuresMatched
+        self.deduped = deduped
+        self.merged = merged
+        self.migratedDistinctIds = migratedDistinctIds
+        self.usage = usage
+        self.journey = journey
+        self.execution = execution
     }
 
     public struct Usage: Codable {

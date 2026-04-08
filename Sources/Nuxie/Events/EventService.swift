@@ -508,7 +508,7 @@ public class EventService: EventServiceProtocol {
       entityId: finalProperties["entityId"] as? String
     )
 
-    let eventId = response.event?.id ?? UUID.v7().uuidString
+    let eventId = response.eventId ?? UUID.v7().uuidString
     let enrichedEvent = NuxieEvent(
       id: eventId,
       name: event,

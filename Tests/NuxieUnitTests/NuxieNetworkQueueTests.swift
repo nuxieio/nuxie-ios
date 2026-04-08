@@ -99,7 +99,7 @@ actor MockNuxieApiForQueue: NuxieApiProtocol {
             status: "success",
             payload: nil,
             customer: nil,
-            event: nil,
+            eventId: nil,
             message: nil,
             featuresMatched: nil,
             usage: nil,

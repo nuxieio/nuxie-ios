@@ -15,7 +15,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
             var server: LocalHTTPServer?
 
             var apiKey: String = "pk_test_e2e_local"
-            var baseURL: URL = URL(string: "http://127.0.0.1:8084")!
+            var baseURL: URL = URL(string: "http://localhost:8084")!
             var flowId: String = "flow_e2e_ready"
 
             var flowViewController: FlowViewController?
@@ -147,7 +147,7 @@ final class FlowRuntimeE2ESpec: QuickSpec {
 	                                status: "ok",
 	                                payload: nil,
 	                                customer: nil,
-	                                event: EventResponse.EventInfo(id: "evt-1", processed: true),
+	                                eventId: "evt-1",
 	                                message: nil,
 	                                featuresMatched: nil,
 	                                usage: nil,

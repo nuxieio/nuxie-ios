@@ -91,7 +91,7 @@ struct ResponseBuilders {
             status: status,
             payload: nil,
             customer: nil,
-            event: nil,
+            eventId: nil,
             message: nil,
             featuresMatched: nil,
             usage: nil,
@@ -111,7 +111,7 @@ struct ResponseBuilders {
             status: status,
             payload: nil,
             customer: nil,
-            event: nil,
+            eventId: nil,
             message: message,
             featuresMatched: nil,
             usage: EventResponse.Usage(

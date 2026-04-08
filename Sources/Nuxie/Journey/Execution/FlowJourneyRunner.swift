@@ -1385,7 +1385,9 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         guard let controller = viewController else { return .continue }
         let resolvedProductId = resolveValueRefs(action.productId.value, context: context)
-        guard let productId = resolvedProductId as? String, !productId.isEmpty else {
+        let resolvedScreenId = context.screenId ?? journey.flowState.currentScreenId
+        let productId = resolvedProductId as? String
+        guard let productId, !productId.isEmpty else {
             return .continue
         }
         let placementIndex = resolveValueRefs(action.placementIndex.value, context: context)
@@ -1398,7 +1400,7 @@ final class FlowJourneyRunner {
             "campaignId": journey.campaignId,
             "productId": productId
         ]
-        if let screenId = context.screenId ?? journey.flowState.currentScreenId {
+        if let screenId = resolvedScreenId {
             userInfo["screenId"] = screenId
         }
         userInfo["placementIndex"] = placementIndex
@@ -2002,7 +2004,6 @@ final class FlowJourneyRunner {
 
         return nil
     }
-
     private func makePendingAction(
         kind: FlowPendingActionKind,
         context: TriggerContext,
