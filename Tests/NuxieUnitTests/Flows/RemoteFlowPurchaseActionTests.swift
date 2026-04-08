@@ -2,13 +2,23 @@ import XCTest
 @testable import Nuxie
 
 final class RemoteFlowPurchaseActionTests: XCTestCase {
-    func testDecodesPurchaseAction() throws {
+    func testDecodesPurchaseActionWithValueRefs() throws {
         let data = Data(
             """
             {
               "type": "purchase",
-              "placementIndex": 0,
-              "productId": "prod_yearly"
+              "placementIndex": {
+                "ref": {
+                  "kind": "ids",
+                  "pathIds": [3893745128, 10, 8]
+                }
+              },
+              "productId": {
+                "ref": {
+                  "kind": "ids",
+                  "pathIds": [3893745128, 10, 9]
+                }
+              }
             }
             """.utf8
         )
@@ -18,8 +28,24 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
         switch action {
         case .purchase(let purchase):
             XCTAssertEqual(purchase.type, "purchase")
-            XCTAssertEqual(purchase.productId.value as? String, "prod_yearly")
-            XCTAssertEqual(purchase.placementIndex.value as? Int, 0)
+            XCTAssertEqual(
+                purchase.placementIndex,
+                AnyCodable([
+                    "ref": [
+                        "kind": "ids",
+                        "pathIds": [3893745128, 10, 8],
+                    ],
+                ])
+            )
+            XCTAssertEqual(
+                purchase.productId,
+                AnyCodable([
+                    "ref": [
+                        "kind": "ids",
+                        "pathIds": [3893745128, 10, 9],
+                    ],
+                ])
+            )
         default:
             XCTFail("Expected purchase action")
         }
@@ -30,7 +56,12 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
             """
             {
               "type": "purchase",
-              "placementIndex": 0
+              "placementIndex": {
+                "ref": {
+                  "kind": "ids",
+                  "pathIds": [3893745128, 10, 8]
+                }
+              }
             }
             """.utf8
         )
@@ -43,7 +74,12 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
             """
             {
               "type": "purchase",
-              "productId": "prod_yearly"
+              "productId": {
+                "ref": {
+                  "kind": "ids",
+                  "pathIds": [3893745128, 10, 9]
+                }
+              }
             }
             """.utf8
         )
