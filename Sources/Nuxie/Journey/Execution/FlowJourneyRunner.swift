@@ -132,7 +132,7 @@ final class FlowJourneyRunner {
         self.onGoalHit = onGoalHit
         self.viewController = viewController
 
-        self.interactionsById = Self.buildInteractionIndex(flow.remoteFlow.interactions)
+        self.interactionsById = flow.remoteFlow.interactions
 
         if let snapshot = journey.flowState.viewModelSnapshot {
             viewModels.hydrate(snapshot)
@@ -292,12 +292,12 @@ final class FlowJourneyRunner {
 
         var interactions: [Interaction] = []
         if let componentId {
-            interactions.append(contentsOf: hostInteractions(forHostId: componentId))
+            interactions.append(contentsOf: interactionsById[componentId] ?? [])
         }
         if let screenId {
-            interactions.append(contentsOf: hostInteractions(forHostId: screenId))
+            interactions.append(contentsOf: interactionsById[screenId] ?? [])
         }
-        interactions.append(contentsOf: globalInteractions())
+        interactions.append(contentsOf: interactionsById[globalInteractionsKey] ?? [])
 
         if interactions.isEmpty { return nil }
 
@@ -462,8 +462,7 @@ final class FlowJourneyRunner {
     }
 
     private func runEntryActionsIfNeeded() async -> RunOutcome? {
-        let globalInteractions = globalInteractions()
-        guard !globalInteractions.isEmpty else { return nil }
+        guard let globalInteractions = interactionsById[globalInteractionsKey], !globalInteractions.isEmpty else { return nil }
 
         var queued = false
         for interaction in globalInteractions {
@@ -1914,9 +1913,9 @@ final class FlowJourneyRunner {
     ) async -> RunOutcome? {
         var interactions: [Interaction] = []
         if let screenId {
-            interactions.append(contentsOf: hostInteractions(forHostId: screenId))
+            interactions.append(contentsOf: interactionsById[screenId] ?? [])
         }
-        interactions.append(contentsOf: globalInteractions())
+        interactions.append(contentsOf: interactionsById[globalInteractionsKey] ?? [])
         if interactions.isEmpty { return nil }
 
         for interaction in interactions {
@@ -1986,14 +1985,14 @@ final class FlowJourneyRunner {
         componentId: String?
     ) -> [InteractionAction]? {
         if let screenId,
-           !hostInteractions(forHostId: screenId).isEmpty,
-           let match = hostInteractions(forHostId: screenId).first(where: { $0.id == interactionId }) {
+           let list = interactionsById[screenId],
+           let match = list.first(where: { $0.id == interactionId }) {
             return match.actions
         }
 
         if let componentId,
-           !hostInteractions(forHostId: componentId).isEmpty,
-           let match = hostInteractions(forHostId: componentId).first(where: { $0.id == interactionId }) {
+           let list = interactionsById[componentId],
+           let match = list.first(where: { $0.id == interactionId }) {
             return match.actions
         }
 
@@ -2005,72 +2004,6 @@ final class FlowJourneyRunner {
 
         return nil
     }
-
-    private func hostInteractions(forHostId hostId: String?) -> [Interaction] {
-        guard let hostId, !hostId.isEmpty else { return [] }
-
-        var matches: [Interaction] = []
-        var seen = Set<String>()
-
-        func append(_ list: [Interaction]?) {
-            guard let list else { return }
-            for interaction in list where !seen.contains(interaction.id) {
-                seen.insert(interaction.id)
-                matches.append(interaction)
-            }
-        }
-
-        append(interactionsById[hostId])
-
-        let normalizedHostId = Self.normalizeInteractionHostId(hostId)
-        if !normalizedHostId.isEmpty {
-            append(interactionsById[normalizedHostId])
-        }
-
-        return matches
-    }
-
-    private func globalInteractions() -> [Interaction] {
-        hostInteractions(forHostId: globalInteractionsKey)
-    }
-
-    private static func buildInteractionIndex(
-        _ source: [String: [Interaction]]
-    ) -> [String: [Interaction]] {
-        var index = source
-
-        func mergeInteractions(for key: String, interactions: [Interaction]) {
-            guard !key.isEmpty else { return }
-            let existing = index[key] ?? []
-            var merged = existing
-            let existingIds = Set(existing.map(\.id))
-            for interaction in interactions where !existingIds.contains(interaction.id) {
-                merged.append(interaction)
-            }
-            index[key] = merged
-        }
-
-        for (hostId, interactions) in source {
-            let normalizedHostId = normalizeInteractionHostId(hostId)
-            if !normalizedHostId.isEmpty {
-                mergeInteractions(for: normalizedHostId, interactions: interactions)
-                if normalizedHostId == "global" {
-                    mergeInteractions(for: "__global__", interactions: interactions)
-                }
-            }
-        }
-
-        return index
-    }
-
-    private static func normalizeInteractionHostId(_ hostId: String) -> String {
-        hostId.replacingOccurrences(
-            of: "[^A-Za-z0-9]",
-            with: "",
-            options: .regularExpression
-        ).lowercased()
-    }
-
     private func makePendingAction(
         kind: FlowPendingActionKind,
         context: TriggerContext,

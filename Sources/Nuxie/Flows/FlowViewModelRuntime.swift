@@ -319,42 +319,6 @@ public final class FlowViewModelRuntime {
         return payload
     }
 
-    private func decodeDictionary(_ value: Any?) -> [String: Any]? {
-        if let dictionary = value as? [String: Any] {
-            return dictionary
-        }
-        if let dictionary = value as? [String: AnyCodable] {
-            return dictionary.mapValues(\.value)
-        }
-        return nil
-    }
-
-    private func decodeArray(_ value: Any?) -> [Any]? {
-        if let array = value as? [Any] {
-            return array
-        }
-        if let array = value as? [AnyCodable] {
-            return array.map(\.value)
-        }
-        return nil
-    }
-
-    private func decodeInt(_ value: Any?) -> Int? {
-        if let value = value as? Int {
-            return value
-        }
-        if let value = value as? NSNumber {
-            return value.intValue
-        }
-        if let value = value as? Double {
-            return Int(value)
-        }
-        if let value = value as? String {
-            return Int(value)
-        }
-        return nil
-    }
-
     private func resolveInstance(
         screenId: String?,
         viewModelId: String?,

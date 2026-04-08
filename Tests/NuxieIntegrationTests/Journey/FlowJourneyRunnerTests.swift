@@ -622,42 +622,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(runner.hasPendingWork()).to(beFalse())
             }
 
-            it("matches normalized component host ids from the runtime bridge") {
-                let flowId = "flow-normalized-component-host"
-                let interaction = Interaction(
-                    id: "int-dismiss",
-                    trigger: .press,
-                    actions: [
-                        .dismiss(DismissAction())
-                    ],
-                    enabled: true
-                )
-                let remoteFlow = makeRemoteFlow(
-                    flowId: flowId,
-                    interactionsByScreen: ["vwbutton": [interaction]]
-                )
-
-                let flow = Flow(remoteFlow: remoteFlow, products: [])
-                let campaign = makeCampaign(flowId: flowId)
-                let journey = Journey(campaign: campaign, distinctId: "user-1")
-                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
-
-                let controller = await MainActor.run {
-                    SpyFlowViewController(flow: flow)
-                }
-                runner.attach(viewController: controller)
-
-                let outcome = await runner.dispatchTrigger(
-                    trigger: .press,
-                    screenId: "screen-1",
-                    componentId: "vw_button",
-                    instanceId: nil,
-                    event: nil
-                )
-                expect(outcome).to(beNil())
-                expect(controller.dismissRequests).to(equal([.userDismissed]))
-            }
-
             it("resumes delayed entry action and continues sequence") {
                 let flowId = "flow-resume"
                 let viewModel = ViewModel(
