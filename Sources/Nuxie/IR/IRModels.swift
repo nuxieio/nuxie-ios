@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Envelope
 
 /// Top-level IR container with version and metadata
-public struct IREnvelope: Codable {
+public struct IREnvelope: Codable, Equatable {
     public let ir_version: Int
     public let engine_min: String?
     public let compiled_at: Double?
@@ -20,7 +20,7 @@ public struct IREnvelope: Codable {
 // MARK: - Expression nodes (v1)
 
 /// IR expression node types
-public indirect enum IRExpr: Codable {
+public indirect enum IRExpr: Codable, Equatable {
     // Scalars / containers
     case bool(Bool)
     case number(Double)
@@ -75,7 +75,7 @@ public indirect enum IRExpr: Codable {
     case journeyId
     
     /// Step in a sequence query
-    public struct Step: Codable {
+    public struct Step: Codable, Equatable {
         public let name: String
         public let where_: IRExpr?
         
@@ -301,8 +301,203 @@ public indirect enum IRExpr: Codable {
     }
     
     public func encode(to encoder: Encoder) throws {
-        // Implementation deferred - not needed for client-side evaluation
-        throw IRError.encodingNotImplemented
+        var typeContainer = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case .bool(let value):
+            try typeContainer.encode("Bool", forKey: .type)
+            var valueContainer = encoder.container(keyedBy: ValueCodingKeys.self)
+            try valueContainer.encode(value, forKey: .value)
+
+        case .number(let value):
+            try typeContainer.encode("Number", forKey: .type)
+            var valueContainer = encoder.container(keyedBy: ValueCodingKeys.self)
+            try valueContainer.encode(value, forKey: .value)
+
+        case .string(let value):
+            try typeContainer.encode("String", forKey: .type)
+            var valueContainer = encoder.container(keyedBy: ValueCodingKeys.self)
+            try valueContainer.encode(value, forKey: .value)
+
+        case .timestamp(let value):
+            try typeContainer.encode("Timestamp", forKey: .type)
+            var valueContainer = encoder.container(keyedBy: ValueCodingKeys.self)
+            try valueContainer.encode(value, forKey: .value)
+
+        case .duration(let value):
+            try typeContainer.encode("Duration", forKey: .type)
+            var valueContainer = encoder.container(keyedBy: ValueCodingKeys.self)
+            try valueContainer.encode(value, forKey: .value)
+
+        case .list(let value):
+            try typeContainer.encode("List", forKey: .type)
+            var valueContainer = encoder.container(keyedBy: ValueCodingKeys.self)
+            try valueContainer.encode(value, forKey: .value)
+
+        case .and(let args):
+            try typeContainer.encode("And", forKey: .type)
+            var argsContainer = encoder.container(keyedBy: ArgsCodingKeys.self)
+            try argsContainer.encode(args, forKey: .args)
+
+        case .or(let args):
+            try typeContainer.encode("Or", forKey: .type)
+            var argsContainer = encoder.container(keyedBy: ArgsCodingKeys.self)
+            try argsContainer.encode(args, forKey: .args)
+
+        case .not(let arg):
+            try typeContainer.encode("Not", forKey: .type)
+            var argContainer = encoder.container(keyedBy: ArgCodingKeys.self)
+            try argContainer.encode(arg, forKey: .arg)
+
+        case .compare(let op, let left, let right):
+            try typeContainer.encode("Compare", forKey: .type)
+            var compareContainer = encoder.container(keyedBy: CompareCodingKeys.self)
+            try compareContainer.encode(op, forKey: .op)
+            try compareContainer.encode(left, forKey: .left)
+            try compareContainer.encode(right, forKey: .right)
+
+        case .user(let op, let key, let value):
+            try typeContainer.encode("User", forKey: .type)
+            var userContainer = encoder.container(keyedBy: UserCodingKeys.self)
+            try userContainer.encode(op, forKey: .op)
+            try userContainer.encode(key, forKey: .key)
+            try userContainer.encodeIfPresent(value, forKey: .value)
+
+        case .event(let op, let key, let value):
+            try typeContainer.encode("Event", forKey: .type)
+            var eventContainer = encoder.container(keyedBy: UserCodingKeys.self)
+            try eventContainer.encode(op, forKey: .op)
+            try eventContainer.encode(key, forKey: .key)
+            try eventContainer.encodeIfPresent(value, forKey: .value)
+
+        case .segment(let op, let id, let within):
+            try typeContainer.encode("Segment", forKey: .type)
+            var segmentContainer = encoder.container(keyedBy: SegmentCodingKeys.self)
+            try segmentContainer.encode(op, forKey: .op)
+            try segmentContainer.encode(id, forKey: .id)
+            try segmentContainer.encodeIfPresent(within, forKey: .within)
+
+        case .feature(let op, let id, let value):
+            try typeContainer.encode("Feature", forKey: .type)
+            var featureContainer = encoder.container(keyedBy: FeatureCodingKeys.self)
+            try featureContainer.encode(op, forKey: .op)
+            try featureContainer.encode(id, forKey: .id)
+            try featureContainer.encodeIfPresent(value, forKey: .value)
+
+        case .pred(let op, let key, let value):
+            try typeContainer.encode("Pred", forKey: .type)
+            var predContainer = encoder.container(keyedBy: PredCodingKeys.self)
+            try predContainer.encode(op, forKey: .op)
+            try predContainer.encode(key, forKey: .key)
+            try predContainer.encodeIfPresent(value, forKey: .value)
+
+        case .predAnd(let args):
+            try typeContainer.encode("PredAnd", forKey: .type)
+            var argsContainer = encoder.container(keyedBy: ArgsCodingKeys.self)
+            try argsContainer.encode(args, forKey: .args)
+
+        case .predOr(let args):
+            try typeContainer.encode("PredOr", forKey: .type)
+            var argsContainer = encoder.container(keyedBy: ArgsCodingKeys.self)
+            try argsContainer.encode(args, forKey: .args)
+
+        case .eventsExists(let name, let since, let until, let within, let where_):
+            try typeContainer.encode("Events.Exists", forKey: .type)
+            var eventsContainer = encoder.container(keyedBy: EventsCodingKeys.self)
+            try eventsContainer.encode(name, forKey: .name)
+            try eventsContainer.encodeIfPresent(since, forKey: .since)
+            try eventsContainer.encodeIfPresent(until, forKey: .until)
+            try eventsContainer.encodeIfPresent(within, forKey: .within)
+            try eventsContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsCount(let name, let since, let until, let within, let where_):
+            try typeContainer.encode("Events.Count", forKey: .type)
+            var eventsContainer = encoder.container(keyedBy: EventsCodingKeys.self)
+            try eventsContainer.encode(name, forKey: .name)
+            try eventsContainer.encodeIfPresent(since, forKey: .since)
+            try eventsContainer.encodeIfPresent(until, forKey: .until)
+            try eventsContainer.encodeIfPresent(within, forKey: .within)
+            try eventsContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsFirstTime(let name, let where_):
+            try typeContainer.encode("Events.FirstTime", forKey: .type)
+            var eventsContainer = encoder.container(keyedBy: EventsCodingKeys.self)
+            try eventsContainer.encode(name, forKey: .name)
+            try eventsContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsLastTime(let name, let where_):
+            try typeContainer.encode("Events.LastTime", forKey: .type)
+            var eventsContainer = encoder.container(keyedBy: EventsCodingKeys.self)
+            try eventsContainer.encode(name, forKey: .name)
+            try eventsContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsLastAge(let name, let where_):
+            try typeContainer.encode("Events.LastAge", forKey: .type)
+            var eventsContainer = encoder.container(keyedBy: EventsCodingKeys.self)
+            try eventsContainer.encode(name, forKey: .name)
+            try eventsContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsAggregate(let agg, let name, let prop, let since, let until, let within, let where_):
+            try typeContainer.encode("Events.Aggregate", forKey: .type)
+            var aggContainer = encoder.container(keyedBy: AggregateCodingKeys.self)
+            try aggContainer.encode(agg, forKey: .agg)
+            try aggContainer.encode(name, forKey: .name)
+            try aggContainer.encode(prop, forKey: .prop)
+            try aggContainer.encodeIfPresent(since, forKey: .since)
+            try aggContainer.encodeIfPresent(until, forKey: .until)
+            try aggContainer.encodeIfPresent(within, forKey: .within)
+            try aggContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsInOrder(let steps, let overallWithin, let perStepWithin, let since, let until):
+            try typeContainer.encode("Events.InOrder", forKey: .type)
+            var orderContainer = encoder.container(keyedBy: InOrderCodingKeys.self)
+            try orderContainer.encode(steps, forKey: .steps)
+            try orderContainer.encodeIfPresent(overallWithin, forKey: .overallWithin)
+            try orderContainer.encodeIfPresent(perStepWithin, forKey: .perStepWithin)
+            try orderContainer.encodeIfPresent(since, forKey: .since)
+            try orderContainer.encodeIfPresent(until, forKey: .until)
+
+        case .eventsActivePeriods(let name, let period, let totalPeriods, let minPeriods, let where_):
+            try typeContainer.encode("Events.ActivePeriods", forKey: .type)
+            var periodsContainer = encoder.container(keyedBy: ActivePeriodsCodingKeys.self)
+            try periodsContainer.encode(name, forKey: .name)
+            try periodsContainer.encode(period, forKey: .period)
+            try periodsContainer.encode(totalPeriods, forKey: .totalPeriods)
+            try periodsContainer.encode(minPeriods, forKey: .minPeriods)
+            try periodsContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsStopped(let name, let inactiveFor, let where_):
+            try typeContainer.encode("Events.Stopped", forKey: .type)
+            var stoppedContainer = encoder.container(keyedBy: StoppedCodingKeys.self)
+            try stoppedContainer.encode(name, forKey: .name)
+            try stoppedContainer.encode(inactiveFor, forKey: .inactiveFor)
+            try stoppedContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .eventsRestarted(let name, let inactiveFor, let within, let where_):
+            try typeContainer.encode("Events.Restarted", forKey: .type)
+            var restartedContainer = encoder.container(keyedBy: RestartedCodingKeys.self)
+            try restartedContainer.encode(name, forKey: .name)
+            try restartedContainer.encode(inactiveFor, forKey: .inactiveFor)
+            try restartedContainer.encode(within, forKey: .within)
+            try restartedContainer.encodeIfPresent(where_, forKey: .where)
+
+        case .timeNow:
+            try typeContainer.encode("Time.Now", forKey: .type)
+
+        case .timeAgo(let duration):
+            try typeContainer.encode("Time.Ago", forKey: .type)
+            var timeContainer = encoder.container(keyedBy: TimeAgoCodingKeys.self)
+            try timeContainer.encode(duration, forKey: .duration)
+
+        case .timeWindow(let value, let interval):
+            try typeContainer.encode("Time.Window", forKey: .type)
+            var windowContainer = encoder.container(keyedBy: TimeWindowCodingKeys.self)
+            try windowContainer.encode(value, forKey: .value)
+            try windowContainer.encode(interval, forKey: .interval)
+
+        case .journeyId:
+            try typeContainer.encode("Journey.Id", forKey: .type)
+        }
     }
     
     // MARK: - Private Coding Keys
