@@ -303,7 +303,7 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   public func handleEvent(_ event: NuxieEvent) async {
-    _ = await handleEvent(event, flushJourneyStartPendingEvents: false)
+    _ = await handleEvent(event, flushJourneyStartPendingEvents: true)
   }
 
   public func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {

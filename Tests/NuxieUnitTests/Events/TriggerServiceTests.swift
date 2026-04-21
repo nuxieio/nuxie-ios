@@ -132,6 +132,34 @@ final class TriggerServiceTests: AsyncSpec {
                 expect(updates).to(contain(.decision(.allowedImmediate)))
             }
 
+            it("keeps handling immediate gate plans after a journey suppression") {
+                await mockJourneyService.setTriggerResults([.suppressed(.alreadyActive)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "allow"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-allow",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                expect(updates).to(contain(.decision(.suppressed(.alreadyActive))))
+                expect(updates).to(contain(.decision(.allowedImmediate)))
+            }
+
             it("keeps handling require_feature gate plans after a journey starts") {
                 let journey = TestJourneyBuilder().build()
                 await mockJourneyService.setTriggerResults([.started(journey)])

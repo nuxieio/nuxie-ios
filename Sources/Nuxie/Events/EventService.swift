@@ -287,6 +287,7 @@ public extension EventServiceProtocol {
 
 /// Dual-purpose event service that handles local storage and network queuing
 public class EventService: EventServiceProtocol {
+  @TaskLocal private static var isProcessingWorkerTrack = false
 
   private let eventStore: EventStoreProtocol
   private let ready = StoreReadySignal()
@@ -458,9 +459,14 @@ public class EventService: EventServiceProtocol {
     await ready.wait()
 
     if flushPendingEvents {
-      // Flush pending events first to ensure ordering
-      // (any queued events should reach the server before this synchronous one)
-      _ = await flushEvents()
+      if Self.isProcessingWorkerTrack {
+        // Re-entrant journey starts are already blocking the EventService worker. The routed
+        // event has been enqueued to the network queue, so flush that queue directly.
+        _ = await networkQueue?.flush() ?? false
+      } else {
+        // Flush pending EventService commands first to ensure ordering.
+        _ = await flushEvents()
+      }
     }
 
     // Get current distinct ID
@@ -616,7 +622,7 @@ public class EventService: EventServiceProtocol {
     // Ensure the store is initialized before touching it
     await ready.wait()
 
-    // 1) Always persist & drive business logic
+    // 1) Always persist locally before downstream routing
     extractUserProperties(from: event)
     do {
       LogDebug("Attempting to store event: \(event.name) for user: \(event.distinctId)")
@@ -631,10 +637,11 @@ public class EventService: EventServiceProtocol {
       // Continue routing to other services even if storage fails
     }
 
-    await journeyService?.handleEvent(event)
-
-    // 2) Network ordering: preserve $identify-first ordering during identity transitions
+    // 2) Network ordering: enqueue before journey routing so lifecycle calls can flush this hit
     await networkQueue?.enqueue(event)
+
+    // 3) Drive business logic after the triggering event is staged for delivery
+    await journeyService?.handleEvent(event)
 
     return event
   }
@@ -697,7 +704,9 @@ public class EventService: EventServiceProtocol {
         switch cmd {
         case .track(let payload):
           guard let self else { return }
-          await self.handleTrack(payload)
+          await EventService.$isProcessingWorkerTrack.withValue(true) {
+            await self.handleTrack(payload)
+          }
 
         case .flush(let cont):
           let ok = await self?.networkQueue?.flush() ?? false

@@ -145,6 +145,21 @@ final class TrackWithResponseTests: AsyncSpec {
                     let lastCall = await mockNuxieApi.lastTrackEventCall
                     expect(lastCall?.event).to(equal("$journey_node_executed"))
                 }
+
+                it("flushes a routed triggering event before sending its journey start") {
+                    let routingJourneyService = RoutingJourneyStartService(eventService: eventService)
+                    try await eventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: routingJourneyService
+                    )
+                    await mockNuxieApi.setTrackEventResponse(.success())
+
+                    eventService.track("paywall_trigger", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    await eventService.drain()
+
+                    let sentEventNames = await mockNuxieApi.sentEvents.map(\.name)
+                    expect(sentEventNames).to(equal(["paywall_trigger", "$journey_start"]))
+                }
             }
 
             // MARK: - Error Handling
@@ -341,4 +356,52 @@ class TrackWithResponseMockSessionService: SessionServiceProtocol {
     func onAppBecameActive() {
         // No-op for tests
     }
+}
+
+private final class RoutingJourneyStartService: JourneyServiceProtocol {
+    private let eventService: EventServiceProtocol
+
+    init(eventService: EventServiceProtocol) {
+        self.eventService = eventService
+    }
+
+    func startJourney(for campaign: Campaign, distinctId: String, originEventId: String?) async -> Journey? {
+        nil
+    }
+
+    func resumeJourney(_ journey: Journey) async {}
+
+    func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {}
+
+    func handleEvent(_ event: NuxieEvent) async {
+        _ = try? await eventService.trackWithResponse(
+            "$journey_start",
+            properties: ["origin_event_id": event.id],
+            flushPendingEvents: true
+        )
+    }
+
+    func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+        []
+    }
+
+    func handleSegmentChange(distinctId: String, segments: Set<String>) async {}
+
+    func getActiveJourneys(for distinctId: String) async -> [Journey] {
+        []
+    }
+
+    func checkExpiredTimers() async {}
+
+    func initialize() async {}
+
+    func onAppWillEnterForeground() async {}
+
+    func onAppBecameActive() async {}
+
+    func onAppDidEnterBackground() async {}
+
+    func shutdown() async {}
+
+    func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {}
 }

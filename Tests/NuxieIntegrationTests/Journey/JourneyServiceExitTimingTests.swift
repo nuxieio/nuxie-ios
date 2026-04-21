@@ -318,7 +318,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 expect(startCall?.flushPendingEvents).to(beTrue())
             }
 
-            it("does not enqueue a flush when a routed event starts a journey") {
+            it("flushes pending events when a routed event starts a journey") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow()
                 await primeProfile(campaign: campaign, flow: flow)
@@ -336,7 +336,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     $0.event == "$journey_start"
                 }
                 expect(startCall).toNot(beNil())
-                expect(startCall?.flushPendingEvents).to(beFalse())
+                expect(startCall?.flushPendingEvents).to(beTrue())
             }
 
             it("does not start a local journey when server start persistence fails") {

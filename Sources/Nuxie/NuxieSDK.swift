@@ -282,7 +282,7 @@ public final class NuxieSDK {
       return true
     case .decision(let decision):
       switch decision {
-      case .allowedImmediate, .deniedImmediate, .noMatch, .suppressed:
+      case .allowedImmediate, .deniedImmediate, .noMatch:
         return true
       default:
         return false
