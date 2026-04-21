@@ -67,6 +67,7 @@ public actor TriggerService: TriggerServiceProtocol {
       }()
 
       let broker = triggerBroker
+      var hasStartedJourney = false
       let shouldCompleteUpdate: (TriggerUpdate) -> Bool = { update in
         switch update {
         case .error:
@@ -76,7 +77,7 @@ public actor TriggerService: TriggerServiceProtocol {
           case .allowedImmediate, .deniedImmediate, .noMatch:
             return true
           case .suppressed:
-            return mode == .flow
+            return gatePlan == nil && !hasStartedJourney
           case .flowShown(let ref):
             return ref.campaignId == terminalGateFlowCampaignId
           default:
@@ -102,12 +103,20 @@ public actor TriggerService: TriggerServiceProtocol {
       }
 
       let journeyResults = await journeyService.handleEventForTrigger(nuxieEvent)
+      hasStartedJourney = journeyResults.contains { result in
+        if case .started = result { return true }
+        return false
+      }
       let emittedJourneyDecision = await emitJourneyDecisions(
         results: journeyResults,
         eventId: eventId
       )
 
-      if emittedJourneyDecision && (gatePlan == nil || mode == .flow) {
+      if gatePlan == nil && emittedJourneyDecision {
+        return
+      }
+
+      if hasStartedJourney && mode == .flow {
         return
       }
 

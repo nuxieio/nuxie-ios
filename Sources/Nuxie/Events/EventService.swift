@@ -37,9 +37,15 @@ private enum Command {
 }
 
 private struct TrackPayload {
+  let commandId: String
   let name: String
   let properties: [String: Any]
   let forcedDistinctId: String  // snapshot at call site
+}
+
+private enum PrestagedTrack {
+  case event(NuxieEvent)
+  case dropped
 }
 
 public enum EventFlushStrategy: Equatable {
@@ -349,6 +355,9 @@ public class EventService: EventServiceProtocol {
   private weak var journeyService: JourneyServiceProtocol?
   private var contextBuilder: NuxieContextBuilder?
   private var configuration: NuxieConfiguration?
+  private let pendingTrackLock = NSLock()
+  private var pendingWorkerTracks: [TrackPayload] = []
+  private var prestagedWorkerTracks: [String: PrestagedTrack] = [:]
 
   // MARK: - Configuration
 
@@ -383,6 +392,7 @@ public class EventService: EventServiceProtocol {
     self.journeyService = journeyService
     self.contextBuilder = contextBuilder
     self.configuration = configuration
+    resetWorkerTrackState()
 
     do {
       try await eventStore.initialize(path: configuration?.customStoragePath)
@@ -439,14 +449,14 @@ public class EventService: EventServiceProtocol {
 
     // Snapshot id NOW to preserve pre/post identify semantics.
     let idSnapshot = identityService.getDistinctId()
+    let payload = TrackPayload(
+      commandId: UUID.v7().uuidString,
+      name: event,
+      properties: custom,
+      forcedDistinctId: idSnapshot
+    )
 
-    continuation.yield(
-      .track(
-        .init(
-          name: event,
-          properties: custom,
-          forcedDistinctId: idSnapshot
-        )))
+    enqueueTrackPayload(payload)
   }
 
   /// Track an event synchronously and wait for server response
@@ -498,6 +508,7 @@ public class EventService: EventServiceProtocol {
       // Flush pending EventService commands first to ensure ordering.
       _ = await flushEvents()
     case .networkQueue:
+      await prestagePendingWorkerTracksForLifecycle()
       if let networkQueue {
         let drained = await networkQueue.flushAll()
         guard drained else {
@@ -644,6 +655,7 @@ public class EventService: EventServiceProtocol {
     // Stop accepting new commands and ask the worker to stop.
     continuation.yield(.shutdown)
     continuation.finish()
+    resetWorkerTrackState()
 
     await eventStore.close()
     LogInfo("EventService closed")
@@ -656,6 +668,15 @@ public class EventService: EventServiceProtocol {
   /// - Returns: Routed event, or nil if routing failed
   @discardableResult
   private func route(_ event: NuxieEvent) async -> NuxieEvent? {
+    await stageForDelivery(event)
+
+    // 3) Drive business logic after the triggering event is staged for delivery
+    await journeyService?.handleEvent(event)
+
+    return event
+  }
+
+  private func stageForDelivery(_ event: NuxieEvent) async {
     // Ensure the store is initialized before touching it
     await ready.wait()
 
@@ -676,11 +697,6 @@ public class EventService: EventServiceProtocol {
 
     // 2) Network ordering: enqueue before journey routing so lifecycle calls can flush this hit
     await networkQueue?.enqueue(event)
-
-    // 3) Drive business logic after the triggering event is staged for delivery
-    await journeyService?.handleEvent(event)
-
-    return event
   }
 
   // MARK: - Private Routing Implementation
@@ -767,6 +783,27 @@ public class EventService: EventServiceProtocol {
   // MARK: - Worker handlers
 
   private func handleTrack(_ p: TrackPayload) async {
+    if let prestaged = takePrestagedWorkerTrack(commandId: p.commandId) {
+      switch prestaged {
+      case .event(let event):
+        await journeyService?.handleEvent(event)
+      case .dropped:
+        break
+      }
+      return
+    }
+
+    removePendingWorkerTrack(commandId: p.commandId)
+
+    guard let finalEvent = await buildEvent(from: p) else { return }
+
+    // Stage 8: Route Event (handles storage/network/journeys)
+    await route(finalEvent)
+  }
+
+  // MARK: - Worker helpers
+
+  private func buildEvent(from p: TrackPayload) async -> NuxieEvent? {
     // Stage 1: Add session ID if not already present
     var propertiesWithSession = p.properties
     if propertiesWithSession["$session_id"] == nil {
@@ -787,22 +824,74 @@ public class EventService: EventServiceProtocol {
     )
 
     // Stage 2: Apply beforeSend hook if configured
-    let finalEvent: NuxieEvent
     if let beforeSend = configuration?.beforeSend {
       guard let transformedEvent = beforeSend(nuxieEvent) else {
         LogDebug("Event '\(nuxieEvent.name)' dropped by beforeSend hook")
-        return
+        return nil
       }
-      finalEvent = transformedEvent
-    } else {
-      finalEvent = nuxieEvent
+      return transformedEvent
     }
 
-    // Stage 8: Route Event (handles storage/network/journeys)
-    await route(finalEvent)
+    return nuxieEvent
   }
 
-  // MARK: - Worker helpers
+  private func prestagePendingWorkerTracksForLifecycle() async {
+    let pendingTracks = takePendingWorkerTracksForPrestage()
+    guard !pendingTracks.isEmpty else { return }
+
+    // Routed journey lifecycle sends run while the worker is blocked inside the triggering track.
+    // Stage any already-queued track commands first so network order still matches worker order.
+    for payload in pendingTracks {
+      guard let event = await buildEvent(from: payload) else {
+        recordPrestagedWorkerTrack(commandId: payload.commandId, result: .dropped)
+        continue
+      }
+
+      await stageForDelivery(event)
+      recordPrestagedWorkerTrack(commandId: payload.commandId, result: .event(event))
+    }
+  }
+
+  private func enqueueTrackPayload(_ payload: TrackPayload) {
+    pendingTrackLock.lock()
+    pendingWorkerTracks.append(payload)
+    continuation.yield(.track(payload))
+    pendingTrackLock.unlock()
+  }
+
+  private func removePendingWorkerTrack(commandId: String) {
+    pendingTrackLock.lock()
+    pendingWorkerTracks.removeAll { $0.commandId == commandId }
+    pendingTrackLock.unlock()
+  }
+
+  private func takePendingWorkerTracksForPrestage() -> [TrackPayload] {
+    pendingTrackLock.lock()
+    let tracks = pendingWorkerTracks
+    pendingWorkerTracks.removeAll()
+    pendingTrackLock.unlock()
+    return tracks
+  }
+
+  private func recordPrestagedWorkerTrack(commandId: String, result: PrestagedTrack) {
+    pendingTrackLock.lock()
+    prestagedWorkerTracks[commandId] = result
+    pendingTrackLock.unlock()
+  }
+
+  private func takePrestagedWorkerTrack(commandId: String) -> PrestagedTrack? {
+    pendingTrackLock.lock()
+    let result = prestagedWorkerTracks.removeValue(forKey: commandId)
+    pendingTrackLock.unlock()
+    return result
+  }
+
+  private func resetWorkerTrackState() {
+    pendingTrackLock.lock()
+    pendingWorkerTracks.removeAll()
+    prestagedWorkerTracks.removeAll()
+    pendingTrackLock.unlock()
+  }
 
   private func buildTriggerProperties(
     _ properties: [String: Any]?,

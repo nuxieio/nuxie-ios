@@ -184,6 +184,53 @@ final class TrackWithResponseTests: AsyncSpec {
                         "$journey_start"
                     ]))
                 }
+
+                it("flushes queued identify before a routed journey start") {
+                    mockNetworkQueue = NuxieNetworkQueue(
+                        flushAt: 100,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 10,
+                        apiClient: mockNuxieApi
+                    )
+                    let routingJourneyService = RoutingJourneyStartService(
+                        eventService: eventService,
+                        delayBeforeJourneyStartNanoseconds: 20_000_000
+                    )
+                    try await eventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: routingJourneyService
+                    )
+                    await mockNuxieApi.setTrackEventResponse(.success())
+
+                    mockIdentityService.reset(keepAnonymousId: false)
+                    mockIdentityService.setAnonymousId("anon-1")
+
+                    eventService.track("paywall_trigger", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+
+                    mockIdentityService.setDistinctId("user-1")
+                    eventService.track(
+                        "$identify",
+                        properties: [
+                            "distinct_id": "user-1",
+                            "$anon_distinct_id": "anon-1"
+                        ],
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil
+                    )
+                    await eventService.drain()
+
+                    let sentEvents = await mockNuxieApi.sentEvents
+                    expect(sentEvents.map(\.name)).to(equal([
+                        "paywall_trigger",
+                        "$identify",
+                        "$journey_start"
+                    ]))
+                    expect(sentEvents.map(\.distinctId)).to(equal([
+                        "anon-1",
+                        "user-1",
+                        "user-1"
+                    ]))
+                }
             }
 
             // MARK: - Error Handling
@@ -384,9 +431,11 @@ class TrackWithResponseMockSessionService: SessionServiceProtocol {
 
 private final class RoutingJourneyStartService: JourneyServiceProtocol {
     private let eventService: EventServiceProtocol
+    private let delayBeforeJourneyStartNanoseconds: UInt64
 
-    init(eventService: EventServiceProtocol) {
+    init(eventService: EventServiceProtocol, delayBeforeJourneyStartNanoseconds: UInt64 = 0) {
         self.eventService = eventService
+        self.delayBeforeJourneyStartNanoseconds = delayBeforeJourneyStartNanoseconds
     }
 
     func startJourney(for campaign: Campaign, distinctId: String, originEventId: String?) async -> Journey? {
@@ -398,6 +447,11 @@ private final class RoutingJourneyStartService: JourneyServiceProtocol {
     func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {}
 
     func handleEvent(_ event: NuxieEvent) async {
+        guard event.name == "paywall_trigger" else { return }
+
+        if delayBeforeJourneyStartNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayBeforeJourneyStartNanoseconds)
+        }
         _ = try? await eventService.trackWithResponse(
             "$journey_start",
             properties: ["origin_event_id": event.id],
