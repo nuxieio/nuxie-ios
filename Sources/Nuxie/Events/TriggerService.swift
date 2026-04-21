@@ -59,6 +59,12 @@ public actor TriggerService: TriggerServiceProtocol {
       let eventId = nuxieEvent.id
       let gatePlan = response.gatePlan()
       let mode = mode(for: gatePlan)
+      let terminalGateFlowCampaignId: String? = {
+        guard let gatePlan, case .showFlow = gatePlan.decision, let flowId = gatePlan.flowId else {
+          return nil
+        }
+        return "flow:\(flowId)"
+      }()
 
       let broker = triggerBroker
       let shouldCompleteUpdate: (TriggerUpdate) -> Bool = { update in
@@ -69,8 +75,10 @@ public actor TriggerService: TriggerServiceProtocol {
           switch decision {
           case .allowedImmediate, .deniedImmediate, .noMatch:
             return true
-          case .suppressed, .flowShown:
+          case .suppressed:
             return mode == .flow
+          case .flowShown(let ref):
+            return ref.campaignId == terminalGateFlowCampaignId
           default:
             return false
           }

@@ -6,11 +6,13 @@ import Foundation
 
 public actor MockTriggerService: TriggerServiceProtocol {
     private var updatesToEmit: [TriggerUpdate] = []
+    private var updatesToEmitAfterReturn: [TriggerUpdate] = []
 
     public init() {}
 
-    public func setUpdates(_ updates: [TriggerUpdate]) {
+    public func setUpdates(_ updates: [TriggerUpdate], afterReturn: [TriggerUpdate] = []) {
         updatesToEmit = updates
+        updatesToEmitAfterReturn = afterReturn
     }
 
     public func trigger(
@@ -20,9 +22,22 @@ public actor MockTriggerService: TriggerServiceProtocol {
         userPropertiesSetOnce: [String: Any]?,
         handler: @escaping (TriggerUpdate) -> Void
     ) async {
-        for update in updatesToEmit {
+        let immediateUpdates = updatesToEmit
+        let delayedUpdates = updatesToEmitAfterReturn
+
+        for update in immediateUpdates {
             await MainActor.run {
                 handler(update)
+            }
+        }
+
+        guard !delayedUpdates.isEmpty else { return }
+        Task {
+            for update in delayedUpdates {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                await MainActor.run {
+                    handler(update)
+                }
             }
         }
     }

@@ -235,6 +235,7 @@ public final class NuxieSDK {
     let triggerService = container.triggerService()
     var continuation: AsyncStream<TriggerUpdate>.Continuation?
     var didFinish = false
+    var isWaitingForJourneyCompletion = false
 
     func finishStream() {
       guard !didFinish else { return }
@@ -261,11 +262,16 @@ public final class NuxieSDK {
         handler?(update)
         continuation?.yield(update)
         if NuxieSDK.isTerminalTriggerUpdate(update) {
+          isWaitingForJourneyCompletion = false
           finishStream()
+        } else if NuxieSDK.opensJourneyCompletion(update) {
+          isWaitingForJourneyCompletion = true
         }
       }
 
-      finishStream()
+      if !isWaitingForJourneyCompletion {
+        finishStream()
+      }
     }
 
     return TriggerHandle(stream: stream) {
@@ -296,6 +302,16 @@ public final class NuxieSDK {
       }
     case .journey:
       return true
+    }
+  }
+
+  private static func opensJourneyCompletion(_ update: TriggerUpdate) -> Bool {
+    guard case .decision(let decision) = update else { return false }
+    switch decision {
+    case .journeyStarted, .journeyResumed:
+      return true
+    default:
+      return false
     }
   }
 
