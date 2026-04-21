@@ -696,7 +696,9 @@ public final class NuxieSDK {
     }
 
     let profileService = container.profileService()
-    return try await profileService.refetchProfile()
+    let profile = try await profileService.refetchProfile()
+    await container.featureService().syncFeatureInfo()
+    return profile
   }
 
   // MARK: - Event System Public API
@@ -904,9 +906,13 @@ public final class NuxieSDK {
       userPropertiesSetOnce: nil
     )
 
-    // Decrement local balance for immediate UI feedback
-    Task { @MainActor in
-      features.decrementBalance(featureId, amount: Int(amount))
+    // Decrement local balance for immediate UI feedback via the centralized feature state.
+    Task {
+      await container.featureStateService().applyOptimisticUsage(
+        featureId: featureId,
+        amount: Int(amount),
+        entityId: entityId
+      )
     }
   }
 
@@ -973,9 +979,11 @@ public final class NuxieSDK {
 
     // Update local balance from server response
     if let usage = response.usage, let remaining = usage.remaining {
-      await MainActor.run {
-        features.setBalance(featureId, balance: Int(remaining))
-      }
+      await container.featureStateService().applyConfirmedUsage(
+        featureId: featureId,
+        remainingBalance: Int(remaining),
+        entityId: entityId
+      )
     }
 
     // Build result from response

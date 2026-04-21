@@ -83,8 +83,13 @@ extension Container {
       .scope(.sdk)
   }
 
-  var featureService: Factory<FeatureServiceProtocol> {
+  var featureStateService: Factory<FeatureService> {
     self { FeatureService() }
+      .scope(.sdk)
+  }
+
+  var featureService: Factory<FeatureServiceProtocol> {
+    self { self.featureStateService() }
       .scope(.sdk)
   }
 
