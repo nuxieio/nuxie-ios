@@ -314,7 +314,7 @@ public class MockEventService: EventServiceProtocol {
 
     private var _trackWithResponseResult: EventResponse?
     private var _trackWithResponseError: Error?
-    private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?)] = []
+    private var _trackWithResponseCalls: [(event: String, properties: [String: Any]?, flushPendingEvents: Bool)] = []
     private var _trackForTriggerCalls: [(event: String, properties: [String: Any]?, distinctIdOverride: String?)] = []
     private var _trackForTriggerDelayNanoseconds: UInt64 = 0
     
@@ -328,7 +328,7 @@ public class MockEventService: EventServiceProtocol {
         set { lock.withLock { _trackWithResponseError = newValue } }
     }
     
-    public private(set) var trackWithResponseCalls: [(event: String, properties: [String: Any]?)] {
+    public private(set) var trackWithResponseCalls: [(event: String, properties: [String: Any]?, flushPendingEvents: Bool)] {
         get { lock.withLock { _trackWithResponseCalls } }
         set { lock.withLock { _trackWithResponseCalls = newValue } }
     }
@@ -419,8 +419,24 @@ public class MockEventService: EventServiceProtocol {
         _ event: String,
         properties: [String: Any]?
     ) async throws -> EventResponse {
+        try await trackWithResponse(
+            event,
+            properties: properties,
+            flushPendingEvents: true
+        )
+    }
+
+    public func trackWithResponse(
+        _ event: String,
+        properties: [String: Any]?,
+        flushPendingEvents: Bool
+    ) async throws -> EventResponse {
         lock.withLock {
-            _trackWithResponseCalls.append((event: event, properties: properties))
+            _trackWithResponseCalls.append((
+                event: event,
+                properties: properties,
+                flushPendingEvents: flushPendingEvents
+            ))
         }
 
         let (result, error): (EventResponse?, Error?) = lock.withLock {

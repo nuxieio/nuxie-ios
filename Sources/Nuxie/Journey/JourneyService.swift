@@ -184,14 +184,16 @@ public actor JourneyService: JourneyServiceProtocol {
     return await startJourneyInternal(
       for: campaign,
       distinctId: distinctId,
-      originEventId: originEventId
+      originEventId: originEventId,
+      flushJourneyStartPendingEvents: true
     )
   }
 
   private func startJourneyInternal(
     for campaign: Campaign,
     distinctId: String,
-    originEventId: String? = nil
+    originEventId: String? = nil,
+    flushJourneyStartPendingEvents: Bool = true
   ) async -> Journey? {
     let flowId = campaign.flowId
 
@@ -214,7 +216,8 @@ public actor JourneyService: JourneyServiceProtocol {
           "campaign_id": campaign.id,
           "flow_id": campaign.flowId,
           "entry_node_id": entryScreenId as Any,
-        ]
+        ],
+        flushPendingEvents: flushJourneyStartPendingEvents
       )
     } catch {
       LogWarning("JourneyService: Failed to persist journey start: \(error)")
@@ -300,12 +303,23 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   public func handleEvent(_ event: NuxieEvent) async {
-    _ = await handleEventForTrigger(event)
+    _ = await handleEvent(event, flushJourneyStartPendingEvents: false)
   }
 
   public func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+    return await handleEvent(event, flushJourneyStartPendingEvents: true)
+  }
+
+  private func handleEvent(
+    _ event: NuxieEvent,
+    flushJourneyStartPendingEvents: Bool
+  ) async -> [JourneyTriggerResult] {
     guard let campaigns = await getAllCampaigns(for: event.distinctId) else { return [] }
-    let results = await startJourneysMatchingEvent(event, campaigns: campaigns)
+    let results = await startJourneysMatchingEvent(
+      event,
+      campaigns: campaigns,
+      flushJourneyStartPendingEvents: flushJourneyStartPendingEvents
+    )
     await processActiveJourneys(
       for: event,
       campaigns: campaigns,
@@ -689,7 +703,11 @@ public actor JourneyService: JourneyServiceProtocol {
       await getAllCampaigns(for: scopedEvent.distinctId)
     }
     if let campaigns {
-      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let results = await startJourneysMatchingEvent(
+        scopedEvent,
+        campaigns: campaigns,
+        flushJourneyStartPendingEvents: true
+      )
       let startedJourneyIds = Set(results.compactMap { result -> String? in
         guard case .started(let startedJourney) = result else { return nil }
         return startedJourney.id
@@ -822,7 +840,11 @@ public actor JourneyService: JourneyServiceProtocol {
       )
     }
     if let campaigns {
-      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let results = await startJourneysMatchingEvent(
+        scopedEvent,
+        campaigns: campaigns,
+        flushJourneyStartPendingEvents: true
+      )
       let startedJourneyIds = Set(results.compactMap { result -> String? in
         guard case .started(let startedJourney) = result else { return nil }
         return startedJourney.id
@@ -1245,7 +1267,8 @@ public actor JourneyService: JourneyServiceProtocol {
 
   private func startJourneysMatchingEvent(
     _ event: NuxieEvent,
-    campaigns: [Campaign]
+    campaigns: [Campaign],
+    flushJourneyStartPendingEvents: Bool
   ) async -> [JourneyTriggerResult] {
     var results: [JourneyTriggerResult] = []
 
@@ -1260,7 +1283,8 @@ public actor JourneyService: JourneyServiceProtocol {
       if let journey = await startJourneyInternal(
         for: campaign,
         distinctId: event.distinctId,
-        originEventId: event.id
+        originEventId: event.id,
+        flushJourneyStartPendingEvents: flushJourneyStartPendingEvents
       ) {
         results.append(.started(journey))
       } else {

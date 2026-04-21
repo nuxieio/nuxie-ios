@@ -315,6 +315,28 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 expect(startCall?.properties?["session_id"] as? String).to(equal(journey.id))
                 expect(startCall?.properties?["campaign_id"] as? String).to(equal(campaign.id))
                 expect(startCall?.properties?["flow_id"] as? String).to(equal(campaign.flowId))
+                expect(startCall?.flushPendingEvents).to(beTrue())
+            }
+
+            it("does not enqueue a flush when a routed event starts a journey") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                await service.handleEvent(
+                    NuxieEvent(
+                        id: "evt_origin",
+                        name: "paywall_trigger",
+                        distinctId: distinctId
+                    )
+                )
+
+                let startCall = mocks.eventService.trackWithResponseCalls.first {
+                    $0.event == "$journey_start"
+                }
+                expect(startCall).toNot(beNil())
+                expect(startCall?.flushPendingEvents).to(beFalse())
             }
 
             it("does not start a local journey when server start persistence fails") {
@@ -328,7 +350,16 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     NuxieEvent(id: "evt_origin", name: "paywall_trigger", distinctId: distinctId)
                 )
 
-                expect(results).to(beEmpty())
+                let started = results.contains { result in
+                    if case .started = result { return true }
+                    return false
+                }
+                let suppressedStartFailure = results.contains { result in
+                    if case .suppressed(.unknown("start_failed")) = result { return true }
+                    return false
+                }
+                expect(started).to(beFalse())
+                expect(suppressedStartFailure).to(beTrue())
                 await expect {
                     await service.getActiveJourneys(for: distinctId)
                 }.toEventually(beEmpty(), timeout: .seconds(2))

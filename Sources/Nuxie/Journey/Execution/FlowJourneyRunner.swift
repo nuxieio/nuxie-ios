@@ -2064,17 +2064,26 @@ final class FlowJourneyRunner {
     private func sendViewModelInit() {
         guard let controller = viewController else { return }
         warnConvertersIfNeeded()
+        let encodedViewModels = encodeJSON(remoteFlow.viewModels) ?? []
+        let encodedInstances = encodeJSON(viewModels.allInstances()) ?? []
+        let converters = remoteFlow.converters?.mapValues { value in
+            value.mapValues { $0.value }
+        } ?? [:]
+        let screenDefaults = viewModels.screenDefaultsPayload()
         let payload: [String: Any] = [
             "schemaVersion": 2,
+            "viewModels": encodedViewModels,
+            "instances": encodedInstances,
+            "viewModelInstances": encodedInstances,
+            "converters": converters,
+            "screenDefaults": screenDefaults,
             "schema": [
-                "viewModels": encodeJSON(remoteFlow.viewModels) ?? [],
-                "converters": remoteFlow.converters?.mapValues { value in
-                    value.mapValues { $0.value }
-                } ?? [:],
+                "viewModels": encodedViewModels,
+                "converters": converters,
             ],
             "state": [
-                "viewModelInstances": encodeJSON(viewModels.allInstances()) ?? [],
-                "screenDefaults": viewModels.screenDefaultsPayload(),
+                "viewModelInstances": encodedInstances,
+                "screenDefaults": screenDefaults,
             ],
         ]
 

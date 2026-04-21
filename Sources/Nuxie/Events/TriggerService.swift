@@ -67,8 +67,10 @@ public actor TriggerService: TriggerServiceProtocol {
           return true
         case .decision(let decision):
           switch decision {
-          case .allowedImmediate, .deniedImmediate, .noMatch, .suppressed:
+          case .allowedImmediate, .deniedImmediate, .noMatch:
             return true
+          case .suppressed, .flowShown:
+            return mode == .flow
           default:
             return false
           }
@@ -97,7 +99,7 @@ public actor TriggerService: TriggerServiceProtocol {
         eventId: eventId
       )
 
-      if emittedJourneyDecision {
+      if emittedJourneyDecision && (gatePlan == nil || mode == .flow) {
         return
       }
 

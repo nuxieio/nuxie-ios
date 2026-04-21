@@ -120,6 +120,15 @@ public protocol EventServiceProtocol {
     properties: [String: Any]?
   ) async throws -> EventResponse
 
+  /// Track an event synchronously, optionally flushing queued events before the round trip.
+  /// Used by re-entrant routing paths that cannot enqueue a flush onto the EventService worker
+  /// they are already blocking.
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushPendingEvents: Bool
+  ) async throws -> EventResponse
+
   /// Reassign events from one user to another (for anonymous → identified transitions)
   /// - Parameters:
   ///   - fromUserId: Old user ID (typically anonymous)
@@ -265,6 +274,14 @@ public extension EventServiceProtocol {
       persistToHistory: true,
       distinctIdOverride: nil
     )
+  }
+
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushPendingEvents: Bool
+  ) async throws -> EventResponse {
+    try await trackWithResponse(event, properties: properties)
   }
 }
 
@@ -421,6 +438,18 @@ public class EventService: EventServiceProtocol {
     _ event: String,
     properties: [String: Any]? = nil
   ) async throws -> EventResponse {
+    try await trackWithResponse(
+      event,
+      properties: properties,
+      flushPendingEvents: true
+    )
+  }
+
+  public func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    flushPendingEvents: Bool
+  ) async throws -> EventResponse {
     guard !event.isEmpty else {
       throw NuxieError.invalidConfiguration("Event name cannot be empty")
     }
@@ -428,9 +457,11 @@ public class EventService: EventServiceProtocol {
     // Wait for initialization
     await ready.wait()
 
-    // Flush pending events first to ensure ordering
-    // (any queued events should reach the server before this synchronous one)
-    _ = await flushEvents()
+    if flushPendingEvents {
+      // Flush pending events first to ensure ordering
+      // (any queued events should reach the server before this synchronous one)
+      _ = await flushEvents()
+    }
 
     // Get current distinct ID
     let distinctId = identityService.getDistinctId()

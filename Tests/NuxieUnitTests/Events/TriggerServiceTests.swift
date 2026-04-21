@@ -98,6 +98,83 @@ final class TriggerServiceTests: AsyncSpec {
                 expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
             }
 
+            it("keeps handling immediate gate plans after a journey starts") {
+                let journey = TestJourneyBuilder().build()
+                await mockJourneyService.setTriggerResults([.started(journey)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "allow"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-allow",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                let expectedRef = JourneyRef(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId
+                )
+                expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
+                expect(updates).to(contain(.decision(.allowedImmediate)))
+            }
+
+            it("keeps handling require_feature gate plans after a journey starts") {
+                let journey = TestJourneyBuilder().build()
+                await mockJourneyService.setTriggerResults([.started(journey)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "require_feature",
+                            "featureId": "pro",
+                            "policy": "cache_only"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-feature",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                let info = await MainActor.run { Container.shared.featureInfo() }
+                await MainActor.run {
+                    info.update([
+                        "pro": FeatureAccess.withBalance(1, unlimited: false, type: .metered)
+                    ])
+                }
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                let expectedRef = JourneyRef(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId
+                )
+                expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
+                expect(updates).to(contain(.entitlement(.allowed(source: .cache))))
+            }
+
             it("emits entitlement allowed for cache_only gate plan with cached access") {
                 let payload: [String: AnyCodable] = [
                     "gate": AnyCodable([

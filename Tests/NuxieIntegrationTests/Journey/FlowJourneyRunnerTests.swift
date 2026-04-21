@@ -165,10 +165,19 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let viewModels = schema?["viewModels"] as? [[String: Any]]
                 let instances = state?["viewModelInstances"] as? [[String: Any]]
                 let screenDefaults = state?["screenDefaults"] as? [String: Any]
+                let legacyViewModels = payload?["viewModels"] as? [[String: Any]]
+                let legacyInstances = payload?["instances"] as? [[String: Any]]
+                let legacyViewModelInstances = payload?["viewModelInstances"] as? [[String: Any]]
+                let legacyScreenDefaults = payload?["screenDefaults"] as? [String: Any]
 
                 expect(viewModels?.first?["id"] as? String).to(equal("vm-1"))
                 expect(instances?.first?["viewModelId"] as? String).to(equal("vm-1"))
                 expect(screenDefaults?["screen-1"]).toNot(beNil())
+                expect(legacyViewModels?.first?["id"] as? String).to(equal("vm-1"))
+                expect(legacyInstances?.first?["viewModelId"] as? String).to(equal("vm-1"))
+                expect(legacyViewModelInstances?.first?["viewModelId"] as? String).to(equal("vm-1"))
+                expect(legacyScreenDefaults?["screen-1"]).toNot(beNil())
+                expect(payload?["converters"]).toNot(beNil())
             }
 
             it("dispatches global event interactions") {
