@@ -206,17 +206,22 @@ public actor JourneyService: JourneyServiceProtocol {
     let flow = try? await flowService.fetchFlow(id: flowId)
     let entryScreenId = flow?.remoteFlow.screens.first?.id
 
-    eventService.track(
-      "$journey_start",
-      properties: [
-        "session_id": journey.id,
-        "campaign_id": campaign.id,
-        "flow_id": campaign.flowId,
-        "entry_node_id": entryScreenId as Any,
-      ],
-      userProperties: nil,
-      userPropertiesSetOnce: nil
-    )
+    do {
+      _ = try await eventService.trackWithResponse(
+        "$journey_start",
+        properties: [
+          "session_id": journey.id,
+          "campaign_id": campaign.id,
+          "flow_id": campaign.flowId,
+          "entry_node_id": entryScreenId as Any,
+        ]
+      )
+    } catch {
+      LogWarning("JourneyService: Failed to persist journey start: \(error)")
+      journey.cancel()
+      inMemoryJourneysById.removeValue(forKey: journey.id)
+      return nil
+    }
 
     eventService.track(
       JourneyEvents.journeyStarted,

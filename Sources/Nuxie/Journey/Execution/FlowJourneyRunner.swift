@@ -2065,12 +2065,17 @@ final class FlowJourneyRunner {
         guard let controller = viewController else { return }
         warnConvertersIfNeeded()
         let payload: [String: Any] = [
-            "viewModels": encodeJSON(remoteFlow.viewModels) ?? [],
-            "instances": encodeJSON(viewModels.allInstances()) ?? [],
-            "converters": remoteFlow.converters?.mapValues { value in
-                value.mapValues { $0.value }
-            } ?? [:],
-            "screenDefaults": viewModels.screenDefaultsPayload(),
+            "schemaVersion": 2,
+            "schema": [
+                "viewModels": encodeJSON(remoteFlow.viewModels) ?? [],
+                "converters": remoteFlow.converters?.mapValues { value in
+                    value.mapValues { $0.value }
+                } ?? [:],
+            ],
+            "state": [
+                "viewModelInstances": encodeJSON(viewModels.allInstances()) ?? [],
+                "screenDefaults": viewModels.screenDefaultsPayload(),
+            ],
         ]
 
         Task { @MainActor in

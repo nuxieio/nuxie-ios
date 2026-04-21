@@ -33,7 +33,8 @@ final class FlowViewModelRuntimeTests: QuickSpec {
         func makeRemoteFlow(
             viewModels: [ViewModel],
             viewModelInstances: [ViewModelInstance]? = nil,
-            defaultViewModelId: String? = nil
+            defaultViewModelId: String? = nil,
+            screens: [RemoteFlowScreen]? = nil
         ) -> RemoteFlow {
             return RemoteFlow(
                 id: "flow-runtime",
@@ -46,7 +47,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                         files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
                     )
                 ),
-                screens: [
+                screens: screens ?? [
                     RemoteFlowScreen(
                         id: "screen-1",
                         defaultViewModelId: defaultViewModelId ?? viewModels.first?.id,
@@ -92,6 +93,165 @@ final class FlowViewModelRuntimeTests: QuickSpec {
 
                 let flag = runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 1])), screenId: "screen-1") as? Bool
                 expect(flag).to(equal(false))
+            }
+
+            it("prefers the current screen instance for shared view model paths") {
+                let selectedProductProperty = makeProperty(type: .string, id: 9, defaultValue: AnyCodable(""))
+                let paywallProperty = makeProperty(
+                    type: .object,
+                    id: 10,
+                    schema: ["selectedProductId": selectedProductProperty]
+                )
+                let viewModel = ViewModel(
+                    id: "vm-runtime-root",
+                    name: "Runtime",
+                    viewModelPathId: 42,
+                    properties: ["paywall": paywallProperty]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    viewModels: [viewModel],
+                    viewModelInstances: [
+                        ViewModelInstance(
+                            viewModelId: viewModel.id,
+                            instanceId: "welcome-instance",
+                            name: "Welcome",
+                            values: [
+                                "paywall": AnyCodable([
+                                    "selectedProductId": ""
+                                ])
+                            ]
+                        ),
+                        ViewModelInstance(
+                            viewModelId: viewModel.id,
+                            instanceId: "paywall-instance",
+                            name: "Paywall",
+                            values: [
+                                "paywall": AnyCodable([
+                                    "selectedProductId": "draft:paywall:0"
+                                ])
+                            ]
+                        )
+                    ],
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "welcome-screen",
+                            defaultViewModelId: viewModel.id,
+                            defaultInstanceId: "welcome-instance"
+                        ),
+                        RemoteFlowScreen(
+                            id: "paywall-screen",
+                            defaultViewModelId: viewModel.id,
+                            defaultInstanceId: "paywall-instance"
+                        )
+                    ]
+                )
+                let runtime = FlowViewModelRuntime(remoteFlow: remoteFlow)
+
+                let productId = runtime.getValue(
+                    path: .ids(VmPathIds(pathIds: [42, 10, 9])),
+                    screenId: "paywall-screen"
+                ) as? String
+
+                expect(productId).to(equal("draft:paywall:0"))
+            }
+
+            it("prefers the current screen root for authored runtime path ids") {
+                let sharedTitleProperty = makeProperty(type: .string, id: 1, defaultValue: AnyCodable(""))
+                let reasonProperty = makeProperty(type: .string, id: 2, defaultValue: AnyCodable(""))
+                let sharedRoot = ViewModel(
+                    id: "vm_runtime_root",
+                    name: "Runtime",
+                    viewModelPathId: 42,
+                    properties: ["title": sharedTitleProperty]
+                )
+                let surveyRoot = ViewModel(
+                    id: "vm_runtime_root_survey",
+                    name: "Runtime Survey",
+                    viewModelPathId: 42,
+                    properties: ["reason": reasonProperty]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    viewModels: [sharedRoot, surveyRoot],
+                    viewModelInstances: [
+                        ViewModelInstance(
+                            viewModelId: sharedRoot.id,
+                            instanceId: "shared-instance",
+                            name: "Shared",
+                            values: ["title": AnyCodable("Shared")]
+                        ),
+                        ViewModelInstance(
+                            viewModelId: surveyRoot.id,
+                            instanceId: "survey-instance",
+                            name: "Survey",
+                            values: ["reason": AnyCodable("Too expensive")]
+                        )
+                    ],
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "survey-screen",
+                            defaultViewModelId: surveyRoot.id,
+                            defaultInstanceId: "survey-instance"
+                        )
+                    ]
+                )
+                let runtime = FlowViewModelRuntime(remoteFlow: remoteFlow)
+
+                let reason = runtime.getValue(
+                    path: .ids(VmPathIds(pathIds: [42, 2])),
+                    screenId: "survey-screen"
+                ) as? String
+
+                expect(reason).to(equal("Too expensive"))
+            }
+
+            it("resolves relative name paths against the repeated item instance") {
+                let rootProperty = makeProperty(type: .string, id: 1, defaultValue: AnyCodable(""))
+                let valueProperty = makeProperty(type: .string, id: 20, defaultValue: AnyCodable(""))
+                let rootViewModel = ViewModel(
+                    id: "vm-runtime-root",
+                    name: "Runtime",
+                    viewModelPathId: 42,
+                    properties: ["title": rootProperty]
+                )
+                let itemViewModel = ViewModel(
+                    id: "vm-source-local-scalar-reasons-item",
+                    name: "REASONS item",
+                    viewModelPathId: nil,
+                    properties: ["value": valueProperty]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    viewModels: [rootViewModel, itemViewModel],
+                    viewModelInstances: [
+                        ViewModelInstance(
+                            viewModelId: rootViewModel.id,
+                            instanceId: "screen-root",
+                            name: "Survey",
+                            values: ["title": AnyCodable("Before you go")]
+                        ),
+                        ViewModelInstance(
+                            viewModelId: itemViewModel.id,
+                            instanceId: "reason-0",
+                            name: nil,
+                            values: ["value": AnyCodable("Too expensive")]
+                        )
+                    ],
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "survey-screen",
+                            defaultViewModelId: rootViewModel.id,
+                            defaultInstanceId: "screen-root"
+                        )
+                    ]
+                )
+                let runtime = FlowViewModelRuntime(remoteFlow: remoteFlow)
+
+                let reason = runtime.getValue(
+                    path: .ids(VmPathIds(pathIds: [1113510858], isRelative: true, nameBased: true)),
+                    screenId: "survey-screen",
+                    instanceId: "reason-0"
+                ) as? String
+
+                expect(reason).to(equal("Too expensive"))
             }
 
             it("supports list operations via pathIds") {

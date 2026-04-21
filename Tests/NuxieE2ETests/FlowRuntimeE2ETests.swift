@@ -1227,7 +1227,11 @@ final class FlowRuntimeE2ESpec: QuickSpec {
                                         return;
                                       }
                                       if (envelope.type === "runtime/view_model_init") {
-                                        var instances = envelope.payload && envelope.payload.instances;
+                                        if (!envelope.payload || envelope.payload.schemaVersion !== 2) {
+                                          setVmText("unsupported-init");
+                                          return;
+                                        }
+                                        var instances = envelope.payload.state && envelope.payload.state.viewModelInstances;
                                         var first = instances && instances[0];
                                         var title = first && first.values && first.values.title;
                                         if (title !== undefined) setVmText(title);

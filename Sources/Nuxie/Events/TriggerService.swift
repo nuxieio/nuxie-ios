@@ -97,9 +97,13 @@ public actor TriggerService: TriggerServiceProtocol {
         eventId: eventId
       )
 
+      if emittedJourneyDecision {
+        return
+      }
+
       if let gatePlan {
         await handleGatePlan(gatePlan, eventId: eventId)
-      } else if !emittedJourneyDecision {
+      } else {
         await broker.emit(eventId: eventId, update: .decision(.noMatch))
       }
     } catch {
