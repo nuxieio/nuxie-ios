@@ -42,6 +42,12 @@ private struct TrackPayload {
   let forcedDistinctId: String  // snapshot at call site
 }
 
+public enum EventFlushStrategy: Equatable {
+  case none
+  case eventService
+  case networkQueue
+}
+
 /// Protocol for event routing operations
 public protocol EventServiceProtocol {
   /// Configure the router with network queue, journey service, context builder and configuration
@@ -121,12 +127,17 @@ public protocol EventServiceProtocol {
   ) async throws -> EventResponse
 
   /// Track an event synchronously, optionally flushing queued events before the round trip.
-  /// Used by re-entrant routing paths that cannot enqueue a flush onto the EventService worker
-  /// they are already blocking.
   func trackWithResponse(
     _ event: String,
     properties: [String: Any]?,
     flushPendingEvents: Bool
+  ) async throws -> EventResponse
+
+  /// Track an event synchronously, using an explicit pending-event flush strategy.
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushStrategy: EventFlushStrategy
   ) async throws -> EventResponse
 
   /// Reassign events from one user to another (for anonymous → identified transitions)
@@ -283,12 +294,22 @@ public extension EventServiceProtocol {
   ) async throws -> EventResponse {
     try await trackWithResponse(event, properties: properties)
   }
+
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushStrategy: EventFlushStrategy
+  ) async throws -> EventResponse {
+    try await trackWithResponse(
+      event,
+      properties: properties,
+      flushPendingEvents: flushStrategy != .none
+    )
+  }
 }
 
 /// Dual-purpose event service that handles local storage and network queuing
 public class EventService: EventServiceProtocol {
-  @TaskLocal private static var isProcessingWorkerTrack = false
-
   private let eventStore: EventStoreProtocol
   private let ready = StoreReadySignal()
 
@@ -451,6 +472,18 @@ public class EventService: EventServiceProtocol {
     properties: [String: Any]? = nil,
     flushPendingEvents: Bool
   ) async throws -> EventResponse {
+    try await trackWithResponse(
+      event,
+      properties: properties,
+      flushStrategy: flushPendingEvents ? .eventService : .none
+    )
+  }
+
+  public func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    flushStrategy: EventFlushStrategy
+  ) async throws -> EventResponse {
     guard !event.isEmpty else {
       throw NuxieError.invalidConfiguration("Event name cannot be empty")
     }
@@ -458,14 +491,18 @@ public class EventService: EventServiceProtocol {
     // Wait for initialization
     await ready.wait()
 
-    if flushPendingEvents {
-      if Self.isProcessingWorkerTrack {
-        // Re-entrant journey starts are already blocking the EventService worker. The routed
-        // event has been enqueued to the network queue, so flush that queue directly.
-        _ = await networkQueue?.flush() ?? false
-      } else {
-        // Flush pending EventService commands first to ensure ordering.
-        _ = await flushEvents()
+    switch flushStrategy {
+    case .none:
+      break
+    case .eventService:
+      // Flush pending EventService commands first to ensure ordering.
+      _ = await flushEvents()
+    case .networkQueue:
+      if let networkQueue {
+        let drained = await networkQueue.flushAll()
+        guard drained else {
+          throw NuxieError.eventRoutingFailed
+        }
       }
     }
 
@@ -704,13 +741,16 @@ public class EventService: EventServiceProtocol {
         switch cmd {
         case .track(let payload):
           guard let self else { return }
-          await EventService.$isProcessingWorkerTrack.withValue(true) {
-            await self.handleTrack(payload)
-          }
+          await self.handleTrack(payload)
 
         case .flush(let cont):
-          let ok = await self?.networkQueue?.flush() ?? false
-          cont.resume(returning: ok)
+          guard let queue = self?.networkQueue else {
+            cont.resume(returning: false)
+            break
+          }
+          let hadEvents = await queue.getQueueSize() > 0
+          let ok = await queue.flushAll()
+          cont.resume(returning: hadEvents && ok)
 
         case .barrier(let cont):
           // All prior commands are processed when we reach here

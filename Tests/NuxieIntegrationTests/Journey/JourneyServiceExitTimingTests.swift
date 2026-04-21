@@ -316,6 +316,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 expect(startCall?.properties?["campaign_id"] as? String).to(equal(campaign.id))
                 expect(startCall?.properties?["flow_id"] as? String).to(equal(campaign.flowId))
                 expect(startCall?.flushPendingEvents).to(beTrue())
+                expect(startCall?.flushStrategy).to(equal(.eventService))
             }
 
             it("flushes pending events when a routed event starts a journey") {
@@ -337,6 +338,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }
                 expect(startCall).toNot(beNil())
                 expect(startCall?.flushPendingEvents).to(beTrue())
+                expect(startCall?.flushStrategy).to(equal(.networkQueue))
             }
 
             it("does not start a local journey when server start persistence fails") {

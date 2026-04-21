@@ -147,6 +147,22 @@ final class TrackWithResponseTests: AsyncSpec {
                 }
 
                 it("flushes a routed triggering event before sending its journey start") {
+                    mockNetworkQueue = NuxieNetworkQueue(
+                        flushAt: 100,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 2,
+                        apiClient: mockNuxieApi
+                    )
+                    try await eventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: nil
+                    )
+
+                    for index in 0..<5 {
+                        eventService.track("backlog_\(index)", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    }
+                    await eventService.drain()
+
                     let routingJourneyService = RoutingJourneyStartService(eventService: eventService)
                     try await eventService.configure(
                         networkQueue: mockNetworkQueue,
@@ -158,7 +174,15 @@ final class TrackWithResponseTests: AsyncSpec {
                     await eventService.drain()
 
                     let sentEventNames = await mockNuxieApi.sentEvents.map(\.name)
-                    expect(sentEventNames).to(equal(["paywall_trigger", "$journey_start"]))
+                    expect(sentEventNames).to(equal([
+                        "backlog_0",
+                        "backlog_1",
+                        "backlog_2",
+                        "backlog_3",
+                        "backlog_4",
+                        "paywall_trigger",
+                        "$journey_start"
+                    ]))
                 }
             }
 
@@ -377,7 +401,7 @@ private final class RoutingJourneyStartService: JourneyServiceProtocol {
         _ = try? await eventService.trackWithResponse(
             "$journey_start",
             properties: ["origin_event_id": event.id],
-            flushPendingEvents: true
+            flushStrategy: .networkQueue
         )
     }
 
