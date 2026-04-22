@@ -114,6 +114,14 @@ final class IRTestEventService: EventServiceProtocol, IREventQueries {
         )
     }
 
+    func trackWithResponse(
+        _ event: String,
+        properties: [String: Any]?,
+        flushStrategy: EventFlushStrategy
+    ) async throws -> EventResponse {
+        return try await trackWithResponse(event, properties: properties)
+    }
+
     func trackForTrigger(
         _ event: String,
         properties: [String: Any]?,

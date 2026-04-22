@@ -298,18 +298,10 @@ public extension EventServiceProtocol {
     properties: [String: Any]?,
     flushPendingEvents: Bool
   ) async throws -> EventResponse {
-    try await trackWithResponse(event, properties: properties)
-  }
-
-  func trackWithResponse(
-    _ event: String,
-    properties: [String: Any]?,
-    flushStrategy: EventFlushStrategy
-  ) async throws -> EventResponse {
     try await trackWithResponse(
       event,
       properties: properties,
-      flushPendingEvents: flushStrategy != .none
+      flushStrategy: flushPendingEvents ? .eventService : .none
     )
   }
 }
