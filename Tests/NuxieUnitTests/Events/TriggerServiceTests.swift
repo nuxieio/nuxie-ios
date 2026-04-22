@@ -8,6 +8,69 @@ import Quick
 @testable import NuxieTestSupport
 #endif
 
+private actor FlowShownBeforeJourneyDecisionService: JourneyServiceProtocol {
+    private let broker: TriggerBrokerProtocol
+    private let journey: Journey
+    private let finalUpdate: JourneyUpdate
+
+    init(broker: TriggerBrokerProtocol, journey: Journey, finalUpdate: JourneyUpdate) {
+        self.broker = broker
+        self.journey = journey
+        self.finalUpdate = finalUpdate
+    }
+
+    func startJourney(for campaign: Campaign, distinctId: String, originEventId: String?) async -> Journey? {
+        nil
+    }
+
+    func resumeJourney(_ journey: Journey) async {}
+
+    func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {}
+
+    func handleEvent(_ event: NuxieEvent) async {}
+
+    func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+        let ref = JourneyRef(
+            journeyId: journey.id,
+            campaignId: journey.campaignId,
+            flowId: journey.flowId
+        )
+        await broker.emit(eventId: event.id, update: .decision(.flowShown(ref)))
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        let broker = self.broker
+        let finalUpdate = self.finalUpdate
+        let eventId = event.id
+        Task {
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            await broker.emit(eventId: eventId, update: .journey(finalUpdate))
+        }
+
+        return [.started(journey)]
+    }
+
+    func handleSegmentChange(distinctId: String, segments: Set<String>) async {}
+
+    func getActiveJourneys(for distinctId: String) async -> [Journey] {
+        []
+    }
+
+    func checkExpiredTimers() async {}
+
+    func initialize() async {}
+
+    func onAppWillEnterForeground() async {}
+
+    func onAppBecameActive() async {}
+
+    func onAppDidEnterBackground() async {}
+
+    func shutdown() async {}
+
+    func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {}
+}
+
 final class TriggerServiceTests: AsyncSpec {
     override class func spec() {
         var mockEventService: MockEventService!
@@ -96,6 +159,230 @@ final class TriggerServiceTests: AsyncSpec {
                     flowId: journey.flowId
                 )
                 expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
+            }
+
+            it("keeps the broker alive when a journey flowShown arrives before journeyStarted") {
+                let journey = TestJourneyBuilder().build()
+                let expectedRef = JourneyRef(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId
+                )
+                let finalUpdate = JourneyUpdate(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId,
+                    exitReason: .completed,
+                    goalMet: false,
+                    goalMetAt: nil,
+                    durationSeconds: 0.5,
+                    flowExitReason: nil
+                )
+                let broker = Container.shared.triggerBroker()
+                let journeyService = FlowShownBeforeJourneyDecisionService(
+                    broker: broker,
+                    journey: journey,
+                    finalUpdate: finalUpdate
+                )
+                Container.shared.journeyService.register { journeyService }
+                triggerService = TriggerService()
+                mockEventService.trackWithResponseResult = .success()
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                await expect { updates }
+                    .toEventually(contain(.journey(finalUpdate)), timeout: .seconds(2))
+                expect(updates).to(contain(.decision(.flowShown(expectedRef))))
+                expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
+                expect(updates).to(contain(.journey(finalUpdate)))
+            }
+
+            it("keeps the broker alive for mixed journey start and suppression results") {
+                let journey = TestJourneyBuilder().build()
+                await mockJourneyService.setTriggerResults([
+                    .started(journey),
+                    .suppressed(.alreadyActive)
+                ])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: nil,
+                    customer: nil,
+                    eventId: "event-mixed",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                let finalUpdate = JourneyUpdate(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId,
+                    exitReason: .completed,
+                    goalMet: false,
+                    goalMetAt: nil,
+                    durationSeconds: 0.5,
+                    flowExitReason: nil
+                )
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                let eventId = await mockJourneyService.lastHandledEvent?.id
+                expect(eventId).toNot(beNil())
+                if let eventId {
+                    await Container.shared.triggerBroker().emit(eventId: eventId, update: .journey(finalUpdate))
+                }
+
+                expect(updates).to(contain(.decision(.suppressed(.alreadyActive))))
+                expect(updates).to(contain(.journey(finalUpdate)))
+            }
+
+            it("continues show_flow gate plans after local journey suppression") {
+                await mockJourneyService.setTriggerResults([.suppressed(.alreadyActive)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "show_flow",
+                            "flowId": "server-flow"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-flow",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                expect(updates).to(contain(.decision(.suppressed(.alreadyActive))))
+                expect(mockFlowPresentationService.presentFlowCallCount).to(equal(1))
+                expect(mockFlowPresentationService.lastPresentedFlowId).to(equal("server-flow"))
+                let showedServerFlow = updates.contains { update in
+                    guard case .decision(.flowShown(let ref)) = update else { return false }
+                    return ref.campaignId == "flow:server-flow" && ref.flowId == "server-flow"
+                }
+                expect(showedServerFlow).to(beTrue())
+            }
+
+            it("keeps handling immediate gate plans after a journey starts") {
+                let journey = TestJourneyBuilder().build()
+                await mockJourneyService.setTriggerResults([.started(journey)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "allow"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-allow",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                let expectedRef = JourneyRef(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId
+                )
+                expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
+                expect(updates).to(contain(.decision(.allowedImmediate)))
+            }
+
+            it("keeps handling immediate gate plans after a journey suppression") {
+                await mockJourneyService.setTriggerResults([.suppressed(.alreadyActive)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "allow"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-allow",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                expect(updates).to(contain(.decision(.suppressed(.alreadyActive))))
+                expect(updates).to(contain(.decision(.allowedImmediate)))
+            }
+
+            it("keeps handling require_feature gate plans after a journey starts") {
+                let journey = TestJourneyBuilder().build()
+                await mockJourneyService.setTriggerResults([.started(journey)])
+                mockEventService.trackWithResponseResult = EventResponse(
+                    status: "ok",
+                    payload: [
+                        "gate": AnyCodable([
+                            "decision": "require_feature",
+                            "featureId": "pro",
+                            "policy": "cache_only"
+                        ])
+                    ],
+                    customer: nil,
+                    eventId: "event-feature",
+                    message: nil,
+                    featuresMatched: nil,
+                    usage: nil,
+                    journey: nil,
+                    execution: nil
+                )
+
+                let info = await MainActor.run { Container.shared.featureInfo() }
+                await MainActor.run {
+                    info.update([
+                        "pro": FeatureAccess.withBalance(1, unlimited: false, type: .metered)
+                    ])
+                }
+
+                var updates: [TriggerUpdate] = []
+
+                await triggerService.trigger("test_event") { update in
+                    updates.append(update)
+                }
+
+                let expectedRef = JourneyRef(
+                    journeyId: journey.id,
+                    campaignId: journey.campaignId,
+                    flowId: journey.flowId
+                )
+                expect(updates).to(contain(.decision(.journeyStarted(expectedRef))))
+                expect(updates).to(contain(.entitlement(.allowed(source: .cache))))
             }
 
             it("emits entitlement allowed for cache_only gate plan with cached access") {

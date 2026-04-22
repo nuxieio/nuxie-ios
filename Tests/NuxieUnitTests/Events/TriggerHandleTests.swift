@@ -105,6 +105,55 @@ final class TriggerHandleTests: AsyncSpec {
                 let recorded = await recorder.updates
                 expect(recorded).to(equal(updates))
             }
+
+            it("keeps the stream open for a gate result after suppression") {
+                let updates: [TriggerUpdate] = [
+                    .decision(.suppressed(.alreadyActive)),
+                    .decision(.allowedImmediate)
+                ]
+
+                await mockTriggerService.setUpdates(updates)
+
+                var streamed: [TriggerUpdate] = []
+                let handle: Nuxie.TriggerHandle = NuxieSDK.shared.trigger("test_event")
+
+                for await update in handle {
+                    streamed.append(update)
+                }
+
+                expect(streamed).to(equal(updates))
+            }
+
+            it("keeps the stream open for a journey completion emitted after trigger returns") {
+                let journeyRef = JourneyRef(journeyId: "journey-1", campaignId: "campaign-1", flowId: "flow-1")
+                let journeyUpdate = JourneyUpdate(
+                    journeyId: "journey-1",
+                    campaignId: "campaign-1",
+                    flowId: "flow-1",
+                    exitReason: .completed,
+                    goalMet: false,
+                    goalMetAt: nil,
+                    durationSeconds: 1.25,
+                    flowExitReason: nil
+                )
+
+                await mockTriggerService.setUpdates(
+                    [.decision(.journeyStarted(journeyRef))],
+                    afterReturn: [.journey(journeyUpdate)]
+                )
+
+                var streamed: [TriggerUpdate] = []
+                let handle: Nuxie.TriggerHandle = NuxieSDK.shared.trigger("test_event")
+
+                for await update in handle {
+                    streamed.append(update)
+                }
+
+                expect(streamed).to(equal([
+                    .decision(.journeyStarted(journeyRef)),
+                    .journey(journeyUpdate)
+                ]))
+            }
         }
     }
 }

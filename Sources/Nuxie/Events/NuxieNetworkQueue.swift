@@ -33,6 +33,9 @@ public actor NuxieNetworkQueue {
     
     /// Current flush operation (prevents concurrent flushes)
     private var isCurrentlyFlushing = false
+
+    /// Callers waiting for the current flush attempt to finish.
+    private var flushWaiters: [CheckedContinuation<Void, Never>] = []
     
     /// Retry state tracking
     private var retryCount = 0
@@ -118,6 +121,28 @@ public actor NuxieNetworkQueue {
     @discardableResult
     public func flush() async -> Bool {
         return await performFlush(forceSend: true)
+    }
+
+    /// Flush until the queue is empty, waiting for any in-flight flush to finish first.
+    /// Returns false if the queue could not be drained, for example because a retained batch
+    /// entered retry backoff or there is no API client.
+    @discardableResult
+    public func flushAll() async -> Bool {
+        while true {
+            if isCurrentlyFlushing {
+                await waitForCurrentFlush()
+                continue
+            }
+
+            guard !eventQueue.isEmpty else {
+                return true
+            }
+
+            let didFlush = await performFlush(forceSend: true)
+            if !didFlush {
+                return eventQueue.isEmpty
+            }
+        }
     }
     
     /// Get current queue size
@@ -237,6 +262,21 @@ public actor NuxieNetworkQueue {
         
         return true
     }
+
+    private func waitForCurrentFlush() async {
+        guard isCurrentlyFlushing else { return }
+
+        await withCheckedContinuation { continuation in
+            flushWaiters.append(continuation)
+        }
+    }
+
+    private func finishCurrentFlush() {
+        isCurrentlyFlushing = false
+        let waiters = flushWaiters
+        flushWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
     
     
     /// Handle successful batch delivery
@@ -251,7 +291,7 @@ public actor NuxieNetworkQueue {
         nextRetryDate = nil
         
         // Mark as not flushing
-        isCurrentlyFlushing = false
+        finishCurrentFlush()
         
         LogInfo("Successfully delivered \(batch.count) events (queue size: \(eventQueue.count))")
         
@@ -292,7 +332,7 @@ public actor NuxieNetworkQueue {
         }
         
         // Mark as not flushing
-        isCurrentlyFlushing = false
+        finishCurrentFlush()
         
         LogWarning("Partially delivered batch: \(response.processed) processed, \(response.failed) failed")
         
@@ -311,8 +351,6 @@ public actor NuxieNetworkQueue {
     ///   - batch: Failed events
     ///   - error: Delivery error
     private func handleBatchFailure(_ batch: [NuxieEvent], error: Error) async {
-        isCurrentlyFlushing = false
-        
         // Check if this is a permanent failure (4xx errors)
         if isPermanentBatchFailure(error) {
             let batchIds = Set(batch.map { $0.id })
@@ -320,6 +358,7 @@ public actor NuxieNetworkQueue {
             retryCount = 0
             nextRetryDate = nil
             LogWarning("Permanent failure (4xx), dropped \(batch.count) events: \(error)")
+            finishCurrentFlush()
             return
         }
         
@@ -343,6 +382,8 @@ public actor NuxieNetworkQueue {
             
             LogError("Max retries exceeded, dropped \(batch.count) events: \(error)")
         }
+
+        finishCurrentFlush()
     }
 
     private func isPermanentBatchFailure(_ error: Error) -> Bool {

@@ -363,6 +363,52 @@ final class NuxieNetworkQueueTests: AsyncSpec {
                     await expect { await mockApi.lastBatchSent?.count }.to(equal(10)) // maxBatchSize
                     await expect { await queue.getQueueSize() }.to(equal(5)) // Remaining events
                 }
+
+                it("should flush all events across multiple batches") {
+                    queue = NuxieNetworkQueue(
+                        flushAt: 20,
+                        maxBatchSize: 2,
+                        apiClient: mockApi
+                    )
+
+                    let events = (0..<5).map { i in
+                        TestEventBuilder(name: "event_\(i)")
+                            .withDistinctId("user123")
+                            .build()
+                    }
+
+                    for event in events {
+                        await queue.enqueue(event)
+                    }
+
+                    let result = await queue.flushAll()
+
+                    expect(result).to(beTrue())
+                    await expect { await mockApi.sendBatchCallCount }.to(equal(3))
+                    await expect { await queue.getQueueSize() }.to(equal(0))
+                }
+
+                it("should wait for an in-flight flush and drain the remaining tail") {
+                    queue = NuxieNetworkQueue(
+                        flushAt: 2,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 1,
+                        apiClient: mockApi
+                    )
+                    await mockApi.setSendBatchDelay(0.1)
+
+                    await queue.enqueue(TestEventBuilder(name: "event_1").withDistinctId("user123").build())
+                    await queue.enqueue(TestEventBuilder(name: "event_2").withDistinctId("user123").build())
+
+                    await expect { await mockApi.sendBatchCallCount }
+                        .toEventually(equal(1), timeout: .seconds(2))
+
+                    let result = await queue.flushAll()
+
+                    expect(result).to(beTrue())
+                    await expect { await mockApi.sendBatchCallCount }.to(equal(2))
+                    await expect { await queue.getQueueSize() }.to(equal(0))
+                }
                 
                 it("should handle concurrent flush attempts") {
                     let events = (0..<5).map { i in

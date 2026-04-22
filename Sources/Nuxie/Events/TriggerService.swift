@@ -59,16 +59,27 @@ public actor TriggerService: TriggerServiceProtocol {
       let eventId = nuxieEvent.id
       let gatePlan = response.gatePlan()
       let mode = mode(for: gatePlan)
+      let terminalGateFlowCampaignId: String? = {
+        guard let gatePlan, case .showFlow = gatePlan.decision, let flowId = gatePlan.flowId else {
+          return nil
+        }
+        return "flow:\(flowId)"
+      }()
 
       let broker = triggerBroker
+      var hasStartedJourney = false
       let shouldCompleteUpdate: (TriggerUpdate) -> Bool = { update in
         switch update {
         case .error:
           return true
         case .decision(let decision):
           switch decision {
-          case .allowedImmediate, .deniedImmediate, .noMatch, .suppressed:
+          case .allowedImmediate, .deniedImmediate, .noMatch:
             return true
+          case .suppressed:
+            return gatePlan == nil && !hasStartedJourney
+          case .flowShown(let ref):
+            return ref.campaignId == terminalGateFlowCampaignId
           default:
             return false
           }
@@ -92,14 +103,26 @@ public actor TriggerService: TriggerServiceProtocol {
       }
 
       let journeyResults = await journeyService.handleEventForTrigger(nuxieEvent)
+      hasStartedJourney = journeyResults.contains { result in
+        if case .started = result { return true }
+        return false
+      }
       let emittedJourneyDecision = await emitJourneyDecisions(
         results: journeyResults,
         eventId: eventId
       )
 
+      if gatePlan == nil && emittedJourneyDecision {
+        return
+      }
+
+      if hasStartedJourney && mode == .flow {
+        return
+      }
+
       if let gatePlan {
         await handleGatePlan(gatePlan, eventId: eventId)
-      } else if !emittedJourneyDecision {
+      } else {
         await broker.emit(eventId: eventId, update: .decision(.noMatch))
       }
     } catch {

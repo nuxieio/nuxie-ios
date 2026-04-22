@@ -117,6 +117,69 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(journey.flowState.pendingAction?.kind).to(equal(.delay))
             }
 
+            it("sends v2 view model init payloads with schema and state") {
+                let flowId = "flow-view-model-init-v2"
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "title": ViewModelProperty(
+                            type: .string,
+                            propertyId: 1,
+                            defaultValue: AnyCodable("Hello"),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    viewModels: [viewModel],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleRuntimeReady()
+
+                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_init"))
+                let payload = controller.messages.first(where: { $0.type == "runtime/view_model_init" })?.payload
+                expect(payload?["schemaVersion"] as? Int).to(equal(2))
+
+                let schema = payload?["schema"] as? [String: Any]
+                let state = payload?["state"] as? [String: Any]
+                let viewModels = schema?["viewModels"] as? [[String: Any]]
+                let instances = state?["viewModelInstances"] as? [[String: Any]]
+                let screenDefaults = state?["screenDefaults"] as? [String: Any]
+                let legacyViewModels = payload?["viewModels"] as? [[String: Any]]
+                let legacyInstances = payload?["instances"] as? [[String: Any]]
+                let legacyViewModelInstances = payload?["viewModelInstances"] as? [[String: Any]]
+                let legacyScreenDefaults = payload?["screenDefaults"] as? [String: Any]
+
+                expect(viewModels?.first?["id"] as? String).to(equal("vm-1"))
+                expect(instances?.first?["viewModelId"] as? String).to(equal("vm-1"))
+                expect(screenDefaults?["screen-1"]).toNot(beNil())
+                expect(legacyViewModels?.first?["id"] as? String).to(equal("vm-1"))
+                expect(legacyInstances?.first?["viewModelId"] as? String).to(equal("vm-1"))
+                expect(legacyViewModelInstances?.first?["viewModelId"] as? String).to(equal("vm-1"))
+                expect(legacyScreenDefaults?["screen-1"]).toNot(beNil())
+                expect(payload?["converters"]).toNot(beNil())
+            }
+
             it("dispatches global event interactions") {
                 let flowId = "flow-global-event"
                 let interaction = Interaction(

@@ -299,6 +299,75 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             mocks.flowPresentationService.defaultMockViewController = controller
         }
 
+        describe("journey start persistence") {
+            it("persists journey start synchronously before returning a started journey") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                let journey = await startJourney()
+
+                let startCall = mocks.eventService.trackWithResponseCalls.first {
+                    $0.event == "$journey_start"
+                }
+                expect(startCall).toNot(beNil())
+                expect(startCall?.properties?["session_id"] as? String).to(equal(journey.id))
+                expect(startCall?.properties?["campaign_id"] as? String).to(equal(campaign.id))
+                expect(startCall?.properties?["flow_id"] as? String).to(equal(campaign.flowId))
+                expect(startCall?.flushPendingEvents).to(beTrue())
+                expect(startCall?.flushStrategy).to(equal(.eventService))
+            }
+
+            it("flushes pending events when a routed event starts a journey") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+
+                await service.handleEvent(
+                    NuxieEvent(
+                        id: "evt_origin",
+                        name: "paywall_trigger",
+                        distinctId: distinctId
+                    )
+                )
+
+                let startCall = mocks.eventService.trackWithResponseCalls.first {
+                    $0.event == "$journey_start"
+                }
+                expect(startCall).toNot(beNil())
+                expect(startCall?.flushPendingEvents).to(beTrue())
+                expect(startCall?.flushStrategy).to(equal(.eventService))
+            }
+
+            it("does not start a local journey when server start persistence fails") {
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+                mocks.eventService.trackWithResponseError = URLError(.notConnectedToInternet)
+
+                let results = await service.handleEventForTrigger(
+                    NuxieEvent(id: "evt_origin", name: "paywall_trigger", distinctId: distinctId)
+                )
+
+                let started = results.contains { result in
+                    if case .started = result { return true }
+                    return false
+                }
+                let suppressedStartFailure = results.contains { result in
+                    if case .suppressed(.unknown("start_failed")) = result { return true }
+                    return false
+                }
+                expect(started).to(beFalse())
+                expect(suppressedStartFailure).to(beTrue())
+                await expect {
+                    await service.getActiveJourneys(for: distinctId)
+                }.toEventually(beEmpty(), timeout: .seconds(2))
+            }
+        }
+
         describe("exit deferral during active flow presentation") {
             it("keeps goal-met journeys live until dismiss, then exits as goal_met") {
                 let campaign = makeCampaign(

@@ -42,6 +42,18 @@ private struct TrackPayload {
   let forcedDistinctId: String  // snapshot at call site
 }
 
+private enum JourneyRouteCommand {
+  case event(NuxieEvent)
+  case barrier(CheckedContinuation<Void, Never>)
+  case shutdown
+}
+
+public enum EventFlushStrategy: Equatable {
+  case none
+  case eventService
+  case networkQueue
+}
+
 /// Protocol for event routing operations
 public protocol EventServiceProtocol {
   /// Configure the router with network queue, journey service, context builder and configuration
@@ -118,6 +130,20 @@ public protocol EventServiceProtocol {
   func trackWithResponse(
     _ event: String,
     properties: [String: Any]?
+  ) async throws -> EventResponse
+
+  /// Track an event synchronously, optionally flushing queued events before the round trip.
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushPendingEvents: Bool
+  ) async throws -> EventResponse
+
+  /// Track an event synchronously, using an explicit pending-event flush strategy.
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushStrategy: EventFlushStrategy
   ) async throws -> EventResponse
 
   /// Reassign events from one user to another (for anonymous → identified transitions)
@@ -266,11 +292,22 @@ public extension EventServiceProtocol {
       distinctIdOverride: nil
     )
   }
+
+  func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]?,
+    flushPendingEvents: Bool
+  ) async throws -> EventResponse {
+    try await trackWithResponse(
+      event,
+      properties: properties,
+      flushStrategy: flushPendingEvents ? .eventService : .none
+    )
+  }
 }
 
 /// Dual-purpose event service that handles local storage and network queuing
 public class EventService: EventServiceProtocol {
-
   private let eventStore: EventStoreProtocol
   private let ready = StoreReadySignal()
 
@@ -282,6 +319,9 @@ public class EventService: EventServiceProtocol {
   private var stream: AsyncStream<Command>
   private var continuation: AsyncStream<Command>.Continuation
   private var worker: Task<Void, Never>?
+  private var journeyRouteStream: AsyncStream<JourneyRouteCommand>
+  private var journeyRouteContinuation: AsyncStream<JourneyRouteCommand>.Continuation
+  private var journeyRouteWorker: Task<Void, Never>?
 
   internal init(eventStore: EventStoreProtocol? = nil) {
     self.eventStore = eventStore ?? EventStore()
@@ -290,12 +330,21 @@ public class EventService: EventServiceProtocol {
     let s = AsyncStream<Command> { c in cont = c }
     self.stream = s
     self.continuation = cont
+
+    var journeyCont: AsyncStream<JourneyRouteCommand>.Continuation!
+    let journeyStream = AsyncStream<JourneyRouteCommand> { c in journeyCont = c }
+    self.journeyRouteStream = journeyStream
+    self.journeyRouteContinuation = journeyCont
+
     startWorker(stream: s)
+    startJourneyRouteWorker(stream: journeyStream)
   }
 
   deinit {
     continuation.finish()
     worker?.cancel()
+    journeyRouteContinuation.finish()
+    journeyRouteWorker?.cancel()
   }
 
   // MARK: - Dependencies
@@ -335,6 +384,12 @@ public class EventService: EventServiceProtocol {
       stream = s
       continuation = cont
       startWorker(stream: s)
+
+      var journeyCont: AsyncStream<JourneyRouteCommand>.Continuation!
+      let journeyStream = AsyncStream<JourneyRouteCommand> { c in journeyCont = c }
+      journeyRouteStream = journeyStream
+      journeyRouteContinuation = journeyCont
+      startJourneyRouteWorker(stream: journeyStream)
     }
     closeLock.unlock()
 
@@ -400,14 +455,13 @@ public class EventService: EventServiceProtocol {
 
     // Snapshot id NOW to preserve pre/post identify semantics.
     let idSnapshot = identityService.getDistinctId()
+    let payload = TrackPayload(
+      name: event,
+      properties: custom,
+      forcedDistinctId: idSnapshot
+    )
 
-    continuation.yield(
-      .track(
-        .init(
-          name: event,
-          properties: custom,
-          forcedDistinctId: idSnapshot
-        )))
+    continuation.yield(.track(payload))
   }
 
   /// Track an event synchronously and wait for server response
@@ -421,6 +475,30 @@ public class EventService: EventServiceProtocol {
     _ event: String,
     properties: [String: Any]? = nil
   ) async throws -> EventResponse {
+    try await trackWithResponse(
+      event,
+      properties: properties,
+      flushPendingEvents: true
+    )
+  }
+
+  public func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    flushPendingEvents: Bool
+  ) async throws -> EventResponse {
+    try await trackWithResponse(
+      event,
+      properties: properties,
+      flushStrategy: flushPendingEvents ? .eventService : .none
+    )
+  }
+
+  public func trackWithResponse(
+    _ event: String,
+    properties: [String: Any]? = nil,
+    flushStrategy: EventFlushStrategy
+  ) async throws -> EventResponse {
     guard !event.isEmpty else {
       throw NuxieError.invalidConfiguration("Event name cannot be empty")
     }
@@ -428,9 +506,20 @@ public class EventService: EventServiceProtocol {
     // Wait for initialization
     await ready.wait()
 
-    // Flush pending events first to ensure ordering
-    // (any queued events should reach the server before this synchronous one)
-    _ = await flushEvents()
+    switch flushStrategy {
+    case .none:
+      break
+    case .eventService:
+      // Flush pending EventService commands first to ensure ordering.
+      _ = await flushEvents()
+    case .networkQueue:
+      if let networkQueue {
+        let drained = await networkQueue.flushAll()
+        guard drained else {
+          throw NuxieError.eventRoutingFailed
+        }
+      }
+    }
 
     // Get current distinct ID
     let distinctId = identityService.getDistinctId()
@@ -570,6 +659,8 @@ public class EventService: EventServiceProtocol {
     // Stop accepting new commands and ask the worker to stop.
     continuation.yield(.shutdown)
     continuation.finish()
+    journeyRouteContinuation.yield(.shutdown)
+    journeyRouteContinuation.finish()
 
     await eventStore.close()
     LogInfo("EventService closed")
@@ -582,10 +673,20 @@ public class EventService: EventServiceProtocol {
   /// - Returns: Routed event, or nil if routing failed
   @discardableResult
   private func route(_ event: NuxieEvent) async -> NuxieEvent? {
+    await stageForDelivery(event)
+
+    // 3) Drive business logic off the EventService worker so lifecycle tracking
+    // can flush this queue without re-entering the same worker.
+    journeyRouteContinuation.yield(.event(event))
+
+    return event
+  }
+
+  private func stageForDelivery(_ event: NuxieEvent) async {
     // Ensure the store is initialized before touching it
     await ready.wait()
 
-    // 1) Always persist & drive business logic
+    // 1) Always persist locally before downstream routing
     extractUserProperties(from: event)
     do {
       LogDebug("Attempting to store event: \(event.name) for user: \(event.distinctId)")
@@ -600,12 +701,8 @@ public class EventService: EventServiceProtocol {
       // Continue routing to other services even if storage fails
     }
 
-    await journeyService?.handleEvent(event)
-
-    // 2) Network ordering: preserve $identify-first ordering during identity transitions
+    // 2) Network ordering: enqueue before journey routing so lifecycle calls can flush this hit
     await networkQueue?.enqueue(event)
-
-    return event
   }
 
   // MARK: - Private Routing Implementation
@@ -669,8 +766,13 @@ public class EventService: EventServiceProtocol {
           await self.handleTrack(payload)
 
         case .flush(let cont):
-          let ok = await self?.networkQueue?.flush() ?? false
-          cont.resume(returning: ok)
+          guard let queue = self?.networkQueue else {
+            cont.resume(returning: false)
+            break
+          }
+          let hadEvents = await queue.getQueueSize() > 0
+          let ok = await queue.flushAll()
+          cont.resume(returning: hadEvents && ok)
 
         case .barrier(let cont):
           // All prior commands are processed when we reach here
@@ -684,9 +786,37 @@ public class EventService: EventServiceProtocol {
     }
   }
 
+  private func startJourneyRouteWorker(stream: AsyncStream<JourneyRouteCommand>) {
+    journeyRouteWorker = Task { [weak self] in
+      for await cmd in stream {
+        switch cmd {
+        case .event(let event):
+          guard let self else { return }
+          await self.journeyService?.handleEvent(event)
+
+        case .barrier(let cont):
+          cont.resume()
+
+        case .shutdown:
+          LogDebug("[JourneyRouteWorker] shutdown received")
+          return
+        }
+      }
+    }
+  }
+
   // MARK: - Worker handlers
 
   private func handleTrack(_ p: TrackPayload) async {
+    guard let finalEvent = await buildEvent(from: p) else { return }
+
+    // Stage 8: Route Event (handles storage/network/journeys)
+    await route(finalEvent)
+  }
+
+  // MARK: - Worker helpers
+
+  private func buildEvent(from p: TrackPayload) async -> NuxieEvent? {
     // Stage 1: Add session ID if not already present
     var propertiesWithSession = p.properties
     if propertiesWithSession["$session_id"] == nil {
@@ -707,22 +837,16 @@ public class EventService: EventServiceProtocol {
     )
 
     // Stage 2: Apply beforeSend hook if configured
-    let finalEvent: NuxieEvent
     if let beforeSend = configuration?.beforeSend {
       guard let transformedEvent = beforeSend(nuxieEvent) else {
         LogDebug("Event '\(nuxieEvent.name)' dropped by beforeSend hook")
-        return
+        return nil
       }
-      finalEvent = transformedEvent
-    } else {
-      finalEvent = nuxieEvent
+      return transformedEvent
     }
 
-    // Stage 8: Route Event (handles storage/network/journeys)
-    await route(finalEvent)
+    return nuxieEvent
   }
-
-  // MARK: - Worker helpers
 
   private func buildTriggerProperties(
     _ properties: [String: Any]?,
@@ -765,8 +889,20 @@ public class EventService: EventServiceProtocol {
     closeLock.unlock()
     if closing { return }
 
+    await drainEventWorker()
+    await drainJourneyRouteWorker()
+    await drainEventWorker()
+  }
+
+  private func drainEventWorker() async {
     await withCheckedContinuation { cont in
       continuation.yield(.barrier(cont))
+    }
+  }
+
+  private func drainJourneyRouteWorker() async {
+    await withCheckedContinuation { cont in
+      journeyRouteContinuation.yield(.barrier(cont))
     }
   }
 

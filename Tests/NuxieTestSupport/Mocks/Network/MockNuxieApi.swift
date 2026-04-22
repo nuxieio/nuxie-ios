@@ -246,6 +246,12 @@ public actor MockNuxieApi: NuxieApiProtocol {
     ) async throws -> EventResponse {
         trackEventCallCount += 1
         lastTrackEventCall = (event, distinctId, properties, value, entityId)
+        sentEvents.append(NuxieEvent(
+            name: event,
+            distinctId: distinctId,
+            properties: properties ?? [:],
+            timestamp: Date()
+        ))
 
         if shouldFailTrackEvent {
             if let error = trackEventError {

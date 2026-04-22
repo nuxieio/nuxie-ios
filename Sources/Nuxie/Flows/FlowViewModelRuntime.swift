@@ -328,21 +328,24 @@ public final class FlowViewModelRuntime {
             return instance
         }
 
+        if let screenId, let defaults = screenDefaults[screenId] {
+            if let instanceId = defaults.defaultInstanceId,
+               let instance = instances[instanceId],
+               viewModelId == nil || instance.viewModelId == viewModelId {
+                return instance
+            }
+            if let defaultViewModelId = defaults.defaultViewModelId,
+               viewModelId == nil || defaultViewModelId == viewModelId,
+               let instanceId = instancesByViewModel[defaultViewModelId]?.first,
+               let instance = instances[instanceId] {
+                return instance
+            }
+        }
+
         if let viewModelId,
            let defaultInstanceId = instancesByViewModel[viewModelId]?.first,
            let defaultInstance = instances[defaultInstanceId] {
             return defaultInstance
-        }
-
-        if let screenId, let defaults = screenDefaults[screenId] {
-            if let instanceId = defaults.defaultInstanceId, let instance = instances[instanceId] {
-                return instance
-            }
-            if let viewModelId = defaults.defaultViewModelId,
-               let instanceId = instancesByViewModel[viewModelId]?.first,
-               let instance = instances[instanceId] {
-                return instance
-            }
         }
 
         if let first = instances.values.first {
@@ -361,9 +364,9 @@ public final class FlowViewModelRuntime {
         case .ids(let ref):
             let resolved: (viewModelId: String, segments: [PathSegment])?
             if ref.isRelative == true || ref.nameBased == true {
-                resolved = resolveNamePathIds(ref, screenId: screenId)
+                resolved = resolveNamePathIds(ref, screenId: screenId, instanceId: instanceId)
             } else {
-                resolved = resolvePathIds(ref.pathIds)
+                resolved = resolvePathIds(ref.pathIds, screenId: screenId)
             }
             if let resolved {
                 let resolvedInstanceId = ref.isRelative == true ? instanceId : nil
@@ -389,10 +392,17 @@ public final class FlowViewModelRuntime {
     }
 
     private func resolvePathIds(
-        _ pathIds: [Int]
+        _ pathIds: [Int],
+        screenId: String?
     ) -> (viewModelId: String, segments: [PathSegment])? {
         guard let rootPathId = pathIds.first else { return nil }
-        guard let viewModel = viewModelList.first(where: { viewModelPathId($0) == rootPathId }) else {
+        let screenDefaultViewModel = screenId
+            .flatMap { screenDefaults[$0]?.defaultViewModelId }
+            .flatMap { viewModels[$0] }
+        let viewModel =
+            screenDefaultViewModel.flatMap { viewModelPathId($0) == rootPathId ? $0 : nil }
+            ?? viewModelList.first(where: { viewModelPathId($0) == rootPathId })
+        guard let viewModel else {
             return nil
         }
         let propertyIds = Array(pathIds.dropFirst())
@@ -488,7 +498,8 @@ public final class FlowViewModelRuntime {
 
     private func resolveNamePathIds(
         _ ref: VmPathIds,
-        screenId: String?
+        screenId: String?,
+        instanceId: String?
     ) -> (viewModelId: String, segments: [PathSegment])? {
         let pathIds = ref.pathIds
         guard !pathIds.isEmpty else { return nil }
@@ -497,7 +508,7 @@ public final class FlowViewModelRuntime {
         let propertyIds: [Int]
 
         if ref.isRelative == true {
-            guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: nil) else {
+            guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: instanceId) else {
                 return nil
             }
             viewModel = viewModels[instance.viewModelId]

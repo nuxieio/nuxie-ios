@@ -184,14 +184,16 @@ public actor JourneyService: JourneyServiceProtocol {
     return await startJourneyInternal(
       for: campaign,
       distinctId: distinctId,
-      originEventId: originEventId
+      originEventId: originEventId,
+      journeyStartFlushStrategy: .eventService
     )
   }
 
   private func startJourneyInternal(
     for campaign: Campaign,
     distinctId: String,
-    originEventId: String? = nil
+    originEventId: String? = nil,
+    journeyStartFlushStrategy: EventFlushStrategy = .eventService
   ) async -> Journey? {
     let flowId = campaign.flowId
 
@@ -206,17 +208,23 @@ public actor JourneyService: JourneyServiceProtocol {
     let flow = try? await flowService.fetchFlow(id: flowId)
     let entryScreenId = flow?.remoteFlow.screens.first?.id
 
-    eventService.track(
-      "$journey_start",
-      properties: [
-        "session_id": journey.id,
-        "campaign_id": campaign.id,
-        "flow_id": campaign.flowId,
-        "entry_node_id": entryScreenId as Any,
-      ],
-      userProperties: nil,
-      userPropertiesSetOnce: nil
-    )
+    do {
+      _ = try await eventService.trackWithResponse(
+        "$journey_start",
+        properties: [
+          "session_id": journey.id,
+          "campaign_id": campaign.id,
+          "flow_id": campaign.flowId,
+          "entry_node_id": entryScreenId as Any,
+        ],
+        flushStrategy: journeyStartFlushStrategy
+      )
+    } catch {
+      LogWarning("JourneyService: Failed to persist journey start: \(error)")
+      journey.cancel()
+      inMemoryJourneysById.removeValue(forKey: journey.id)
+      return nil
+    }
 
     eventService.track(
       JourneyEvents.journeyStarted,
@@ -295,12 +303,23 @@ public actor JourneyService: JourneyServiceProtocol {
   }
 
   public func handleEvent(_ event: NuxieEvent) async {
-    _ = await handleEventForTrigger(event)
+    _ = await handleEvent(event, journeyStartFlushStrategy: .eventService)
   }
 
   public func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+    return await handleEvent(event, journeyStartFlushStrategy: .eventService)
+  }
+
+  private func handleEvent(
+    _ event: NuxieEvent,
+    journeyStartFlushStrategy: EventFlushStrategy
+  ) async -> [JourneyTriggerResult] {
     guard let campaigns = await getAllCampaigns(for: event.distinctId) else { return [] }
-    let results = await startJourneysMatchingEvent(event, campaigns: campaigns)
+    let results = await startJourneysMatchingEvent(
+      event,
+      campaigns: campaigns,
+      journeyStartFlushStrategy: journeyStartFlushStrategy
+    )
     await processActiveJourneys(
       for: event,
       campaigns: campaigns,
@@ -684,7 +703,11 @@ public actor JourneyService: JourneyServiceProtocol {
       await getAllCampaigns(for: scopedEvent.distinctId)
     }
     if let campaigns {
-      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let results = await startJourneysMatchingEvent(
+        scopedEvent,
+        campaigns: campaigns,
+        journeyStartFlushStrategy: .eventService
+      )
       let startedJourneyIds = Set(results.compactMap { result -> String? in
         guard case .started(let startedJourney) = result else { return nil }
         return startedJourney.id
@@ -817,7 +840,11 @@ public actor JourneyService: JourneyServiceProtocol {
       )
     }
     if let campaigns {
-      let results = await startJourneysMatchingEvent(scopedEvent, campaigns: campaigns)
+      let results = await startJourneysMatchingEvent(
+        scopedEvent,
+        campaigns: campaigns,
+        journeyStartFlushStrategy: .eventService
+      )
       let startedJourneyIds = Set(results.compactMap { result -> String? in
         guard case .started(let startedJourney) = result else { return nil }
         return startedJourney.id
@@ -1240,7 +1267,8 @@ public actor JourneyService: JourneyServiceProtocol {
 
   private func startJourneysMatchingEvent(
     _ event: NuxieEvent,
-    campaigns: [Campaign]
+    campaigns: [Campaign],
+    journeyStartFlushStrategy: EventFlushStrategy
   ) async -> [JourneyTriggerResult] {
     var results: [JourneyTriggerResult] = []
 
@@ -1255,7 +1283,8 @@ public actor JourneyService: JourneyServiceProtocol {
       if let journey = await startJourneyInternal(
         for: campaign,
         distinctId: event.distinctId,
-        originEventId: event.id
+        originEventId: event.id,
+        journeyStartFlushStrategy: journeyStartFlushStrategy
       ) {
         results.append(.started(journey))
       } else {

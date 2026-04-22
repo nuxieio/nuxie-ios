@@ -145,6 +145,120 @@ final class TrackWithResponseTests: AsyncSpec {
                     let lastCall = await mockNuxieApi.lastTrackEventCall
                     expect(lastCall?.event).to(equal("$journey_node_executed"))
                 }
+
+                it("flushes a routed triggering event before sending its journey start") {
+                    mockNetworkQueue = NuxieNetworkQueue(
+                        flushAt: 100,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 2,
+                        apiClient: mockNuxieApi
+                    )
+                    try await eventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: nil
+                    )
+
+                    for index in 0..<5 {
+                        eventService.track("backlog_\(index)", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    }
+                    await eventService.drain()
+
+                    let routingJourneyService = RoutingJourneyStartService(eventService: eventService)
+                    try await eventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: routingJourneyService
+                    )
+                    await mockNuxieApi.setTrackEventResponse(.success())
+
+                    eventService.track("paywall_trigger", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    await eventService.drain()
+
+                    let sentEventNames = await mockNuxieApi.sentEvents.map(\.name)
+                    expect(sentEventNames).to(equal([
+                        "backlog_0",
+                        "backlog_1",
+                        "backlog_2",
+                        "backlog_3",
+                        "backlog_4",
+                        "paywall_trigger",
+                        "$journey_start"
+                    ]))
+                }
+
+                it("flushes queued identify before a routed journey start") {
+                    mockNetworkQueue = NuxieNetworkQueue(
+                        flushAt: 100,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 10,
+                        apiClient: mockNuxieApi
+                    )
+                    let routingJourneyService = RoutingJourneyStartService(
+                        eventService: eventService,
+                        delayBeforeJourneyStartNanoseconds: 20_000_000
+                    )
+                    try await eventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: routingJourneyService
+                    )
+                    await mockNuxieApi.setTrackEventResponse(.success())
+
+                    mockIdentityService.reset(keepAnonymousId: false)
+                    mockIdentityService.setAnonymousId("anon-1")
+
+                    eventService.track("paywall_trigger", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+
+                    mockIdentityService.setDistinctId("user-1")
+                    eventService.track(
+                        "$identify",
+                        properties: [
+                            "distinct_id": "user-1",
+                            "$anon_distinct_id": "anon-1"
+                        ],
+                        userProperties: nil,
+                        userPropertiesSetOnce: nil
+                    )
+                    await eventService.drain()
+
+                    let sentEvents = await mockNuxieApi.sentEvents
+                    expect(sentEvents.map(\.name)).to(equal([
+                        "paywall_trigger",
+                        "$identify",
+                        "$journey_start"
+                    ]))
+                    expect(sentEvents.map(\.distinctId)).to(equal([
+                        "anon-1",
+                        "user-1",
+                        "user-1"
+                    ]))
+                }
+
+                it("preserves buffered tracks from before configure before a routed journey start") {
+                    mockNetworkQueue = NuxieNetworkQueue(
+                        flushAt: 100,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 10,
+                        apiClient: mockNuxieApi
+                    )
+                    let bufferedEventService = EventService(eventStore: mockEventStore)
+                    let routingJourneyService = RoutingJourneyStartService(eventService: bufferedEventService)
+                    await mockNuxieApi.setTrackEventResponse(.success())
+
+                    bufferedEventService.track("startup_event", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    try await bufferedEventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: routingJourneyService
+                    )
+
+                    bufferedEventService.track("paywall_trigger", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    await bufferedEventService.drain()
+
+                    let sentEventNames = await mockNuxieApi.sentEvents.map(\.name)
+                    expect(sentEventNames).to(equal([
+                        "startup_event",
+                        "paywall_trigger",
+                        "$journey_start"
+                    ]))
+                }
             }
 
             // MARK: - Error Handling
@@ -341,4 +455,59 @@ class TrackWithResponseMockSessionService: SessionServiceProtocol {
     func onAppBecameActive() {
         // No-op for tests
     }
+}
+
+private final class RoutingJourneyStartService: JourneyServiceProtocol {
+    private let eventService: EventServiceProtocol
+    private let delayBeforeJourneyStartNanoseconds: UInt64
+
+    init(eventService: EventServiceProtocol, delayBeforeJourneyStartNanoseconds: UInt64 = 0) {
+        self.eventService = eventService
+        self.delayBeforeJourneyStartNanoseconds = delayBeforeJourneyStartNanoseconds
+    }
+
+    func startJourney(for campaign: Campaign, distinctId: String, originEventId: String?) async -> Journey? {
+        nil
+    }
+
+    func resumeJourney(_ journey: Journey) async {}
+
+    func resumeFromServerState(_ journeys: [ActiveJourney], campaigns: [Campaign]) async {}
+
+    func handleEvent(_ event: NuxieEvent) async {
+        guard event.name == "paywall_trigger" else { return }
+
+        if delayBeforeJourneyStartNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayBeforeJourneyStartNanoseconds)
+        }
+        _ = try? await eventService.trackWithResponse(
+            "$journey_start",
+            properties: ["origin_event_id": event.id],
+            flushStrategy: .eventService
+        )
+    }
+
+    func handleEventForTrigger(_ event: NuxieEvent) async -> [JourneyTriggerResult] {
+        []
+    }
+
+    func handleSegmentChange(distinctId: String, segments: Set<String>) async {}
+
+    func getActiveJourneys(for distinctId: String) async -> [Journey] {
+        []
+    }
+
+    func checkExpiredTimers() async {}
+
+    func initialize() async {}
+
+    func onAppWillEnterForeground() async {}
+
+    func onAppBecameActive() async {}
+
+    func onAppDidEnterBackground() async {}
+
+    func shutdown() async {}
+
+    func handleUserChange(from oldDistinctId: String, to newDistinctId: String) async {}
 }
