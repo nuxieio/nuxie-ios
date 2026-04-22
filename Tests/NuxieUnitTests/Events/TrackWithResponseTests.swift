@@ -231,6 +231,34 @@ final class TrackWithResponseTests: AsyncSpec {
                         "user-1"
                     ]))
                 }
+
+                it("preserves buffered tracks from before configure before a routed journey start") {
+                    mockNetworkQueue = NuxieNetworkQueue(
+                        flushAt: 100,
+                        flushIntervalSeconds: 30,
+                        maxBatchSize: 10,
+                        apiClient: mockNuxieApi
+                    )
+                    let bufferedEventService = EventService(eventStore: mockEventStore)
+                    let routingJourneyService = RoutingJourneyStartService(eventService: bufferedEventService)
+                    await mockNuxieApi.setTrackEventResponse(.success())
+
+                    bufferedEventService.track("startup_event", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    try await bufferedEventService.configure(
+                        networkQueue: mockNetworkQueue,
+                        journeyService: routingJourneyService
+                    )
+
+                    bufferedEventService.track("paywall_trigger", properties: nil, userProperties: nil, userPropertiesSetOnce: nil)
+                    await bufferedEventService.drain()
+
+                    let sentEventNames = await mockNuxieApi.sentEvents.map(\.name)
+                    expect(sentEventNames).to(equal([
+                        "startup_event",
+                        "paywall_trigger",
+                        "$journey_start"
+                    ]))
+                }
             }
 
             // MARK: - Error Handling
@@ -455,7 +483,7 @@ private final class RoutingJourneyStartService: JourneyServiceProtocol {
         _ = try? await eventService.trackWithResponse(
             "$journey_start",
             properties: ["origin_event_id": event.id],
-            flushStrategy: .networkQueue
+            flushStrategy: .eventService
         )
     }
 

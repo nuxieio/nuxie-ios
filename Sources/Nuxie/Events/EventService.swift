@@ -37,15 +37,15 @@ private enum Command {
 }
 
 private struct TrackPayload {
-  let commandId: String
   let name: String
   let properties: [String: Any]
   let forcedDistinctId: String  // snapshot at call site
 }
 
-private enum PrestagedTrack {
+private enum JourneyRouteCommand {
   case event(NuxieEvent)
-  case dropped
+  case barrier(CheckedContinuation<Void, Never>)
+  case shutdown
 }
 
 public enum EventFlushStrategy: Equatable {
@@ -327,6 +327,9 @@ public class EventService: EventServiceProtocol {
   private var stream: AsyncStream<Command>
   private var continuation: AsyncStream<Command>.Continuation
   private var worker: Task<Void, Never>?
+  private var journeyRouteStream: AsyncStream<JourneyRouteCommand>
+  private var journeyRouteContinuation: AsyncStream<JourneyRouteCommand>.Continuation
+  private var journeyRouteWorker: Task<Void, Never>?
 
   internal init(eventStore: EventStoreProtocol? = nil) {
     self.eventStore = eventStore ?? EventStore()
@@ -335,12 +338,21 @@ public class EventService: EventServiceProtocol {
     let s = AsyncStream<Command> { c in cont = c }
     self.stream = s
     self.continuation = cont
+
+    var journeyCont: AsyncStream<JourneyRouteCommand>.Continuation!
+    let journeyStream = AsyncStream<JourneyRouteCommand> { c in journeyCont = c }
+    self.journeyRouteStream = journeyStream
+    self.journeyRouteContinuation = journeyCont
+
     startWorker(stream: s)
+    startJourneyRouteWorker(stream: journeyStream)
   }
 
   deinit {
     continuation.finish()
     worker?.cancel()
+    journeyRouteContinuation.finish()
+    journeyRouteWorker?.cancel()
   }
 
   // MARK: - Dependencies
@@ -355,9 +367,6 @@ public class EventService: EventServiceProtocol {
   private weak var journeyService: JourneyServiceProtocol?
   private var contextBuilder: NuxieContextBuilder?
   private var configuration: NuxieConfiguration?
-  private let pendingTrackLock = NSLock()
-  private var pendingWorkerTracks: [TrackPayload] = []
-  private var prestagedWorkerTracks: [String: PrestagedTrack] = [:]
 
   // MARK: - Configuration
 
@@ -383,6 +392,12 @@ public class EventService: EventServiceProtocol {
       stream = s
       continuation = cont
       startWorker(stream: s)
+
+      var journeyCont: AsyncStream<JourneyRouteCommand>.Continuation!
+      let journeyStream = AsyncStream<JourneyRouteCommand> { c in journeyCont = c }
+      journeyRouteStream = journeyStream
+      journeyRouteContinuation = journeyCont
+      startJourneyRouteWorker(stream: journeyStream)
     }
     closeLock.unlock()
 
@@ -392,7 +407,6 @@ public class EventService: EventServiceProtocol {
     self.journeyService = journeyService
     self.contextBuilder = contextBuilder
     self.configuration = configuration
-    resetWorkerTrackState()
 
     do {
       try await eventStore.initialize(path: configuration?.customStoragePath)
@@ -450,13 +464,12 @@ public class EventService: EventServiceProtocol {
     // Snapshot id NOW to preserve pre/post identify semantics.
     let idSnapshot = identityService.getDistinctId()
     let payload = TrackPayload(
-      commandId: UUID.v7().uuidString,
       name: event,
       properties: custom,
       forcedDistinctId: idSnapshot
     )
 
-    enqueueTrackPayload(payload)
+    continuation.yield(.track(payload))
   }
 
   /// Track an event synchronously and wait for server response
@@ -508,7 +521,6 @@ public class EventService: EventServiceProtocol {
       // Flush pending EventService commands first to ensure ordering.
       _ = await flushEvents()
     case .networkQueue:
-      await prestagePendingWorkerTracksForLifecycle()
       if let networkQueue {
         let drained = await networkQueue.flushAll()
         guard drained else {
@@ -655,7 +667,8 @@ public class EventService: EventServiceProtocol {
     // Stop accepting new commands and ask the worker to stop.
     continuation.yield(.shutdown)
     continuation.finish()
-    resetWorkerTrackState()
+    journeyRouteContinuation.yield(.shutdown)
+    journeyRouteContinuation.finish()
 
     await eventStore.close()
     LogInfo("EventService closed")
@@ -670,8 +683,9 @@ public class EventService: EventServiceProtocol {
   private func route(_ event: NuxieEvent) async -> NuxieEvent? {
     await stageForDelivery(event)
 
-    // 3) Drive business logic after the triggering event is staged for delivery
-    await journeyService?.handleEvent(event)
+    // 3) Drive business logic off the EventService worker so lifecycle tracking
+    // can flush this queue without re-entering the same worker.
+    journeyRouteContinuation.yield(.event(event))
 
     return event
   }
@@ -780,21 +794,28 @@ public class EventService: EventServiceProtocol {
     }
   }
 
+  private func startJourneyRouteWorker(stream: AsyncStream<JourneyRouteCommand>) {
+    journeyRouteWorker = Task { [weak self] in
+      for await cmd in stream {
+        switch cmd {
+        case .event(let event):
+          guard let self else { return }
+          await self.journeyService?.handleEvent(event)
+
+        case .barrier(let cont):
+          cont.resume()
+
+        case .shutdown:
+          LogDebug("[JourneyRouteWorker] shutdown received")
+          return
+        }
+      }
+    }
+  }
+
   // MARK: - Worker handlers
 
   private func handleTrack(_ p: TrackPayload) async {
-    if let prestaged = takePrestagedWorkerTrack(commandId: p.commandId) {
-      switch prestaged {
-      case .event(let event):
-        await journeyService?.handleEvent(event)
-      case .dropped:
-        break
-      }
-      return
-    }
-
-    removePendingWorkerTrack(commandId: p.commandId)
-
     guard let finalEvent = await buildEvent(from: p) else { return }
 
     // Stage 8: Route Event (handles storage/network/journeys)
@@ -833,64 +854,6 @@ public class EventService: EventServiceProtocol {
     }
 
     return nuxieEvent
-  }
-
-  private func prestagePendingWorkerTracksForLifecycle() async {
-    let pendingTracks = takePendingWorkerTracksForPrestage()
-    guard !pendingTracks.isEmpty else { return }
-
-    // Routed journey lifecycle sends run while the worker is blocked inside the triggering track.
-    // Stage any already-queued track commands first so network order still matches worker order.
-    for payload in pendingTracks {
-      guard let event = await buildEvent(from: payload) else {
-        recordPrestagedWorkerTrack(commandId: payload.commandId, result: .dropped)
-        continue
-      }
-
-      await stageForDelivery(event)
-      recordPrestagedWorkerTrack(commandId: payload.commandId, result: .event(event))
-    }
-  }
-
-  private func enqueueTrackPayload(_ payload: TrackPayload) {
-    pendingTrackLock.lock()
-    pendingWorkerTracks.append(payload)
-    continuation.yield(.track(payload))
-    pendingTrackLock.unlock()
-  }
-
-  private func removePendingWorkerTrack(commandId: String) {
-    pendingTrackLock.lock()
-    pendingWorkerTracks.removeAll { $0.commandId == commandId }
-    pendingTrackLock.unlock()
-  }
-
-  private func takePendingWorkerTracksForPrestage() -> [TrackPayload] {
-    pendingTrackLock.lock()
-    let tracks = pendingWorkerTracks
-    pendingWorkerTracks.removeAll()
-    pendingTrackLock.unlock()
-    return tracks
-  }
-
-  private func recordPrestagedWorkerTrack(commandId: String, result: PrestagedTrack) {
-    pendingTrackLock.lock()
-    prestagedWorkerTracks[commandId] = result
-    pendingTrackLock.unlock()
-  }
-
-  private func takePrestagedWorkerTrack(commandId: String) -> PrestagedTrack? {
-    pendingTrackLock.lock()
-    let result = prestagedWorkerTracks.removeValue(forKey: commandId)
-    pendingTrackLock.unlock()
-    return result
-  }
-
-  private func resetWorkerTrackState() {
-    pendingTrackLock.lock()
-    pendingWorkerTracks.removeAll()
-    prestagedWorkerTracks.removeAll()
-    pendingTrackLock.unlock()
   }
 
   private func buildTriggerProperties(
@@ -934,8 +897,20 @@ public class EventService: EventServiceProtocol {
     closeLock.unlock()
     if closing { return }
 
+    await drainEventWorker()
+    await drainJourneyRouteWorker()
+    await drainEventWorker()
+  }
+
+  private func drainEventWorker() async {
     await withCheckedContinuation { cont in
       continuation.yield(.barrier(cont))
+    }
+  }
+
+  private func drainJourneyRouteWorker() async {
+    await withCheckedContinuation { cont in
+      journeyRouteContinuation.yield(.barrier(cont))
     }
   }
 

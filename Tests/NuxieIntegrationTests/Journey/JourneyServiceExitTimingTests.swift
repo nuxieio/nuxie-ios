@@ -338,7 +338,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }
                 expect(startCall).toNot(beNil())
                 expect(startCall?.flushPendingEvents).to(beTrue())
-                expect(startCall?.flushStrategy).to(equal(.networkQueue))
+                expect(startCall?.flushStrategy).to(equal(.eventService))
             }
 
             it("does not start a local journey when server start persistence fails") {
