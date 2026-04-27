@@ -395,6 +395,7 @@ public actor JourneyService: JourneyServiceProtocol {
           properties: [
             "session_id": journey.id,
             "node_id": screenId,
+            "async": true,
             "context": journey.context.mapValues { $0.value },
           ],
           userProperties: nil,
