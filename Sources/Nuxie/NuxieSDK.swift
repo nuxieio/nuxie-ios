@@ -860,14 +860,13 @@ public final class NuxieSDK {
 
   // MARK: - Feature Usage
 
-  /// Report usage of a metered feature (fire-and-forget).
+  /// Report usage of a metered feature in the background.
   ///
-  /// This method queues a `$feature_used` event to be sent in the next batch and immediately
-  /// decrements the local balance for instant UI feedback. Use this for most usage tracking
-  /// where you don't need server confirmation.
+  /// Feature usage is an authoritative command, so it is never sent through the background
+  /// batch queue. Prefer `useFeatureAndWait` when the caller needs the confirmed result.
   ///
-  /// The server will process the event asynchronously and update the ledger. The next profile
-  /// refresh will sync the authoritative balance from the server.
+  /// This convenience method sends the confirmed usage request on a background task and logs
+  /// failures. Local balance is reconciled only from the server response.
   ///
   /// - Parameters:
   ///   - featureId: The feature identifier (external ID configured in Nuxie dashboard)
@@ -897,32 +896,17 @@ public final class NuxieSDK {
       return
     }
 
-    // Build properties for $feature_used event
-    var properties: [String: Any] = [
-      "feature_extId": featureId,
-      "amount": amount,
-      "value": amount  // EventService extracts this for the batch payload
-    ]
-
-    if let metadata = metadata {
-      properties["metadata"] = metadata
-    }
-
-    if let entityId = entityId {
-      properties["entityId"] = entityId
-    }
-
-    // Queue event to batch (fire-and-forget)
-    container.eventService().track(
-      "$feature_used",
-      properties: properties,
-      userProperties: nil,
-      userPropertiesSetOnce: nil
-    )
-
-    // Decrement local balance for immediate UI feedback
-    Task { @MainActor in
-      features.decrementBalance(featureId, amount: Int(amount))
+    Task {
+      do {
+        _ = try await useFeatureAndWait(
+          featureId,
+          amount: amount,
+          entityId: entityId,
+          metadata: metadata
+        )
+      } catch {
+        LogWarning("useFeature failed: \(error)")
+      }
     }
   }
 
