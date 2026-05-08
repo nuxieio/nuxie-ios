@@ -12,6 +12,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
             type: ViewModelPropertyType,
             id: Int,
             defaultValue: AnyCodable? = nil,
+            allowUnset: Bool? = nil,
             itemType: ViewModelProperty? = nil,
             schema: [String: ViewModelProperty]? = nil,
             viewModelId: String? = nil,
@@ -21,6 +22,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 type: type,
                 propertyId: id,
                 defaultValue: defaultValue,
+                allowUnset: allowUnset,
                 required: nil,
                 enumValues: enumValues,
                 itemType: itemType,
@@ -199,6 +201,56 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                 let reason = runtime.getValue(
                     path: .ids(VmPathIds(pathIds: [42, 2])),
                     screenId: "survey-screen"
+                ) as? String
+
+                expect(reason).to(equal("Too expensive"))
+            }
+
+            it("uses explicit instance ids to resolve duplicate view model path ids") {
+                let titleProperty = makeProperty(type: .string, id: 1, defaultValue: AnyCodable(""))
+                let reasonProperty = makeProperty(type: .string, id: 2, defaultValue: AnyCodable(""))
+                let sharedRoot = ViewModel(
+                    id: "vm_runtime_root",
+                    name: "Runtime",
+                    viewModelPathId: 42,
+                    properties: ["title": titleProperty]
+                )
+                let surveyRoot = ViewModel(
+                    id: "vm_runtime_root_survey",
+                    name: "Runtime Survey",
+                    viewModelPathId: 42,
+                    properties: ["reason": reasonProperty]
+                )
+                let remoteFlow = makeRemoteFlow(
+                    viewModels: [sharedRoot, surveyRoot],
+                    viewModelInstances: [
+                        ViewModelInstance(
+                            viewModelId: sharedRoot.id,
+                            instanceId: "shared-instance",
+                            name: "Shared",
+                            values: ["title": AnyCodable("Shared")]
+                        ),
+                        ViewModelInstance(
+                            viewModelId: surveyRoot.id,
+                            instanceId: "survey-instance",
+                            name: "Survey",
+                            values: ["reason": AnyCodable("Too expensive")]
+                        )
+                    ],
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "shared-screen",
+                            defaultViewModelId: sharedRoot.id,
+                            defaultInstanceId: "shared-instance"
+                        )
+                    ]
+                )
+                let runtime = FlowViewModelRuntime(remoteFlow: remoteFlow)
+
+                let reason = runtime.getValue(
+                    path: .ids(VmPathIds(pathIds: [42, 2])),
+                    screenId: "shared-screen",
+                    instanceId: "survey-instance"
                 ) as? String
 
                 expect(reason).to(equal("Too expensive"))
@@ -387,6 +439,53 @@ final class FlowViewModelRuntimeTests: QuickSpec {
                     .to(equal(0))
                 expect(runtime.getValue(path: .ids(VmPathIds(pathIds: [0, 20])), screenId: "screen-1") as? Int)
                     .to(equal(0))
+            }
+
+            it("honors allowUnset while still defaulting present nested objects") {
+                let titleProperty = makeProperty(type: .string, id: 10, allowUnset: true)
+                let nestedFlag = makeProperty(type: .boolean, id: 12)
+                let metaProperty = makeProperty(
+                    type: .object,
+                    id: 11,
+                    allowUnset: true,
+                    schema: ["flag": nestedFlag]
+                )
+                let viewModel = ViewModel(
+                    id: "vm-allow-unset",
+                    name: "Allow Unset",
+                    viewModelPathId: 0,
+                    properties: [
+                        "title": titleProperty,
+                        "meta": metaProperty
+                    ]
+                )
+                let runtime = FlowViewModelRuntime(
+                    remoteFlow: makeRemoteFlow(
+                        viewModels: [viewModel],
+                        viewModelInstances: [
+                            ViewModelInstance(
+                                viewModelId: viewModel.id,
+                                instanceId: "allow-unset-instance",
+                                name: "Allow Unset",
+                                values: ["meta": AnyCodable([String: Any]())]
+                            )
+                        ]
+                    )
+                )
+
+                let title = runtime.getValue(
+                    path: .ids(VmPathIds(pathIds: [0, 10])),
+                    screenId: "screen-1",
+                    instanceId: "allow-unset-instance"
+                )
+                let nestedFlagValue = runtime.getValue(
+                    path: .ids(VmPathIds(pathIds: [0, 11, 12])),
+                    screenId: "screen-1",
+                    instanceId: "allow-unset-instance"
+                ) as? Bool
+
+                expect(title).to(beNil())
+                expect(nestedFlagValue).to(equal(false))
             }
 
             it("detects trigger properties via pathIds") {

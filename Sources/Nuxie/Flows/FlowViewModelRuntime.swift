@@ -366,7 +366,7 @@ public final class FlowViewModelRuntime {
             if ref.isRelative == true || ref.nameBased == true {
                 resolved = resolveNamePathIds(ref, screenId: screenId, instanceId: instanceId)
             } else {
-                resolved = resolvePathIds(ref.pathIds, screenId: screenId)
+                resolved = resolvePathIds(ref.pathIds, screenId: screenId, instanceId: instanceId)
             }
             if let resolved {
                 let resolvedInstanceId = ref.isRelative == true ? instanceId : nil
@@ -393,15 +393,27 @@ public final class FlowViewModelRuntime {
 
     private func resolvePathIds(
         _ pathIds: [Int],
-        screenId: String?
+        screenId: String?,
+        instanceId: String?
     ) -> (viewModelId: String, segments: [PathSegment])? {
         guard let rootPathId = pathIds.first else { return nil }
-        let screenDefaultViewModel = screenId
-            .flatMap { screenDefaults[$0]?.defaultViewModelId }
-            .flatMap { viewModels[$0] }
-        let viewModel =
-            screenDefaultViewModel.flatMap { viewModelPathId($0) == rootPathId ? $0 : nil }
-            ?? viewModelList.first(where: { viewModelPathId($0) == rootPathId })
+        let matches = viewModelList.filter { viewModelPathId($0) == rootPathId }
+        let viewModel: ViewModel?
+        if matches.count <= 1 {
+            viewModel = matches.first
+        } else {
+            let byInstance = instanceId
+                .flatMap { instances[$0] }
+                .flatMap { instance in matches.first { $0.id == instance.viewModelId } }
+            let byScreenDefaultViewModel = screenId
+                .flatMap { screenDefaults[$0]?.defaultViewModelId }
+                .flatMap { defaultViewModelId in matches.first { $0.id == defaultViewModelId } }
+            let byScreenDefaultInstance = screenId
+                .flatMap { screenDefaults[$0]?.defaultInstanceId }
+                .flatMap { instances[$0] }
+                .flatMap { instance in matches.first { $0.id == instance.viewModelId } }
+            viewModel = byInstance ?? byScreenDefaultViewModel ?? byScreenDefaultInstance ?? matches.first
+        }
         guard let viewModel else {
             return nil
         }
@@ -698,6 +710,24 @@ public final class FlowViewModelRuntime {
             if let defaultValue = property.defaultValue {
                 if target[key] == nil {
                     target[key] = defaultValue
+                }
+                continue
+            }
+
+            if property.allowUnset == true {
+                if property.type == .object, let schema = property.schema {
+                    let existingAny = target[key]?.value as? [String: Any]
+                    let existingCodable = target[key]?.value as? [String: AnyCodable]
+                    if existingAny != nil || existingCodable != nil {
+                        var nested: [String: AnyCodable] = existingCodable ?? [:]
+                        if let existingAny {
+                            for (nestedKey, nestedValue) in existingAny {
+                                nested[nestedKey] = AnyCodable(nestedValue)
+                            }
+                        }
+                        applyDefaults(schema: schema, target: &nested)
+                        target[key] = AnyCodable(nested.mapValues { $0.value })
+                    }
                 }
                 continue
             }
