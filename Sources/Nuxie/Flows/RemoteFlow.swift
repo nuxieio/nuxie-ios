@@ -1194,6 +1194,7 @@ public final class ViewModelProperty: Codable {
     public let type: ViewModelPropertyType
     public let propertyId: Int?
     public let defaultValue: AnyCodable?
+    public let allowUnset: Bool?
     public let required: Bool?
     public let enumValues: [String]?
     public let itemType: ViewModelProperty?
@@ -1205,6 +1206,7 @@ public final class ViewModelProperty: Codable {
         type: ViewModelPropertyType,
         propertyId: Int? = nil,
         defaultValue: AnyCodable? = nil,
+        allowUnset: Bool? = nil,
         required: Bool? = nil,
         enumValues: [String]? = nil,
         itemType: ViewModelProperty? = nil,
@@ -1215,6 +1217,7 @@ public final class ViewModelProperty: Codable {
         self.type = type
         self.propertyId = propertyId
         self.defaultValue = defaultValue
+        self.allowUnset = allowUnset
         self.required = required
         self.enumValues = enumValues
         self.itemType = itemType
