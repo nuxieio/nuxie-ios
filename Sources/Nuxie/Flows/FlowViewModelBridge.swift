@@ -737,16 +737,7 @@ final class FlowViewModelBridge {
             let viewModel: ViewModel?
             let propertyIds: [Int]
             if ref.isRelative == true {
-                if let instanceId, let viewModelId = flowInstanceViewModelIds[instanceId] {
-                    viewModel = flowViewModelsById[viewModelId]
-                } else if let screenId,
-                          let defaultViewModelId = remoteFlow?.screens.first(where: { $0.id == screenId })?.defaultViewModelId {
-                    viewModel = flowViewModelsById[defaultViewModelId]
-                } else if let boundFlowViewModelId {
-                    viewModel = flowViewModelsById[boundFlowViewModelId]
-                } else {
-                    viewModel = nil
-                }
+                viewModel = resolveRelativeViewModel(screenId: screenId, instanceId: instanceId)
                 propertyIds = ref.pathIds
             } else {
                 guard let root = ref.pathIds.first else { return nil }
@@ -781,6 +772,33 @@ final class FlowViewModelBridge {
                 property: resolved.property
             )
         }
+    }
+
+    private func resolveRelativeViewModel(screenId: String?, instanceId: String?) -> ViewModel? {
+        if let instanceId,
+           let viewModelId = flowInstanceViewModelIds[instanceId],
+           let viewModel = flowViewModelsById[viewModelId] {
+            return viewModel
+        }
+
+        if let screenId,
+           let screen = remoteFlow?.screens.first(where: { $0.id == screenId }) {
+            if let defaultInstanceId = screen.defaultInstanceId,
+               let viewModelId = flowInstanceViewModelIds[defaultInstanceId],
+               let viewModel = flowViewModelsById[viewModelId] {
+                return viewModel
+            }
+            if let defaultViewModelId = screen.defaultViewModelId,
+               let viewModel = flowViewModelsById[defaultViewModelId] {
+                return viewModel
+            }
+        }
+
+        if let boundFlowViewModelId {
+            return flowViewModelsById[boundFlowViewModelId]
+        }
+
+        return nil
     }
 
     private func resolveRootViewModel(
