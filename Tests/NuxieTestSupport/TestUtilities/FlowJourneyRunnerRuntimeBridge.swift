@@ -1,7 +1,7 @@
 import Foundation
 @testable import Nuxie
 
-/// Serializes web->native runtime messages onto a single execution context,
+/// Serializes native runtime messages onto a single execution context,
 /// mirroring production (JourneyService is an actor).
 actor FlowJourneyRunnerRuntimeBridge {
     private let runner: FlowJourneyRunner

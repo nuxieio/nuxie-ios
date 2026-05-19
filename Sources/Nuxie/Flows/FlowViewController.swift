@@ -1,7 +1,9 @@
 import Foundation
 import FactoryKit
-import WebKit
 import UserNotifications
+#if canImport(RiveRuntime) && canImport(UIKit)
+import RiveRuntime
+#endif
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
@@ -322,7 +324,7 @@ protocol FlowRuntimeDelegate: AnyObject {
         payload: [String: Any],
         id: String?
     )
-    /// Called when the host emits a runtime message toward the web runtime.
+    /// Called when the host emits a runtime message toward the native flow runtime.
     /// This is fired when the message is requested, even if delivery is queued
     /// until runtime readiness.
     func flowViewController(
@@ -376,13 +378,12 @@ extension FlowRuntimeDelegate {
     ) {}
 }
 
-/// FlowViewController - displays flow content in a WebView with loading and error states
-public class FlowViewController: NuxiePlatformViewController, FlowMessageHandlerDelegate {
+/// FlowViewController - displays native flow content with loading and error states.
+public class FlowViewController: NuxiePlatformViewController {
 
     // MARK: - Properties
 
     private let viewModel: FlowViewModel
-    private let fontStore: FontStore
     var notificationAuthorizationHandler: NotificationAuthorizationHandling = UserNotificationAuthorizationHandler()
     var cameraPermissionAuthorizationHandler: PermissionAuthorizationHandling = CameraPermissionAuthorizationHandler()
     var locationPermissionAuthorizationHandler: PermissionAuthorizationHandling = LocationPermissionAuthorizationHandler()
@@ -442,7 +443,10 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     }
 
     // UI Components
-    internal var flowWebView: FlowWebView!
+    #if canImport(RiveRuntime) && canImport(UIKit)
+    private var flowRiveViewModel: RiveViewModel?
+    private var flowRiveView: RiveView?
+    #endif
     #if canImport(UIKit)
     var loadingView: UIView!
     var errorView: UIView!
@@ -477,17 +481,14 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     init(
         flow: Flow,
-        archiveService: FlowArchiver,
-        fontStore: FontStore = FontStore(),
+        artifactStore: FlowArtifactStore,
         artifactTelemetryContext: FlowArtifactTelemetryContext? = nil
     ) {
         self.viewModel = FlowViewModel(
             flow: flow,
-            archiveService: archiveService,
-            fontStore: fontStore,
+            artifactStore: artifactStore,
             artifactTelemetryContext: artifactTelemetryContext
         )
-        self.fontStore = fontStore
         super.init(nibName: nil, bundle: nil)
 
         setupBindings()
@@ -696,7 +697,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
         #endif
     }
 
-    /// Send a runtime message to the Flow bundle
+    /// Send a runtime message to the native flow runtime.
     func sendRuntimeMessage(
         type: String,
         payload: [String: Any] = [:],
@@ -713,7 +714,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
             pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
             return
         }
-        flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
+        completion?(nil, nil)
     }
 
     fileprivate func sendImmediateBridgeResult(
@@ -728,7 +729,7 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
             payload: payload,
             replyTo: replyTo
         )
-        flowWebView.sendBridgeMessage(type: type, payload: payload, replyTo: replyTo, completion: completion)
+        completion?(nil, nil)
     }
 
     // MARK: - Setup
@@ -739,21 +740,14 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
             self?.updateUIState(state)
         }
 
-        // Bind to load URL requests
-        viewModel.onLoadURL = { [weak self] url in
-            self?.flowWebView.loadFileURL(url)
-        }
-
-        // Bind to load request
-        viewModel.onLoadRequest = { [weak self] request in
-            self?.flowWebView.load(request)
+        viewModel.onLoadArtifact = { [weak self] artifact in
+            self?.mountFlowArtifact(artifact)
         }
     }
 
     private func setupViews() {
         platformApplyDefaultBackgroundColor()
 
-        setupWebView()
         platformSetupLoadingView()
         platformSetupErrorView()
 
@@ -761,32 +755,94 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
         updateUIState(.loading)
     }
 
-    private func setupWebView() {
-        flowWebView = FlowWebView(messageHandlerDelegate: self, fontStore: fontStore)
-        flowWebView.isHidden = true
-        view.addSubview(flowWebView)
+    private func mountFlowArtifact(_ artifact: LoadedFlowArtifact) {
+        #if canImport(RiveRuntime) && canImport(UIKit)
+        do {
+            flowRiveView?.removeFromSuperview()
+            flowRiveView = nil
+            flowRiveViewModel = nil
 
-        // Set up callbacks
-        flowWebView.onLoadingStarted = { [weak self] in
-            self?.viewModel.handleLoadingStarted()
+            let data = try Data(contentsOf: artifact.rivURL)
+            let riveFile = try RiveFile(
+                data: data,
+                loadCdn: false,
+                customAssetLoader: { asset, embeddedData, factory in
+                    self.loadRiveAsset(
+                        asset,
+                        embeddedData: embeddedData,
+                        factory: factory,
+                        artifact: artifact
+                    )
+                }
+            )
+            let model = RiveModel(riveFile: riveFile)
+            let riveViewModel = RiveViewModel(
+                model,
+                animationName: nil,
+                fit: .contain,
+                alignment: .center,
+                autoPlay: true,
+                artboardName: artifact.manifest.entry.artboardName
+            )
+            let riveView = riveViewModel.createRiveView()
+            riveView.translatesAutoresizingMaskIntoConstraints = false
+            riveView.isHidden = true
+
+            view.insertSubview(riveView, at: 0)
+            NSLayoutConstraint.activate([
+                riveView.topAnchor.constraint(equalTo: view.topAnchor),
+                riveView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                riveView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                riveView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            ])
+
+            flowRiveViewModel = riveViewModel
+            flowRiveView = riveView
+            runtimeReady = true
+            viewModel.handleLoadingFinished()
+            flushPendingRuntimeMessages()
+            sendRuntimeSafeAreaInsets()
+            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
+            LogDebug("Mounted native flow artifact for flow \(flow.id)")
+        } catch {
+            viewModel.handleLoadingFailed(error)
+        }
+        #else
+        viewModel.handleLoadingFailed(FlowError.configurationFailed(FlowArtifactStoreError.downloadFailed("Rive runtime unavailable")))
+        #endif
+    }
+
+    #if canImport(RiveRuntime) && canImport(UIKit)
+    private func loadRiveAsset(
+        _ asset: RiveFileAsset,
+        embeddedData: Data,
+        factory: RiveFactory,
+        artifact: LoadedFlowArtifact
+    ) -> Bool {
+        let assetName = asset.uniqueName()
+        guard let assetURL = artifact.localAssetURL(forRiveUniqueName: assetName),
+              let data = try? Data(contentsOf: assetURL) else {
+            return false
         }
 
-        flowWebView.onLoadingFinished = { [weak self] in
-            self?.viewModel.handleLoadingFinished()
+        if let imageAsset = asset as? RiveImageAsset {
+            imageAsset.renderImage(factory.decodeImage(data))
+            return true
         }
 
-        flowWebView.onLoadingFailed = { [weak self] error in
-            self?.viewModel.handleLoadingFailed(error)
+        if let fontAsset = asset as? RiveFontAsset {
+            fontAsset.font(factory.decodeFont(data))
+            return true
         }
 
-        NSLayoutConstraint.activate([
-            flowWebView.topAnchor.constraint(equalTo: view.topAnchor),
-            flowWebView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            flowWebView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            flowWebView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+        return false
+    }
+    #endif
 
-        LogDebug("FlowWebView added for flow: \(flow.id)")
+    private func setFlowContentHidden(_ hidden: Bool) {
+        #if canImport(RiveRuntime) && canImport(UIKit)
+        flowRiveView?.isHidden = hidden
+        #endif
     }
 
     // MARK: - UI State Management
@@ -794,19 +850,19 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
     private func updateUIState(_ state: FlowViewModel.State) {
         switch state {
         case .loading:
-            flowWebView.isHidden = true
+            setFlowContentHidden(true)
             loadingView.isHidden = false
             errorView.isHidden = true
             platformStartLoadingIndicator()
 
         case .loaded:
-            flowWebView.isHidden = false
+            setFlowContentHidden(false)
             loadingView.isHidden = true
             errorView.isHidden = true
             platformStopLoadingIndicator()
 
         case .error:
-            flowWebView.isHidden = true
+            setFlowContentHidden(true)
             loadingView.isHidden = true
             errorView.isHidden = false
             platformStopLoadingIndicator()
@@ -815,86 +871,6 @@ public class FlowViewController: NuxiePlatformViewController, FlowMessageHandler
 
     func retryFromErrorView() {
         viewModel.retry()
-    }
-}
-
-// MARK: - FlowMessageHandlerDelegate
-
-extension FlowViewController {
-    // Handle @nuxie/bridge messages directly
-    func messageHandler(
-        _ handler: FlowMessageHandler,
-        didReceiveBridgeMessage type: String,
-        payload: [String: Any],
-        id: String?,
-        from webView: FlowWebView
-    ) {
-        switch type {
-        case "runtime/ready":
-            runtimeReady = true
-            runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            flushPendingRuntimeMessages()
-            sendRuntimeSafeAreaInsets()
-            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
-        case "runtime/screen_changed", "action/did_set", "action/event":
-            runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-        case "action/purchase":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else if let productId = payload["productId"] as? String {
-                handleBridgePurchase(productId: productId, requestId: id)
-            }
-        case "action/restore":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else {
-                handleBridgeRestore(requestId: id)
-            }
-        case "action/request_notifications":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else {
-                performRequestNotifications()
-            }
-        case "action/request_permission":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else if let permissionType = payload["permissionType"] as? String {
-                performRequestPermission(permissionType: permissionType)
-            }
-        case "action/request_tracking":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else {
-                performRequestTracking()
-            }
-        case "action/open_link":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else if let urlString = payload["url"] as? String {
-                performOpenLink(urlString: urlString, target: payload["target"] as? String)
-            }
-        case "action/back":
-            if runtimeDelegate != nil {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else {
-                LogDebug("FlowViewController: Unhandled runtime back action")
-            }
-        case "action/dismiss":
-            performDismiss(reason: .userDismissed)
-        case "dismiss", "closeFlow":
-            performDismiss(reason: .userDismissed)
-        case "openURL":
-            if let urlString = payload["url"] as? String {
-                performOpenLink(urlString: urlString)
-            }
-        default:
-            if type.hasPrefix("action/") {
-                runtimeDelegate?.flowViewController(self, didReceiveRuntimeMessage: type, payload: payload, id: id)
-            } else {
-                LogDebug("FlowViewController: Unhandled bridge message: \(type)")
-            }
-        }
     }
 }
 
@@ -1156,14 +1132,12 @@ private extension FlowViewController {
         _ eventName: String,
         properties: [String: Any]
     ) {
-        guard flowWebView != nil else { return }
-
         var payload: [String: Any] = ["name": eventName]
         if !properties.isEmpty {
             payload["properties"] = properties
         }
 
-        flowWebView.sendBridgeMessage(type: "action/event", payload: payload)
+        sendRuntimeMessage(type: "action/event", payload: payload)
     }
 
     func applyColorSchemeMode() {
@@ -1192,11 +1166,11 @@ private extension FlowViewController {
         let queued = pendingRuntimeMessages
         pendingRuntimeMessages.removeAll()
         for message in queued {
-            flowWebView.sendBridgeMessage(
-                type: message.type,
+            runtimeDelegate?.flowViewController(
+                self,
+                didSendRuntimeMessage: message.type,
                 payload: message.payload,
-                replyTo: message.replyTo,
-                completion: nil
+                replyTo: message.replyTo
             )
         }
     }

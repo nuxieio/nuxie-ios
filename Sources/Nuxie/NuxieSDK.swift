@@ -61,9 +61,6 @@ public final class NuxieSDK {
     // Store configuration and register it FIRST before any service creation
     self.configuration = configuration
     container.sdkConfiguration.register { configuration }
-    RemoteFlow.supportedCapabilities = configuration.flowRuntimeCapabilities
-    RemoteFlow.preferredCompilerBackends = configuration.flowPreferredCompilerBackends
-    RemoteFlow.renderableCompilerBackends = configuration.flowRenderableCompilerBackends
 
     // Configure logger
     NuxieLogger.shared.configure(

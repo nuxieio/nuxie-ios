@@ -63,7 +63,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             return RemoteFlow(
                 id: flowId,
-                bundle: FlowBundleRef(
+                flowArtifact: FlowArtifact(
                     url: "https://example.com/flow/\(flowId)",
                     manifest: BuildManifest(
                         totalFiles: 1,
@@ -1801,7 +1801,7 @@ private final class SpyFlowViewController: FlowViewController {
     private(set) var openLinkRequests: [OpenLinkRequest] = []
 
     init(flow: Flow) {
-        super.init(flow: flow, archiveService: FlowArchiver())
+        super.init(flow: flow, artifactStore: FlowArtifactStore())
     }
 
     required init?(coder: NSCoder) {

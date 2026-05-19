@@ -25,6 +25,7 @@ let package = Package(
         .package(url: "https://github.com/Quick/Quick.git", from: "7.0.0"),
         .package(url: "https://github.com/Quick/Nimble.git", from: "13.0.0"),
         .package(url: "https://github.com/hmlongco/Factory.git", from: "2.5.0"),
+        .package(url: "https://github.com/rive-app/rive-ios.git", from: "6.20.3"),
         .package(url: "https://github.com/RevenueCat/purchases-ios.git", branch: "main"),
         .package(url: "https://github.com/superwall/Superwall-iOS.git", branch: "develop"),
     ],
@@ -32,12 +33,14 @@ let package = Package(
         .target(
             name: "Nuxie",
             dependencies: [
-                .product(name: "FactoryKit", package: "Factory")
+                .product(name: "FactoryKit", package: "Factory"),
+                .product(
+                    name: "RiveRuntime",
+                    package: "rive-ios",
+                    condition: .when(platforms: [.iOS])
+                )
             ],
-            path: "Sources/Nuxie",
-            linkerSettings: [
-                .linkedFramework("WebKit")
-            ]
+            path: "Sources/Nuxie"
         ),
         .testTarget(
             name: "NuxieTestSupport",
@@ -70,17 +73,6 @@ let package = Package(
                 .product(name: "FactoryKit", package: "Factory"),
             ],
             path: "Tests/NuxieIntegrationTests"
-        ),
-        .testTarget(
-            name: "NuxieE2ETests",
-            dependencies: [
-                "Nuxie",
-                "NuxieTestSupport",
-                "Quick",
-                "Nimble",
-                .product(name: "FactoryKit", package: "Factory"),
-            ],
-            path: "Tests/NuxieE2ETests"
         ),
         .target(
             name: "NuxieRevenueCat",

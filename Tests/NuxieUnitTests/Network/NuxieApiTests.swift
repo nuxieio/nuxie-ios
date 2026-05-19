@@ -378,7 +378,7 @@ final class NuxieApiTests: AsyncSpec {
                     let result = try await api.fetchFlow(flowId: flowId)
                     
                     expect(result.id).to(equal(flowId))
-                    expect(result.bundle.url).toNot(beEmpty())
+                    expect(result.flowArtifact.url).toNot(beEmpty())
                 }
                 
                 it("should handle flow not found") {

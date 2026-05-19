@@ -40,7 +40,7 @@ final class FlowViewModelRuntimeTests: QuickSpec {
         ) -> RemoteFlow {
             return RemoteFlow(
                 id: "flow-runtime",
-                bundle: FlowBundleRef(
+                flowArtifact: FlowArtifact(
                     url: "https://example.com/flow/runtime",
                     manifest: BuildManifest(
                         totalFiles: 1,

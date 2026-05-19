@@ -530,18 +530,11 @@ internal actor ProfileService: ProfileServiceProtocol {
     }
 
     static func shouldRefreshCachedFlow(previous: RemoteFlow, next: RemoteFlow) -> Bool {
-        let previousSelectionKey = previous.selectedTarget.map {
-            "\($0.compilerBackend.lowercased()):\($0.buildId)"
-        } ?? "legacy"
-        let nextSelectionKey = next.selectedTarget.map {
-            "\($0.compilerBackend.lowercased()):\($0.buildId)"
-        } ?? "legacy"
+        let previousArtifact = previous.flowArtifact
+        let nextArtifact = next.flowArtifact
 
-        let previousBundle = previous.selectedBundle
-        let nextBundle = next.selectedBundle
-
-        return previousSelectionKey != nextSelectionKey
-            || previousBundle.url != nextBundle.url
-            || previousBundle.manifest.contentHash != nextBundle.manifest.contentHash
+        return previousArtifact.buildId != nextArtifact.buildId
+            || previousArtifact.url != nextArtifact.url
+            || previousArtifact.manifest.contentHash != nextArtifact.manifest.contentHash
     }
 }

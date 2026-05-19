@@ -10,14 +10,14 @@ class MockFlowViewController: FlowViewController {
     init(mockFlowId: String = "test-flow") {
         let description = RemoteFlow(
             id: mockFlowId,
-            bundle: FlowBundleRef(
+            flowArtifact: FlowArtifact(
                 url: "https://example.com/flow/\(mockFlowId)",
                 manifest: BuildManifest(
                     totalFiles: 1,
                     totalSize: 100,
                     contentHash: "test-hash",
                     files: [
-                        BuildFile(path: "index.html", size: 100, contentType: "text/html")
+                        BuildFile(path: "flow.riv", size: 100, contentType: "application/octet-stream")
                     ]
                 )
             ),
@@ -35,9 +35,7 @@ class MockFlowViewController: FlowViewController {
         )
 
         let flow = Flow(remoteFlow: description, products: [])
-        // Create a mock FlowArchiver for testing
-        let mockArchiver = FlowArchiver()
-        super.init(flow: flow, archiveService: mockArchiver)
+        super.init(flow: flow, artifactStore: FlowArtifactStore())
     }
     
     required init?(coder: NSCoder) {

@@ -230,7 +230,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
         func makeFlow(flowId: String = flowId, interactions: [String: [Interaction]] = [:]) -> Flow {
             let remoteFlow = RemoteFlow(
                 id: flowId,
-                bundle: FlowBundleRef(
+                flowArtifact: FlowArtifact(
                     url: "https://example.com/flow/\(flowId)",
                     manifest: BuildManifest(
                         totalFiles: 1,
