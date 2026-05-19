@@ -147,7 +147,7 @@ final class FlowJourneyRunner {
 
     func handleRuntimeReady() async -> RunOutcome? {
         isRuntimeReady = true
-        sendViewModelInit()
+        applyInitialViewModelState()
 
         if let current = journey.flowState.currentScreenId {
             await sendShowScreen(current)
@@ -1176,10 +1176,10 @@ final class FlowJourneyRunner {
             screenId: context.screenId,
             instanceId: context.instanceId
         )
-        sendViewModelPatch(
+        applyViewModelValue(
             path: path,
             value: value,
-            source: "host",
+            screenId: context.screenId,
             instanceId: context.instanceId
         )
     }
@@ -1612,7 +1612,12 @@ final class FlowJourneyRunner {
         )
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
-        sendViewModelPatch(path: action.path, value: resolvedValue, source: "host", instanceId: context.instanceId)
+        applyViewModelValue(
+            path: action.path,
+            value: resolvedValue,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
 
         _ = await dispatchDidSetTrigger(
             path: action.path,
@@ -1639,7 +1644,11 @@ final class FlowJourneyRunner {
         )
         journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
 
-        sendViewModelTrigger(path: action.path, value: timestamp, instanceId: context.instanceId)
+        fireViewModelTrigger(
+            path: action.path,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
 
         _ = await dispatchDidSetTrigger(
             path: action.path,
@@ -1673,7 +1682,7 @@ final class FlowJourneyRunner {
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "insert", path: action.path, payload: payload, instanceId: context.instanceId)
+            applyViewModelListOperation(.insert, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
             let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
@@ -1703,7 +1712,7 @@ final class FlowJourneyRunner {
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "remove", path: action.path, payload: payload, instanceId: context.instanceId)
+            applyViewModelListOperation(.remove, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
             let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
@@ -1736,7 +1745,7 @@ final class FlowJourneyRunner {
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "swap", path: action.path, payload: payload, instanceId: context.instanceId)
+            applyViewModelListOperation(.swap, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
             let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
@@ -1769,7 +1778,7 @@ final class FlowJourneyRunner {
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "move", path: action.path, payload: payload, instanceId: context.instanceId)
+            applyViewModelListOperation(.move, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
             let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
@@ -1803,7 +1812,7 @@ final class FlowJourneyRunner {
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "set", path: action.path, payload: payload, instanceId: context.instanceId)
+            applyViewModelListOperation(.set, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
             let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
@@ -1833,7 +1842,7 @@ final class FlowJourneyRunner {
 
         if ok {
             journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
-            sendViewModelListOperation(op: "clear", path: action.path, payload: payload, instanceId: context.instanceId)
+            applyViewModelListOperation(.clear, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
             let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
@@ -1974,7 +1983,7 @@ final class FlowJourneyRunner {
                 guard let self else { return }
                 _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
                 self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
-                self.sendViewModelTrigger(path: path, value: 0, instanceId: instanceId)
+                self.fireViewModelTrigger(path: path, screenId: screenId, instanceId: instanceId)
             }
         }
     }
@@ -2061,34 +2070,14 @@ final class FlowJourneyRunner {
         )
     }
 
-    private func sendViewModelInit() {
+    private func applyInitialViewModelState() {
         guard let controller = viewController else { return }
         warnConvertersIfNeeded()
-        let encodedViewModels = encodeJSON(remoteFlow.viewModels) ?? []
-        let encodedInstances = encodeJSON(viewModels.allInstances()) ?? []
-        let converters = remoteFlow.converters?.mapValues { value in
-            value.mapValues { $0.value }
-        } ?? [:]
-        let screenDefaults = viewModels.screenDefaultsPayload()
-        let payload: [String: Any] = [
-            "schemaVersion": 2,
-            "viewModels": encodedViewModels,
-            "instances": encodedInstances,
-            "viewModelInstances": encodedInstances,
-            "converters": converters,
-            "screenDefaults": screenDefaults,
-            "schema": [
-                "viewModels": encodedViewModels,
-                "converters": converters,
-            ],
-            "state": [
-                "viewModelInstances": encodedInstances,
-                "screenDefaults": screenDefaults,
-            ],
-        ]
+        let snapshot = viewModels.getSnapshot()
+        let screenId = journey.flowState.currentScreenId
 
         Task { @MainActor in
-            controller.sendRuntimeMessage(type: "runtime/view_model_init", payload: payload)
+            controller.applyViewModelSnapshot(snapshot, screenId: screenId)
         }
     }
 
@@ -2108,50 +2097,54 @@ final class FlowJourneyRunner {
         LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters.\(triggerNote)")
     }
 
-    private func sendViewModelPatch(path: VmPathRef, value: Any, source: String?, instanceId: String? = nil) {
+    private func applyViewModelValue(
+        path: VmPathRef,
+        value: Any,
+        screenId: String?,
+        instanceId: String? = nil
+    ) {
         guard let controller = viewController else { return }
-        var payload: [String: Any] = [
-            "value": value,
-        ]
-        appendPathPayload(&payload, path: path)
-        if let source {
-            payload["source"] = source
-        }
-        if let instanceId {
-            payload["instanceId"] = instanceId
-        }
-
         Task { @MainActor in
-            controller.sendRuntimeMessage(type: "runtime/view_model_patch", payload: payload)
+            controller.applyViewModelValue(
+                path: path,
+                value: value,
+                screenId: screenId,
+                instanceId: instanceId
+            )
         }
     }
 
-    private func sendViewModelListOperation(op: String, path: VmPathRef, payload: [String: Any], instanceId: String? = nil) {
+    private func applyViewModelListOperation(
+        _ operation: FlowViewModelListOperation,
+        path: VmPathRef,
+        payload: [String: Any],
+        screenId: String?,
+        instanceId: String? = nil
+    ) {
         guard let controller = viewController else { return }
-        var message = payload
-        appendPathPayload(&message, path: path)
-        if let instanceId {
-            message["instanceId"] = instanceId
-        }
-
         Task { @MainActor in
-            controller.sendRuntimeMessage(type: "runtime/view_model_list_\(op)", payload: message)
+            controller.applyViewModelListOperation(
+                operation,
+                path: path,
+                payload: payload,
+                screenId: screenId,
+                instanceId: instanceId
+            )
         }
     }
 
-    private func sendViewModelTrigger(path: VmPathRef, value: Any?, instanceId: String? = nil) {
+    private func fireViewModelTrigger(
+        path: VmPathRef,
+        screenId: String?,
+        instanceId: String? = nil
+    ) {
         guard let controller = viewController else { return }
-        var payload: [String: Any] = [:]
-        appendPathPayload(&payload, path: path)
-        if let value {
-            payload["value"] = value
-        }
-        if let instanceId {
-            payload["instanceId"] = instanceId
-        }
-
         Task { @MainActor in
-            controller.sendRuntimeMessage(type: "runtime/view_model_trigger", payload: payload)
+            controller.fireViewModelTrigger(
+                path: path,
+                screenId: screenId,
+                instanceId: instanceId
+            )
         }
     }
 
@@ -2161,24 +2154,8 @@ final class FlowJourneyRunner {
             return
         }
         guard let controller = viewController else { return }
-        var payload: [String: Any] = ["screenId": screenId]
-        if let transition {
-            payload["transition"] = transition.value
-        }
         await MainActor.run {
-            controller.sendRuntimeMessage(type: "runtime/navigate", payload: payload)
-        }
-    }
-
-    private func appendPathPayload(_ payload: inout [String: Any], path: VmPathRef) {
-        if case .ids(let ref) = path {
-            payload["pathIds"] = ref.pathIds
-            if ref.isRelative == true {
-                payload["isRelative"] = true
-            }
-            if ref.nameBased == true {
-                payload["nameBased"] = true
-            }
+            controller.navigate(to: screenId, transition: transition?.value)
         }
     }
 
@@ -2297,13 +2274,6 @@ final class FlowJourneyRunner {
             }
         }
         return nil
-    }
-
-    private func encodeJSON<T: Encodable>(_ value: T) -> Any? {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(value) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
 
     private func evalConditionIR(_ envelope: IREnvelope?, event: NuxieEvent?) async -> Bool {
