@@ -80,7 +80,7 @@ final class FlowJourneyRunner {
     private let campaign: Campaign
     private let flow: Flow
     private let remoteFlow: RemoteFlow
-    private let viewModels: FlowViewModelRuntime
+    private let viewModelState: FlowViewModelStateCoordinator
     private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
@@ -128,16 +128,16 @@ final class FlowJourneyRunner {
         self.campaign = campaign
         self.flow = flow
         self.remoteFlow = flow.remoteFlow
-        self.viewModels = FlowViewModelRuntime(remoteFlow: flow.remoteFlow)
+        self.viewModelState = FlowViewModelStateCoordinator(remoteFlow: flow.remoteFlow)
         self.onGoalHit = onGoalHit
         self.viewController = viewController
 
         self.interactionsById = flow.remoteFlow.interactions
 
         if let snapshot = journey.flowState.viewModelSnapshot {
-            viewModels.hydrate(snapshot)
+            viewModelState.hydrate(snapshot)
         } else {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
         }
     }
 
@@ -188,13 +188,13 @@ final class FlowJourneyRunner {
         instanceId: String?
     ) async -> RunOutcome? {
         let resolvedScreenId = screenId ?? journey.flowState.currentScreenId
-        _ = viewModels.setValue(
+        _ = viewModelState.setValue(
             path: path,
             value: value,
             screenId: resolvedScreenId,
             instanceId: instanceId
         )
-        journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+        journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
 
         let outcome = await dispatchDidSetTrigger(
             path: path,
@@ -1104,19 +1104,19 @@ final class FlowJourneyRunner {
         return ResponseRuntimeContext(
             screenId: screenId,
             instanceId: instanceId,
-            schemaId: viewModels.getValue(
+            schemaId: viewModelState.getValue(
                 path: schemaIdPath,
                 screenId: screenId,
                 instanceId: instanceId
             ) as? String,
             schemaVersion: responseValueAsInt(
-                viewModels.getValue(
+                viewModelState.getValue(
                     path: schemaVersionPath,
                     screenId: screenId,
                     instanceId: instanceId
                 )
             ),
-            state: viewModels.getValue(
+            state: viewModelState.getValue(
                 path: statePath,
                 screenId: screenId,
                 instanceId: instanceId
@@ -1170,7 +1170,7 @@ final class FlowJourneyRunner {
         value: Any,
         context: ResponseRuntimeContext
     ) {
-        _ = viewModels.setValue(
+        _ = viewModelState.setValue(
             path: path,
             value: value,
             screenId: context.screenId,
@@ -1220,7 +1220,7 @@ final class FlowJourneyRunner {
                 context: runtimeContext
             )
         }
-        journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+        journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
     }
 
     private func handleSetResponseField(
@@ -1249,7 +1249,7 @@ final class FlowJourneyRunner {
                 value: "draft",
                 context: runtimeContext
             )
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
         }
 
         do {
@@ -1604,13 +1604,13 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         let resolvedValue = resolveValueRefs(action.value.value, context: context)
         let screenId = context.screenId ?? journey.flowState.currentScreenId
-        _ = viewModels.setValue(
+        _ = viewModelState.setValue(
             path: action.path,
             value: resolvedValue,
             screenId: screenId,
             instanceId: context.instanceId
         )
-        journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+        journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
 
         applyViewModelValue(
             path: action.path,
@@ -1636,13 +1636,13 @@ final class FlowJourneyRunner {
     ) async -> ActionResult {
         let screenId = context.screenId ?? journey.flowState.currentScreenId
         let timestamp = Int(dateProvider.now().timeIntervalSince1970 * 1000)
-        _ = viewModels.setValue(
+        _ = viewModelState.setValue(
             path: action.path,
             value: timestamp,
             screenId: screenId,
             instanceId: context.instanceId
         )
-        journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+        journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
 
         fireViewModelTrigger(
             path: action.path,
@@ -1672,7 +1672,7 @@ final class FlowJourneyRunner {
             payload["index"] = index
         }
 
-        let ok = viewModels.setListValue(
+        let ok = viewModelState.setListValue(
             path: action.path,
             operation: "insert",
             payload: payload,
@@ -1681,9 +1681,9 @@ final class FlowJourneyRunner {
         )
 
         if ok {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.insert, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
                 value: updatedValue,
@@ -1702,7 +1702,7 @@ final class FlowJourneyRunner {
         let screenId = context.screenId ?? journey.flowState.currentScreenId
         let payload: [String: Any] = ["index": action.index]
 
-        let ok = viewModels.setListValue(
+        let ok = viewModelState.setListValue(
             path: action.path,
             operation: "remove",
             payload: payload,
@@ -1711,9 +1711,9 @@ final class FlowJourneyRunner {
         )
 
         if ok {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.remove, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
                 value: updatedValue,
@@ -1735,7 +1735,7 @@ final class FlowJourneyRunner {
             "to": action.indexB
         ]
 
-        let ok = viewModels.setListValue(
+        let ok = viewModelState.setListValue(
             path: action.path,
             operation: "swap",
             payload: payload,
@@ -1744,9 +1744,9 @@ final class FlowJourneyRunner {
         )
 
         if ok {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.swap, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
                 value: updatedValue,
@@ -1768,7 +1768,7 @@ final class FlowJourneyRunner {
             "to": action.to
         ]
 
-        let ok = viewModels.setListValue(
+        let ok = viewModelState.setListValue(
             path: action.path,
             operation: "move",
             payload: payload,
@@ -1777,9 +1777,9 @@ final class FlowJourneyRunner {
         )
 
         if ok {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.move, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
                 value: updatedValue,
@@ -1802,7 +1802,7 @@ final class FlowJourneyRunner {
             "value": resolvedValue
         ]
 
-        let ok = viewModels.setListValue(
+        let ok = viewModelState.setListValue(
             path: action.path,
             operation: "set",
             payload: payload,
@@ -1811,9 +1811,9 @@ final class FlowJourneyRunner {
         )
 
         if ok {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.set, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
                 value: updatedValue,
@@ -1832,7 +1832,7 @@ final class FlowJourneyRunner {
         let screenId = context.screenId ?? journey.flowState.currentScreenId
         let payload: [String: Any] = [:]
 
-        let ok = viewModels.setListValue(
+        let ok = viewModelState.setListValue(
             path: action.path,
             operation: "clear",
             payload: payload,
@@ -1841,9 +1841,9 @@ final class FlowJourneyRunner {
         )
 
         if ok {
-            journey.flowState.viewModelSnapshot = viewModels.getSnapshot()
+            journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.clear, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModels.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
+            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
             _ = await dispatchDidSetTrigger(
                 path: action.path,
                 value: updatedValue,
@@ -1973,7 +1973,7 @@ final class FlowJourneyRunner {
     }
 
     private func scheduleTriggerReset(path: VmPathRef, screenId: String?, instanceId: String?) {
-        guard viewModels.isTriggerPath(path: path, screenId: screenId) else { return }
+        guard viewModelState.isTriggerPath(path: path, screenId: screenId) else { return }
         let key = path.normalizedPath
         triggerResetTasks[key]?.cancel()
         triggerResetTasks[key] = Task { [weak self] in
@@ -1981,8 +1981,8 @@ final class FlowJourneyRunner {
             guard let self else { return }
             self.deferredTaskQueue.enqueue { [weak self] in
                 guard let self else { return }
-                _ = self.viewModels.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
-                self.journey.flowState.viewModelSnapshot = self.viewModels.getSnapshot()
+                _ = self.viewModelState.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
+                self.journey.flowState.viewModelSnapshot = self.viewModelState.getSnapshot()
                 self.fireViewModelTrigger(path: path, screenId: screenId, instanceId: instanceId)
             }
         }
@@ -2073,7 +2073,7 @@ final class FlowJourneyRunner {
     private func applyInitialViewModelState() {
         guard let controller = viewController else { return }
         warnConvertersIfNeeded()
-        let snapshot = viewModels.getSnapshot()
+        let snapshot = viewModelState.getSnapshot()
         let screenId = journey.flowState.currentScreenId
 
         Task { @MainActor in
@@ -2219,7 +2219,7 @@ final class FlowJourneyRunner {
                 return literal
             }
             if dict.count == 1, let refValue = dict["ref"], let ref = parseRefPath(refValue) {
-                return viewModels.getValue(
+                return viewModelState.getValue(
                     path: ref,
                     screenId: context.screenId ?? journey.flowState.currentScreenId,
                     instanceId: context.instanceId
@@ -2236,7 +2236,7 @@ final class FlowJourneyRunner {
                 return literal
             }
             if dict.count == 1, let refValue = dict["ref"]?.value, let ref = parseRefPath(refValue) {
-                return viewModels.getValue(
+                return viewModelState.getValue(
                     path: ref,
                     screenId: context.screenId ?? journey.flowState.currentScreenId,
                     instanceId: context.instanceId
