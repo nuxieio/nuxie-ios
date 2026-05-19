@@ -8,15 +8,30 @@ final class FlowArtifactStoreTests: AsyncSpec {
         func writeFixtureArtifact(
             flowId: String = "flow-artifact-store",
             buildId: String = "build-1",
-            includeImageAsset: Bool = false
-        ) throws -> (baseURL: URL, flow: Flow, cacheURL: URL, rivData: Data, imagePath: String?, imageData: Data?) {
+            includeImageAsset: Bool = false,
+            includeFontAsset: Bool = false,
+            fontFormat: String = "ttf",
+            fontContentType: String = "font/ttf",
+            fontDataOverride: Data? = nil
+        ) throws -> (
+            baseURL: URL,
+            flow: Flow,
+            cacheURL: URL,
+            runtimeCacheURL: URL,
+            rivData: Data,
+            imagePath: String?,
+            imageData: Data?,
+            fontData: Data?
+        ) {
             let rootURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("nuxie-flow-artifact-store-tests")
                 .appendingPathComponent(UUID().uuidString)
             let remoteURL = rootURL.appendingPathComponent("remote")
             let cacheURL = rootURL.appendingPathComponent("cache")
+            let runtimeCacheURL = rootURL.appendingPathComponent("runtime-cache")
             try FileManager.default.createDirectory(at: remoteURL, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: runtimeCacheURL, withIntermediateDirectories: true)
 
             let rivData = Data("fake-riv-bytes".utf8)
             let rivSha = FlowArtifactStore.sha256Hex(rivData)
@@ -34,29 +49,71 @@ final class FlowArtifactStoreTests: AsyncSpec {
                 try imageData.write(to: imageURL)
             }
 
-            let assetsJSON: String
-            if let imagePath, let imageData, let imageSha {
-                assetsJSON = """
+            let fontData: Data?
+            if includeFontAsset {
+                if let fontDataOverride {
+                    fontData = fontDataOverride
+                } else {
+                    fontData = try publishedFixtureFontData()
+                }
+            } else {
+                fontData = nil
+            }
+            let fontSha = fontData.map(FlowArtifactStore.sha256Hex)
+            let fontURL = remoteURL
+                .appendingPathComponent("external-fonts")
+                .appendingPathComponent("test-font.\(fontFormat)")
+            if let fontData {
+                try FileManager.default.createDirectory(
+                    at: fontURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try fontData.write(to: fontURL)
+            }
+
+            var imageAssetEntries: [String] = []
+            if let imagePath, let imageSha {
+                imageAssetEntries.append("""
                 {
-                  "images": [
-                    {
-                      "riveAssetId": 1,
-                      "riveUniqueName": "test-image",
-                      "sourceAssetKey": "test-image-source",
-                      "path": "\(imagePath)",
-                      "sha256": "\(imageSha)",
-                      "contentType": "image/png",
-                      "width": 1,
-                      "height": 1,
-                      "required": true
-                    }
-                  ],
-                  "fonts": []
+                  "riveAssetId": 1,
+                  "riveUniqueName": "test-image",
+                  "sourceAssetKey": "test-image-source",
+                  "path": "\(imagePath)",
+                  "sha256": "\(imageSha)",
+                  "contentType": "image/png",
+                  "width": 1,
+                  "height": 1,
+                  "required": true
+                }
+                """)
+            }
+
+            var fontAssetEntries: [String] = []
+            if let fontData, let fontSha {
+                fontAssetEntries.append("""
+                {
+                  "riveAssetId": 2,
+                  "riveUniqueName": "test-font",
+                  "requestKey": "Inter:400:normal",
+                  "family": "Inter",
+                  "weight": "400",
+                  "style": "normal",
+                  "assetUrl": "\(fontURL.absoluteString)",
+                  "sha256": "\(fontSha)",
+                  "sizeBytes": \(fontData.count),
+                  "contentType": "\(fontContentType)",
+                  "format": "\(fontFormat)",
+                  "required": true
+                }
+                """)
+            }
+
+            let assetsJSON = """
+                {
+                  "images": [\(imageAssetEntries.joined(separator: ","))],
+                  "fonts": [\(fontAssetEntries.joined(separator: ","))]
                 }
                 """
-            } else {
-                assetsJSON = "{ \"images\": [], \"fonts\": [] }"
-            }
 
             let manifestJSON = """
             {
@@ -149,16 +206,40 @@ final class FlowArtifactStoreTests: AsyncSpec {
                 baseURL: remoteURL,
                 flow: Flow(remoteFlow: remoteFlow, products: []),
                 cacheURL: cacheURL,
+                runtimeCacheURL: runtimeCacheURL,
                 rivData: rivData,
                 imagePath: imagePath,
-                imageData: imageData
+                imageData: imageData,
+                fontData: fontData
             )
+        }
+
+        func publishedFixtureFontData() throws -> Data {
+            let testFileURL = URL(fileURLWithPath: #filePath)
+            let sdkRootURL = testFileURL
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+            let fontURL = sdkRootURL
+                .appendingPathComponent("Tests")
+                .appendingPathComponent("FlowRuntimeHostApp")
+                .appendingPathComponent("Fixtures")
+                .appendingPathComponent("published-font")
+                .appendingPathComponent("assets")
+                .appendingPathComponent("fonts")
+                .appendingPathComponent("inter-400-normal.ttf")
+            return try Data(contentsOf: fontURL)
         }
 
         describe("FlowArtifactStore") {
             it("downloads and reuses a verified flow artifact") {
                 let fixture = try writeFixtureArtifact()
-                let store = FlowArtifactStore(cacheDirectory: fixture.cacheURL)
+                let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
+                let store = FlowArtifactStore(
+                    cacheDirectory: fixture.cacheURL,
+                    runtimeAssetStore: runtimeAssetStore
+                )
 
                 let downloaded = try await store.getOrDownloadArtifact(for: fixture.flow)
 
@@ -172,24 +253,121 @@ final class FlowArtifactStoreTests: AsyncSpec {
                 expect(cached.rivURL.path).to(equal(downloaded.rivURL.path))
             }
 
-            it("redownloads when a cached external image is missing") {
+            it("reuses a shared runtime image cache when the artifact copy is missing") {
                 let fixture = try writeFixtureArtifact(includeImageAsset: true)
-                let store = FlowArtifactStore(cacheDirectory: fixture.cacheURL)
+                let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
+                let store = FlowArtifactStore(
+                    cacheDirectory: fixture.cacheURL,
+                    runtimeAssetStore: runtimeAssetStore
+                )
 
                 let downloaded = try await store.getOrDownloadArtifact(for: fixture.flow)
                 guard let imagePath = fixture.imagePath,
-                      let imageData = fixture.imageData else {
+                      let imageData = fixture.imageData,
+                      let sharedImageURL = downloaded.localAssetURL(forRiveUniqueName: "test-image") else {
                     fail("Expected image fixture")
                     return
                 }
 
-                let cachedImageURL = downloaded.directoryURL.appendingPathComponent(imagePath)
-                expect(FileManager.default.fileExists(atPath: cachedImageURL.path)).to(beTrue())
-                try FileManager.default.removeItem(at: cachedImageURL)
+                expect(sharedImageURL.path).to(contain(fixture.runtimeCacheURL.path))
+                expect(try Data(contentsOf: sharedImageURL)).to(equal(imageData))
+
+                let artifactImageURL = downloaded.directoryURL.appendingPathComponent(imagePath)
+                expect(FileManager.default.fileExists(atPath: artifactImageURL.path)).to(beTrue())
+                try FileManager.default.removeItem(at: artifactImageURL)
+
+                let reloaded = try await store.getOrDownloadArtifact(for: fixture.flow)
+                expect(reloaded.source).to(equal(.cachedArtifact))
+                expect(reloaded.localAssetURL(forRiveUniqueName: "test-image")?.path).to(equal(sharedImageURL.path))
+            }
+
+            it("redownloads when a required image is missing from artifact and runtime caches") {
+                let fixture = try writeFixtureArtifact(includeImageAsset: true)
+                let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
+                let store = FlowArtifactStore(
+                    cacheDirectory: fixture.cacheURL,
+                    runtimeAssetStore: runtimeAssetStore
+                )
+
+                let downloaded = try await store.getOrDownloadArtifact(for: fixture.flow)
+                guard let imagePath = fixture.imagePath,
+                      let imageData = fixture.imageData,
+                      let sharedImageURL = downloaded.localAssetURL(forRiveUniqueName: "test-image") else {
+                    fail("Expected image fixture")
+                    return
+                }
+
+                let artifactImageURL = downloaded.directoryURL.appendingPathComponent(imagePath)
+                try FileManager.default.removeItem(at: artifactImageURL)
+                try FileManager.default.removeItem(at: sharedImageURL)
 
                 let reloaded = try await store.getOrDownloadArtifact(for: fixture.flow)
                 expect(reloaded.source).to(equal(.downloadedArtifact))
-                expect(try Data(contentsOf: cachedImageURL)).to(equal(imageData))
+                guard let reloadedImageURL = reloaded.localAssetURL(forRiveUniqueName: "test-image") else {
+                    fail("Expected reloaded image URL")
+                    return
+                }
+                expect(try Data(contentsOf: reloadedImageURL)).to(equal(imageData))
+            }
+
+            it("downloads manifest fonts into the shared runtime cache") {
+                let fixture = try writeFixtureArtifact(includeFontAsset: true)
+                let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
+                let store = FlowArtifactStore(
+                    cacheDirectory: fixture.cacheURL,
+                    runtimeAssetStore: runtimeAssetStore
+                )
+
+                let downloaded = try await store.getOrDownloadArtifact(for: fixture.flow)
+                guard let fontData = fixture.fontData,
+                      let sharedFontURL = downloaded.localAssetURL(forRiveUniqueName: "test-font") else {
+                    fail("Expected font fixture")
+                    return
+                }
+
+                expect(sharedFontURL.path).to(contain(fixture.runtimeCacheURL.path))
+                expect(try Data(contentsOf: sharedFontURL)).to(equal(fontData))
+
+                let cached = try await store.getOrDownloadArtifact(for: fixture.flow)
+                expect(cached.source).to(equal(.cachedArtifact))
+                expect(cached.localAssetURL(forRiveUniqueName: "test-font")?.path).to(equal(sharedFontURL.path))
+            }
+
+            it("rejects unsupported runtime font formats") {
+                let fixture = try writeFixtureArtifact(
+                    includeFontAsset: true,
+                    fontFormat: "woff2",
+                    fontContentType: "font/woff2"
+                )
+                let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
+                let store = FlowArtifactStore(
+                    cacheDirectory: fixture.cacheURL,
+                    runtimeAssetStore: runtimeAssetStore
+                )
+
+                await expect {
+                    try await store.getOrDownloadArtifact(for: fixture.flow)
+                }.to(throwError { error in
+                    expect(error.localizedDescription).to(contain("Unsupported runtime font format"))
+                })
+            }
+
+            it("rejects invalid TTF bytes") {
+                let fixture = try writeFixtureArtifact(
+                    includeFontAsset: true,
+                    fontDataOverride: Data("fake-font-bytes".utf8)
+                )
+                let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
+                let store = FlowArtifactStore(
+                    cacheDirectory: fixture.cacheURL,
+                    runtimeAssetStore: runtimeAssetStore
+                )
+
+                await expect {
+                    try await store.getOrDownloadArtifact(for: fixture.flow)
+                }.to(throwError { error in
+                    expect(error.localizedDescription).to(contain("Invalid runtime font data"))
+                })
             }
 
             it("rejects unsafe manifest paths") {

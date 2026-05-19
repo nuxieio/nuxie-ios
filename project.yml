@@ -187,6 +187,52 @@ targets:
         - NuxieSDKIntegrationTests
       gatherCoverageData: false
 
+  NuxieFlowRuntimeHostApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Tests/FlowRuntimeHostApp/Sources
+        name: FlowRuntimeHostApp
+      - path: Tests/FlowRuntimeHostApp/Fixtures
+        type: folder
+    dependencies:
+      - target: NuxieSDK
+      - package: RiveRuntime
+        product: RiveRuntime
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.flow-runtime-host
+      PRODUCT_NAME: NuxieFlowRuntimeHost
+      MARKETING_VERSION: 0.1.0
+      CURRENT_PROJECT_VERSION: 1
+      SWIFT_VERSION: 5.9
+      INFOPLIST_FILE: Tests/FlowRuntimeHostApp/Sources/Info.plist
+      SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+      SUPPORTS_MACCATALYST: NO
+      TARGETED_DEVICE_FAMILY: "1"
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+
+  NuxieFlowRuntimeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/FlowRuntimeUITests
+        name: FlowRuntimeUITests
+    dependencies:
+      - target: NuxieFlowRuntimeHostApp
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.flow-runtime-uitests
+      GENERATE_INFOPLIST_FILE: YES
+      SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+      SUPPORTS_MACCATALYST: NO
+      TARGETED_DEVICE_FAMILY: "1"
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+    scheme:
+      testTargets:
+        - NuxieFlowRuntimeUITests
+      gatherCoverageData: false
+
 schemes:
   NuxieSDK:
     build:
@@ -235,4 +281,14 @@ schemes:
     test:
       targets:
         - NuxieSDKIntegrationTests
+      gatherCoverageData: false
+
+  NuxieFlowRuntimeUITests:
+    build:
+      targets:
+        NuxieFlowRuntimeHostApp: all
+        NuxieFlowRuntimeUITests: all
+    test:
+      targets:
+        - NuxieFlowRuntimeUITests
       gatherCoverageData: false

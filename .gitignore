@@ -49,6 +49,7 @@ playground.xcworkspace
 .build/
 *.xcresult/
 .xcode-spm/
+test-results/
 
 # CocoaPods
 #
