@@ -832,7 +832,6 @@ public class FlowViewController: NuxiePlatformViewController {
             flowViewModelBridge = nil
             flowArtifact = nil
             pendingNativeScreenBindingId = nil
-            pendingNativeRuntimeCommands.removeAll()
 
             let data = try Data(contentsOf: artifact.rivURL)
             let riveFile = try RiveFile(
@@ -895,7 +894,6 @@ public class FlowViewController: NuxiePlatformViewController {
         } catch {
             flowArtifact = nil
             pendingNativeScreenBindingId = nil
-            pendingNativeRuntimeCommands.removeAll()
             viewModel.handleLoadingFailed(error)
         }
         #else
