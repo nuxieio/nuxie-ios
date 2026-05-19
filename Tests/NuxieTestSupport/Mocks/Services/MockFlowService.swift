@@ -3,43 +3,101 @@ import Foundation
 
 /// Mock implementation of FlowService for testing
 public class MockFlowService: FlowServiceProtocol {
-    public var prefetchedFlows: [RemoteFlow] = []
-    public var removedFlowIds: [String] = []
-    public var fetchedFlowIds: [String] = []
+    private let lock = NSRecursiveLock()
+    private var _prefetchedFlows: [RemoteFlow] = []
+    private var _removedFlowIds: [String] = []
+    private var _fetchedFlowIds: [String] = []
     
     // Error testing properties
-    public var shouldFailFlowDisplay = false
-    public var failureError: Error?
-    public var displayAttempts: [(flowId: String, timestamp: Date)] = []
+    private var _shouldFailFlowDisplay = false
+    private var _failureError: Error?
+    private var _displayAttempts: [(flowId: String, timestamp: Date)] = []
 
-    public var mockFlows: [String: Flow] = [:]
-    public var defaultMockFlow: Flow?
+    private var _mockFlows: [String: Flow] = [:]
+    private var _defaultMockFlow: Flow?
     
     // Property storage for testing
-    private var properties: [String: Any] = [:]
+    private var _properties: [String: Any] = [:]
     
     // View controller generation for testing
-    public var mockViewControllers: [String: FlowViewController] = [:]
-    public var defaultMockViewController: FlowViewController?
+    private var _mockViewControllers: [String: FlowViewController] = [:]
+    private var _defaultMockViewController: FlowViewController?
+
+    public var prefetchedFlows: [RemoteFlow] {
+        get { withLock { _prefetchedFlows } }
+        set { withLock { _prefetchedFlows = newValue } }
+    }
+
+    public var removedFlowIds: [String] {
+        get { withLock { _removedFlowIds } }
+        set { withLock { _removedFlowIds = newValue } }
+    }
+
+    public var fetchedFlowIds: [String] {
+        get { withLock { _fetchedFlowIds } }
+        set { withLock { _fetchedFlowIds = newValue } }
+    }
+
+    public var shouldFailFlowDisplay: Bool {
+        get { withLock { _shouldFailFlowDisplay } }
+        set { withLock { _shouldFailFlowDisplay = newValue } }
+    }
+
+    public var failureError: Error? {
+        get { withLock { _failureError } }
+        set { withLock { _failureError = newValue } }
+    }
+
+    public var displayAttempts: [(flowId: String, timestamp: Date)] {
+        get { withLock { _displayAttempts } }
+        set { withLock { _displayAttempts = newValue } }
+    }
+
+    public var mockFlows: [String: Flow] {
+        get { withLock { _mockFlows } }
+        set { withLock { _mockFlows = newValue } }
+    }
+
+    public var defaultMockFlow: Flow? {
+        get { withLock { _defaultMockFlow } }
+        set { withLock { _defaultMockFlow = newValue } }
+    }
+
+    public var mockViewControllers: [String: FlowViewController] {
+        get { withLock { _mockViewControllers } }
+        set { withLock { _mockViewControllers = newValue } }
+    }
+
+    public var defaultMockViewController: FlowViewController? {
+        get { withLock { _defaultMockViewController } }
+        set { withLock { _defaultMockViewController = newValue } }
+    }
     
     public func prefetchFlows(_ remoteFlows: [RemoteFlow]) {
-        prefetchedFlows.append(contentsOf: remoteFlows)
+        withLock {
+            _prefetchedFlows.append(contentsOf: remoteFlows)
+        }
     }
     
     public func removeFlows(_ flowIds: [String]) async {
-        removedFlowIds.append(contentsOf: flowIds)
+        withLock {
+            _removedFlowIds.append(contentsOf: flowIds)
+        }
     }
 
     public func fetchFlow(id: String) async throws -> Flow {
-        fetchedFlowIds.append(id)
+        lock.lock()
+        defer { lock.unlock() }
 
-        if let flow = mockFlows[id] {
+        _fetchedFlowIds.append(id)
+
+        if let flow = _mockFlows[id] {
             return flow
         }
-        if let flow = defaultMockFlow {
+        if let flow = _defaultMockFlow {
             return flow
         }
-        if let error = failureError {
+        if let error = _failureError {
             throw error
         }
         throw MockFlowServiceError.flowNotFound(id)
@@ -47,21 +105,20 @@ public class MockFlowService: FlowServiceProtocol {
     
     @MainActor
     public func viewController(for flowId: String) async throws -> FlowViewController {
-        // Track display attempts
-        displayAttempts.append((flowId: flowId, timestamp: Date()))
+        lock.lock()
+        defer { lock.unlock() }
+
+        _displayAttempts.append((flowId: flowId, timestamp: Date()))
         
-        // Check if we should fail
-        if shouldFailFlowDisplay {
-            throw failureError ?? MockFlowServiceError.flowNotFound(flowId)
+        if _shouldFailFlowDisplay {
+            throw _failureError ?? MockFlowServiceError.flowNotFound(flowId)
         }
         
-        // Return specific mock view controller if available
-        if let mockVC = mockViewControllers[flowId] {
+        if let mockVC = _mockViewControllers[flowId] {
             return mockVC
         }
         
-        // Return default mock view controller if available
-        if let defaultVC = defaultMockViewController {
+        if let defaultVC = _defaultMockViewController {
             return defaultVC
         }
         
@@ -101,32 +158,43 @@ public class MockFlowService: FlowServiceProtocol {
     }
     
     public func clearCache() async {
-        // Mock implementation - just clear tracked data
-        prefetchedFlows = []
-        removedFlowIds = []
+        withLock {
+            _prefetchedFlows = []
+            _removedFlowIds = []
+        }
     }
     
     public func reset() {
-        prefetchedFlows = []
-        removedFlowIds = []
-        fetchedFlowIds = []
-        shouldFailFlowDisplay = false
-        failureError = nil
-        displayAttempts = []
-        properties = [:]
-        mockViewControllers = [:]
-        defaultMockViewController = nil
-        mockFlows = [:]
-        defaultMockFlow = nil
+        withLock {
+            _prefetchedFlows = []
+            _removedFlowIds = []
+            _fetchedFlowIds = []
+            _shouldFailFlowDisplay = false
+            _failureError = nil
+            _displayAttempts = []
+            _properties = [:]
+            _mockViewControllers = [:]
+            _defaultMockViewController = nil
+            _mockFlows = [:]
+            _defaultMockFlow = nil
+        }
     }
     
     // Property storage methods for testing
     public func getProperty(_ key: String) -> Any? {
-        return properties[key]
+        return withLock { _properties[key] }
     }
     
     public func setProperty(_ key: String, value: Any?) {
-        properties[key] = value
+        withLock {
+            _properties[key] = value
+        }
+    }
+
+    private func withLock<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
     }
 }
 
