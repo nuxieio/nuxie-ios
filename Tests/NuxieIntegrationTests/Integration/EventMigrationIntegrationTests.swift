@@ -383,6 +383,9 @@ final class EventMigrationIntegrationTests: AsyncSpec {
                         fail("Expected bulk events to include a distinctId")
                         return
                     }
+                    let sourceEvents = await eventService.getEventsForUser(sourceDistinctId, limit: 200)
+                    let sourceBulkEvents = sourceEvents.filter { $0.name.starts(with: "bulk_event") }
+                    expect(sourceBulkEvents.count).to(equal(eventCount))
                     
                     // Record time before migration
                     let startTime = Date()
@@ -395,7 +398,7 @@ final class EventMigrationIntegrationTests: AsyncSpec {
 
                     // Measure migration time after completion
                     let migrationTime = Date().timeIntervalSince(startTime)
-                    expect(reassignedCount).to(equal(eventCount))
+                    expect(reassignedCount).to(equal(sourceEvents.count))
                     expect(migrationTime).to(beLessThan(1.0))
 
                     let migratedEvents = await eventService.getEventsForUser(userId, limit: 200)
