@@ -92,6 +92,13 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             return Int(hash)
         }
 
+        func expectNoLegacyRendererMessages(_ controller: SpyFlowViewController) {
+            let legacyMessages = controller.messages.map(\.type).filter { type in
+                type.hasPrefix("runtime/view_model") || type == "runtime/navigate"
+            }
+            expect(legacyMessages).to(beEmpty())
+        }
+
         describe("FlowJourneyRunner") {
             it("pauses on entry delay") {
                 let flowId = "flow-delay"
@@ -199,6 +206,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
 
                 await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
+                expectNoLegacyRendererMessages(controller)
             }
 
             it("dispatches global did_set interactions") {
@@ -394,6 +402,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
                     contain(VmPathRef.ids(VmPathIds(pathIds: [0, 1])).normalizedPath)
                 )
+                expectNoLegacyRendererMessages(controller)
             }
 
             it("handles list_insert and fire_trigger actions") {
@@ -479,6 +488,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.viewModelTriggers.map(\.path.normalizedPath)).toEventually(
                     contain(VmPathRef.ids(VmPathIds(pathIds: [0, 4])).normalizedPath)
                 )
+                expectNoLegacyRendererMessages(controller)
             }
 
             it("handles list_move, list_set, and list_clear actions") {

@@ -41,7 +41,9 @@ private struct ResolvedPathInfo {
     let viewModel: ViewModel?
 }
 
-public final class FlowViewModelRuntime {
+/// Small SDK-owned state mirror used to evaluate flow-description values,
+/// dispatch did-set behavior, and persist snapshots between renderer updates.
+final class FlowViewModelStateCoordinator {
     private let remoteFlow: RemoteFlow
     private var viewModels: [String: ViewModel] = [:]
     private var viewModelList: [ViewModel] = []
@@ -49,7 +51,7 @@ public final class FlowViewModelRuntime {
     private var instancesByViewModel: [String: [String]] = [:]
     private var screenDefaults: [String: (defaultViewModelId: String?, defaultInstanceId: String?)] = [:]
 
-    public init(remoteFlow: RemoteFlow) {
+    init(remoteFlow: RemoteFlow) {
         self.remoteFlow = remoteFlow
         self.viewModelList = remoteFlow.viewModels
 
@@ -86,7 +88,7 @@ public final class FlowViewModelRuntime {
         }
     }
 
-    public func getSnapshot() -> FlowViewModelSnapshot {
+    func getSnapshot() -> FlowViewModelSnapshot {
         let values = instances.values.map { state -> ViewModelInstance in
             ViewModelInstance(
                 viewModelId: state.viewModelId,
@@ -98,7 +100,7 @@ public final class FlowViewModelRuntime {
         return FlowViewModelSnapshot(viewModelInstances: values)
     }
 
-    public func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
+    func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
         let resolved = resolvePathInfo(path, screenId: screenId, instanceId: nil)
         guard let instance = resolved.instance else { return false }
         if resolved.segments.isEmpty { return false }
@@ -111,7 +113,7 @@ public final class FlowViewModelRuntime {
         return property.type == .trigger
     }
 
-    public func hydrate(_ snapshot: FlowViewModelSnapshot) {
+    func hydrate(_ snapshot: FlowViewModelSnapshot) {
         instances.removeAll()
         instancesByViewModel.removeAll()
 
@@ -138,7 +140,7 @@ public final class FlowViewModelRuntime {
         }
     }
 
-    public func setValue(
+    func setValue(
         path: VmPathRef,
         value: Any,
         screenId: String?,
@@ -168,7 +170,7 @@ public final class FlowViewModelRuntime {
         return true
     }
 
-    public func getValue(path: VmPathRef, screenId: String?, instanceId: String? = nil) -> Any? {
+    func getValue(path: VmPathRef, screenId: String?, instanceId: String? = nil) -> Any? {
         let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
         guard let instance = resolved.instance else { return nil }
 
@@ -206,7 +208,7 @@ public final class FlowViewModelRuntime {
         return current
     }
 
-    public func setListValue(
+    func setListValue(
         path: VmPathRef,
         operation: String,
         payload: [String: Any],
@@ -289,34 +291,6 @@ public final class FlowViewModelRuntime {
         }
 
         return false
-    }
-
-    public func allInstances() -> [ViewModelInstance] {
-        return instances.values.map { state in
-            ViewModelInstance(
-                viewModelId: state.viewModelId,
-                instanceId: state.instanceId,
-                name: state.name,
-                values: state.values
-            )
-        }
-    }
-
-    public func screenDefaultsPayload() -> [String: [String: String]] {
-        var payload: [String: [String: String]] = [:]
-        for (screenId, defaults) in screenDefaults {
-            var entry: [String: String] = [:]
-            if let viewModelId = defaults.defaultViewModelId {
-                entry["defaultViewModelId"] = viewModelId
-            }
-            if let instanceId = defaults.defaultInstanceId {
-                entry["defaultInstanceId"] = instanceId
-            }
-            if !entry.isEmpty {
-                payload[screenId] = entry
-            }
-        }
-        return payload
     }
 
     private func resolveInstance(
