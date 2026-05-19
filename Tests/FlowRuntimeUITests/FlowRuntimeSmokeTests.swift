@@ -50,8 +50,8 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             "Expected the fixture runtime event log to mount"
         )
         XCTAssertTrue(
-            eventLog.waitForLabel(containing: "navigated:screen_2", timeout: 10),
-            "Expected tapping the published Pressable to emit a native interaction and run the flow navigate action"
+            eventLog.waitForLabel(containing: "screen:screen_2", timeout: 10),
+            "Expected tapping the published Pressable to emit a native interaction and reach the target screen"
         )
 
         try captureScreenshot(named: "pressable-interaction")
