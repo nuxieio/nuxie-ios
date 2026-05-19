@@ -177,6 +177,21 @@ public enum FlowRuntimeFixtureHost {
                 event: nil
             )
         }
+
+        func handleEvent(_ event: FlowRendererEvent) async -> FlowJourneyRunner.RunOutcome? {
+            let runtimeEvent = NuxieEvent(
+                name: event.name,
+                distinctId: "fixture-distinct-id",
+                properties: event.properties
+            )
+            return await runner.dispatchTrigger(
+                trigger: .event(eventName: event.name, filter: nil),
+                screenId: event.screenId ?? currentScreenId,
+                componentId: event.componentId,
+                instanceId: event.instanceId,
+                event: runtimeEvent
+            )
+        }
     }
 
     private final class FlowRuntimeFixtureExecutionRuntime: FlowRuntimeDelegate {
@@ -244,6 +259,17 @@ public enum FlowRuntimeFixtureHost {
             Task { [bridge, weak self] in
                 guard let self else { return }
                 await self.handleOutcome(await bridge.handleInteraction(interaction))
+            }
+        }
+
+        func flowViewController(
+            _ controller: FlowViewController,
+            didEmitEvent event: FlowRendererEvent
+        ) {
+            setStatus("event:\(event.name)")
+            Task { [bridge, weak self] in
+                guard let self else { return }
+                await self.handleOutcome(await bridge.handleEvent(event))
             }
         }
 

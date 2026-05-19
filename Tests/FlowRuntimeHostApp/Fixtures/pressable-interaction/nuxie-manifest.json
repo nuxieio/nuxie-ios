@@ -5,8 +5,8 @@
   "renderer": "rive",
   "riv": {
     "path": "flow.riv",
-    "sha256": "cc4fd6fe4239e30d1cd3de6a460ad91d2eb3d4fd21e7b840f703bfcefdcf3d48",
-    "sizeBytes": 459
+    "sha256": "7e48a23db1b798f6f8147837013923784fe50260179f2fc259f468dc4d23ff63",
+    "sizeBytes": 409
   },
   "entry": {
     "screenId": "screen_1",
