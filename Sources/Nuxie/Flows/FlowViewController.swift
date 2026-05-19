@@ -1323,9 +1323,13 @@ private extension FlowViewController {
         switch command {
         case .viewModelSnapshot(let snapshot, let screenId):
             _ = flowViewModelBridge?.applySnapshot(snapshot, screenId: screenId)
+            let didSatisfyPendingScreenBinding = screenId != nil && pendingNativeScreenBindingId == screenId
             if let screenId,
                flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true {
                 pendingNativeScreenBindingId = nil
+                if didSatisfyPendingScreenBinding {
+                    flowRiveView?.advance(delta: 0)
+                }
             }
             bindPendingNativeScreenIfNeeded()
         case .viewModelValue(let path, let value, let screenId, let instanceId):
