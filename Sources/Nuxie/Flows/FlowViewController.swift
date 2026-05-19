@@ -758,6 +758,7 @@ public class FlowViewController: NuxiePlatformViewController {
     private func mountFlowArtifact(_ artifact: LoadedFlowArtifact) {
         #if canImport(RiveRuntime) && canImport(UIKit)
         do {
+            runtimeReady = false
             flowRiveView?.removeFromSuperview()
             flowRiveView = nil
             flowRiveViewModel = nil
@@ -766,13 +767,13 @@ public class FlowViewController: NuxiePlatformViewController {
             let riveFile = try RiveFile(
                 data: data,
                 loadCdn: false,
-                customAssetLoader: { asset, embeddedData, factory in
-                    self.loadRiveAsset(
+                customAssetLoader: { [weak self] asset, embeddedData, factory in
+                    self?.loadRiveAsset(
                         asset,
                         embeddedData: embeddedData,
                         factory: factory,
                         artifact: artifact
-                    )
+                    ) ?? false
                 }
             )
             let model = RiveModel(riveFile: riveFile)
@@ -798,11 +799,7 @@ public class FlowViewController: NuxiePlatformViewController {
 
             flowRiveViewModel = riveViewModel
             flowRiveView = riveView
-            runtimeReady = true
-            viewModel.handleLoadingFinished()
-            flushPendingRuntimeMessages()
-            sendRuntimeSafeAreaInsets()
-            sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
+            handleNativeRuntimeReady()
             LogDebug("Mounted native flow artifact for flow \(flow.id)")
         } catch {
             viewModel.handleLoadingFailed(error)
@@ -810,6 +807,20 @@ public class FlowViewController: NuxiePlatformViewController {
         #else
         viewModel.handleLoadingFailed(FlowError.configurationFailed(FlowArtifactStoreError.downloadFailed("Rive runtime unavailable")))
         #endif
+    }
+
+    func handleNativeRuntimeReady() {
+        runtimeReady = true
+        viewModel.handleLoadingFinished()
+        runtimeDelegate?.flowViewController(
+            self,
+            didReceiveRuntimeMessage: "runtime/ready",
+            payload: [:],
+            id: nil
+        )
+        flushPendingRuntimeMessages()
+        sendRuntimeSafeAreaInsets()
+        sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
     }
 
     #if canImport(RiveRuntime) && canImport(UIKit)

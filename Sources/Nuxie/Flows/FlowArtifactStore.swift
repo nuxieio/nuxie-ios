@@ -226,17 +226,7 @@ actor FlowArtifactStore {
         }
 
         let manifest = try decodeManifest(at: manifestURL)
-        let rivURL = try localURL(forRelativePath: manifest.riv.path, in: directoryURL)
-        guard FileManager.default.fileExists(atPath: rivURL.path) else {
-            return nil
-        }
-
-        try verifyFile(
-            at: rivURL,
-            path: manifest.riv.path,
-            expectedSize: manifest.riv.sizeBytes,
-            expectedSha256: manifest.riv.sha256
-        )
+        let rivURL = try verifyManifestFiles(manifest, directoryURL: directoryURL)
 
         return LoadedFlowArtifact(
             flow: flow,
@@ -249,8 +239,13 @@ actor FlowArtifactStore {
     }
 
     func getOrDownloadArtifact(for flow: Flow) async throws -> LoadedFlowArtifact {
-        if let cached = try getCachedArtifact(for: flow) {
-            return cached
+        do {
+            if let cached = try getCachedArtifact(for: flow) {
+                return cached
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: canonicalDirectoryURL(for: flow))
+            LogDebug("Discarded invalid cached flow artifact for \(flow.id): \(error)")
         }
 
         let key = artifactCacheKey(for: flow)
@@ -314,31 +309,11 @@ actor FlowArtifactStore {
         }
 
         let manifest = try decodeManifest(at: manifestURL)
-        let rivURL = try localURL(forRelativePath: manifest.riv.path, in: directoryURL)
-        guard FileManager.default.fileExists(atPath: rivURL.path) else {
-            throw FlowArtifactStoreError.missingRivFile(manifest.riv.path)
-        }
-
-        try verifyFile(
-            at: rivURL,
-            path: manifest.riv.path,
-            expectedSize: manifest.riv.sizeBytes,
-            expectedSha256: manifest.riv.sha256
-        )
-
-        for image in manifest.assets.images {
-            let imageURL = try localURL(forRelativePath: image.path, in: directoryURL)
-            try verifyFile(
-                at: imageURL,
-                path: image.path,
-                expectedSize: nil,
-                expectedSha256: image.sha256
-            )
-        }
-
         for font in manifest.assets.fonts {
             try await downloadFontAsset(font, directoryURL: directoryURL)
         }
+
+        let rivURL = try verifyManifestFiles(manifest, directoryURL: directoryURL)
 
         return LoadedFlowArtifact(
             flow: flow,
@@ -430,6 +405,46 @@ actor FlowArtifactStore {
     private func decodeManifest(at url: URL) throws -> FlowArtifactManifest {
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(FlowArtifactManifest.self, from: data)
+    }
+
+    private func verifyManifestFiles(
+        _ manifest: FlowArtifactManifest,
+        directoryURL: URL
+    ) throws -> URL {
+        let rivURL = try localURL(forRelativePath: manifest.riv.path, in: directoryURL)
+        guard FileManager.default.fileExists(atPath: rivURL.path) else {
+            throw FlowArtifactStoreError.missingRivFile(manifest.riv.path)
+        }
+
+        try verifyFile(
+            at: rivURL,
+            path: manifest.riv.path,
+            expectedSize: manifest.riv.sizeBytes,
+            expectedSha256: manifest.riv.sha256
+        )
+
+        for image in manifest.assets.images {
+            let imageURL = try localURL(forRelativePath: image.path, in: directoryURL)
+            try verifyFile(
+                at: imageURL,
+                path: image.path,
+                expectedSize: nil,
+                expectedSha256: image.sha256
+            )
+        }
+
+        for font in manifest.assets.fonts {
+            let fontPath = Self.localFontPath(for: font)
+            let fontURL = try localURL(forRelativePath: fontPath, in: directoryURL)
+            try verifyFile(
+                at: fontURL,
+                path: fontPath,
+                expectedSize: font.sizeBytes,
+                expectedSha256: font.sha256
+            )
+        }
+
+        return rivURL
     }
 
     private func verifyFile(
