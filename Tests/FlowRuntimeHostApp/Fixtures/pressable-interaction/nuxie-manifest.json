@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "flowId": "pressable-interaction",
+  "buildId": "build_1",
+  "renderer": "rive",
+  "riv": {
+    "path": "flow.riv",
+    "sha256": "36d0fb2b02ec242d1ae46440bd974983469f0fba0b30b2aac5c1d056418dd8a9",
+    "sizeBytes": 666
+  },
+  "entry": {
+    "screenId": "screen_1",
+    "artboardId": "screen_1",
+    "artboardName": "Pressable",
+    "width": 390,
+    "height": 844
+  },
+  "screens": [
+    {
+      "screenId": "screen_1",
+      "artboardId": "screen_1",
+      "artboardName": "Pressable",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "screenId": "screen_2",
+      "artboardId": "screen_2",
+      "artboardName": "Next",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "assets": {
+    "images": [],
+    "fonts": []
+  },
+  "textInputs": []
+}

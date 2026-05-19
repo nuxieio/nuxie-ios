@@ -1,7 +1,11 @@
 import Foundation
 import FactoryKit
 
-#if DEBUG
+#if canImport(UIKit)
+import UIKit
+#endif
+
+#if DEBUG && canImport(UIKit)
 public enum FlowRuntimeFixtureHost {
     private static let fixtureBaseURLToken = "__NUXIE_FIXTURE_BASE_URL__"
 
@@ -10,7 +14,7 @@ public enum FlowRuntimeFixtureHost {
         fixtureBaseURL: URL,
         cacheRootURL: URL,
         flowId: String = "flow-runtime-fixture"
-    ) throws -> FlowViewController {
+    ) throws -> UIViewController {
         registerFixtureConfiguration(cacheRootURL: cacheRootURL)
 
         let fixtureBaseURL = try prepareFixtureBaseURL(
@@ -20,6 +24,7 @@ public enum FlowRuntimeFixtureHost {
         let manifestURL = fixtureBaseURL.appendingPathComponent(FlowArtifactStore.manifestPath)
         let manifestData = try Data(contentsOf: manifestURL)
         let manifest = try JSONDecoder().decode(FlowArtifactManifest.self, from: manifestData)
+        let fixtureFlowDescription = try loadFixtureFlowDescription(fixtureBaseURL: fixtureBaseURL)
 
         let buildFiles = try buildFiles(
             for: manifest,
@@ -39,14 +44,14 @@ public enum FlowRuntimeFixtureHost {
                 buildId: manifest.buildId,
                 manifest: buildManifest
             ),
-            screens: manifest.screens.map {
+            screens: fixtureFlowDescription.screens ?? manifest.screens.map {
                 RemoteFlowScreen(
                     id: $0.screenId,
                     defaultViewModelId: nil,
                     defaultInstanceId: nil
                 )
             },
-            interactions: [:],
+            interactions: fixtureFlowDescription.interactions ?? [:],
             viewModels: [],
             viewModelInstances: nil,
             converters: nil
@@ -60,10 +65,178 @@ public enum FlowRuntimeFixtureHost {
             runtimeAssetStore: runtimeAssetStore
         )
 
-        return FlowViewController(
-            flow: Flow(remoteFlow: remoteFlow, products: []),
+        let flow = Flow(remoteFlow: remoteFlow, products: [])
+        let flowViewController = FlowViewController(
+            flow: flow,
             artifactStore: artifactStore
         )
+
+        if fixtureFlowDescription.interactions?.isEmpty == false {
+            return FlowRuntimeFixtureContainerViewController(
+                flowViewController: flowViewController,
+                flow: flow
+            )
+        }
+
+        return flowViewController
+    }
+
+    private static func loadFixtureFlowDescription(
+        fixtureBaseURL: URL
+    ) throws -> FixtureFlowDescription {
+        let url = fixtureBaseURL.appendingPathComponent("flow-description.json")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return FixtureFlowDescription()
+        }
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(FixtureFlowDescription.self, from: data)
+    }
+
+    private struct FixtureFlowDescription: Decodable {
+        var screens: [RemoteFlowScreen]? = nil
+        var interactions: [String: [Interaction]]? = nil
+    }
+
+    private final class FlowRuntimeFixtureContainerViewController: UIViewController {
+        private let flowViewController: FlowViewController
+        private let statusLabel = UILabel()
+        private let runtime: FlowRuntimeFixtureExecutionRuntime
+
+        init(flowViewController: FlowViewController, flow: Flow) {
+            self.flowViewController = flowViewController
+            self.runtime = FlowRuntimeFixtureExecutionRuntime(
+                flow: flow,
+                flowViewController: flowViewController
+            )
+            super.init(nibName: nil, bundle: nil)
+            self.runtime.statusLabel = statusLabel
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+
+            addChild(flowViewController)
+            flowViewController.view.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(flowViewController.view)
+            flowViewController.didMove(toParent: self)
+
+            statusLabel.translatesAutoresizingMaskIntoConstraints = false
+            statusLabel.accessibilityIdentifier = "nuxie-flow-event-log"
+            statusLabel.text = "ready"
+            statusLabel.textColor = .label
+            statusLabel.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
+            statusLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            statusLabel.textAlignment = .center
+            statusLabel.numberOfLines = 1
+            view.addSubview(statusLabel)
+
+            NSLayoutConstraint.activate([
+                flowViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                flowViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                flowViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
+                flowViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+                statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+                statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+                statusLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+                statusLabel.heightAnchor.constraint(equalToConstant: 32),
+            ])
+        }
+    }
+
+    private final class FlowRuntimeFixtureExecutionRuntime: FlowRuntimeDelegate {
+        private let runner: FlowJourneyRunner
+        weak var statusLabel: UILabel?
+
+        init(flow: Flow, flowViewController: FlowViewController) {
+            let campaign = Campaign(
+                id: "fixture-campaign",
+                name: "Fixture Campaign",
+                flowId: flow.remoteFlow.id,
+                flowNumber: 1,
+                flowName: "Fixture Flow",
+                reentry: .everyTime,
+                publishedAt: ISO8601DateFormatter().string(from: Date()),
+                trigger: .event(EventTriggerConfig(eventName: "fixture", condition: nil)),
+                goal: nil,
+                exitPolicy: nil,
+                conversionAnchor: nil,
+                campaignType: nil
+            )
+            let journey = Journey(
+                id: "fixture-journey",
+                campaign: campaign,
+                distinctId: "fixture-distinct-id"
+            )
+            self.runner = FlowJourneyRunner(
+                journey: journey,
+                campaign: campaign,
+                flow: flow
+            )
+            runner.attach(viewController: flowViewController)
+            runner.onShowScreen = { [weak flowViewController, weak self] screenId, transition in
+                await MainActor.run {
+                    flowViewController?.navigate(to: screenId, transition: transition?.value)
+                    self?.statusLabel?.text = "navigated:\(screenId)"
+                }
+            }
+            flowViewController.runtimeDelegate = self
+        }
+
+        func flowViewControllerDidBecomeReady(_ controller: FlowViewController) {
+            Task { [weak self] in
+                guard let self else { return }
+                self.handleOutcome(await self.runner.handleRuntimeReady())
+            }
+        }
+
+        func flowViewController(
+            _ controller: FlowViewController,
+            didChangeScreen screenId: String
+        ) {
+            statusLabel?.text = "screen:\(screenId)"
+            Task { [weak self] in
+                guard let self else { return }
+                self.handleOutcome(await self.runner.handleScreenChanged(screenId))
+            }
+        }
+
+        func flowViewController(
+            _ controller: FlowViewController,
+            didEmitInteraction interaction: FlowRendererInteraction
+        ) {
+            statusLabel?.text = "interaction:\(interaction.componentId ?? "unknown")"
+            Task { [weak self] in
+                guard let self else { return }
+                self.handleOutcome(
+                    await self.runner.dispatchTrigger(
+                        trigger: interaction.trigger,
+                        screenId: interaction.screenId,
+                        componentId: interaction.componentId,
+                        instanceId: interaction.instanceId,
+                        event: nil
+                    )
+                )
+            }
+        }
+
+        func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
+            statusLabel?.text = "dismissed:\(String(describing: reason))"
+        }
+
+        private func handleOutcome(_ outcome: FlowJourneyRunner.RunOutcome?) {
+            guard let outcome else { return }
+            switch outcome {
+            case .paused:
+                statusLabel?.text = "paused"
+            case .exited(let reason):
+                statusLabel?.text = "exited:\(reason.rawValue)"
+            }
+        }
     }
 
     private static func prepareFixtureBaseURL(
