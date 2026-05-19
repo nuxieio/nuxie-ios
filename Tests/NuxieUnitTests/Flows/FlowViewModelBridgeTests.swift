@@ -144,6 +144,33 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertEqual(try bridge.stringValue(path: "String"), "preloaded-offscreen")
     }
 
+    func testRelativeScreenPatchUsesDefaultInstanceWhenDefaultViewModelIsOmitted() throws {
+        let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
+            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: "instance-nested"),
+        ]))
+        XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
+
+        XCTAssertTrue(bridge.applySnapshot(
+            makeSnapshot([
+                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+            ]),
+            screenId: "screen-1"
+        ))
+
+        XCTAssertTrue(bridge.applyValue(
+            path: relativePath([1]),
+            value: "patched-by-instance-default",
+            screenId: "screen-2",
+            instanceId: nil
+        ))
+        XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-a")
+
+        XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
+        XCTAssertEqual(try bridge.stringValue(path: "String"), "patched-by-instance-default")
+    }
+
     func testDuplicatePathRootsPreferBoundViewModelWhenPatchOmitsInstanceId() throws {
         let duplicateRoot = ViewModel(
             id: "vm-nested-duplicate-root",
@@ -403,6 +430,10 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
     private func path(_ pathIds: [Int]) -> VmPathRef {
         .ids(VmPathIds(pathIds: pathIds))
+    }
+
+    private func relativePath(_ pathIds: [Int]) -> VmPathRef {
+        .ids(VmPathIds(pathIds: pathIds, isRelative: true))
     }
 
     private func makeSnapshot(_ instances: [Nuxie.ViewModelInstance]) -> FlowViewModelSnapshot {
