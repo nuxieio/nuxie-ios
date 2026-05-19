@@ -446,6 +446,9 @@ public class FlowViewController: NuxiePlatformViewController {
     #if canImport(RiveRuntime) && canImport(UIKit)
     private var flowRiveViewModel: RiveViewModel?
     private var flowRiveView: RiveView?
+    private var flowViewModelBridge: FlowViewModelBridge?
+    private var flowArtifact: LoadedFlowArtifact?
+    private var pendingNativeScreenBindingId: String?
     #endif
     #if canImport(UIKit)
     var loadingView: UIView!
@@ -714,6 +717,7 @@ public class FlowViewController: NuxiePlatformViewController {
             pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
             return
         }
+        deliverRuntimeMessageToNativeRuntime(type: type, payload: payload)
         completion?(nil, nil)
     }
 
@@ -762,6 +766,9 @@ public class FlowViewController: NuxiePlatformViewController {
             flowRiveView?.removeFromSuperview()
             flowRiveView = nil
             flowRiveViewModel = nil
+            flowViewModelBridge = nil
+            flowArtifact = nil
+            pendingNativeScreenBindingId = nil
 
             let data = try Data(contentsOf: artifact.rivURL)
             let riveFile = try RiveFile(
@@ -785,6 +792,16 @@ public class FlowViewController: NuxiePlatformViewController {
                 autoPlay: true,
                 artboardName: artifact.manifest.entry.artboardName
             )
+
+            let viewModelBridge = FlowViewModelBridge(
+                model: model,
+                remoteFlow: flow.remoteFlow,
+                imageResolver: { [weak self] imageKey in
+                    self?.resolveRiveImage(imageKey, artifact: artifact)
+                }
+            )
+            let didBindViewModel = try viewModelBridge.bindDefaultInstanceForActiveArtboard()
+
             let riveView = riveViewModel.createRiveView()
             riveView.translatesAutoresizingMaskIntoConstraints = false
             riveView.accessibilityIdentifier = "nuxie-flow-surface"
@@ -799,11 +816,21 @@ public class FlowViewController: NuxiePlatformViewController {
                 riveView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
             ])
 
+            flowViewModelBridge = viewModelBridge
+            if didBindViewModel {
+                LogDebug("Bound native flow ViewModel \(viewModelBridge.boundViewModelName ?? "<unknown>")")
+            } else {
+                LogDebug("Mounted native flow artifact without a default ViewModel")
+            }
+
             flowRiveViewModel = riveViewModel
             flowRiveView = riveView
+            flowArtifact = artifact
             handleNativeRuntimeReady()
             LogDebug("Mounted native flow artifact for flow \(flow.id)")
         } catch {
+            flowArtifact = nil
+            pendingNativeScreenBindingId = nil
             viewModel.handleLoadingFailed(error)
         }
         #else
@@ -860,6 +887,19 @@ public class FlowViewController: NuxiePlatformViewController {
 
         LogDebug("Unsupported Rive asset type for prepared asset \(assetName)")
         return false
+    }
+
+    private func resolveRiveImage(_ imageKey: String, artifact: LoadedFlowArtifact) -> RiveRenderImage? {
+        guard let asset = artifact.manifest.assets.images.first(where: {
+            $0.sourceAssetKey == imageKey || $0.riveUniqueName == imageKey || $0.path == imageKey
+        }) else {
+            return nil
+        }
+        guard let assetURL = try? artifact.localImageURL(for: asset),
+              let data = try? Data(contentsOf: assetURL) else {
+            return nil
+        }
+        return RiveRenderImage(data: data)
     }
     #endif
 
@@ -1190,6 +1230,7 @@ private extension FlowViewController {
         let queued = pendingRuntimeMessages
         pendingRuntimeMessages.removeAll()
         for message in queued {
+            deliverRuntimeMessageToNativeRuntime(type: message.type, payload: message.payload)
             runtimeDelegate?.flowViewController(
                 self,
                 didSendRuntimeMessage: message.type,
@@ -1198,6 +1239,64 @@ private extension FlowViewController {
             )
         }
     }
+
+    private func deliverRuntimeMessageToNativeRuntime(type: String, payload: [String: Any]) {
+        #if canImport(RiveRuntime) && canImport(UIKit)
+        if type == "runtime/navigate" {
+            _ = handleNativeRuntimeNavigate(payload)
+            return
+        }
+        _ = flowViewModelBridge?.handleRuntimeMessage(type: type, payload: payload)
+        if type == "runtime/view_model_init" {
+            bindPendingNativeScreenIfNeeded()
+        }
+        #endif
+    }
+
+    #if canImport(RiveRuntime) && canImport(UIKit)
+    @discardableResult
+    private func handleNativeRuntimeNavigate(_ payload: [String: Any]) -> Bool {
+        guard let screenId = payload["screenId"] as? String,
+              let artifact = flowArtifact,
+              let screen = artifact.manifest.screens.first(where: { $0.screenId == screenId }),
+              let riveViewModel = flowRiveViewModel else {
+            return false
+        }
+
+        do {
+            try riveViewModel.configureModel(
+                artboardName: screen.artboardName,
+                stateMachineName: nil,
+                animationName: nil
+            )
+            if flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true {
+                pendingNativeScreenBindingId = nil
+            } else {
+                pendingNativeScreenBindingId = screenId
+            }
+            flowRiveView?.advance(delta: 0)
+            runtimeDelegate?.flowViewController(
+                self,
+                didReceiveRuntimeMessage: "runtime/screen_changed",
+                payload: ["screenId": screenId],
+                id: nil
+            )
+            return true
+        } catch {
+            LogWarning("FlowViewController: failed to navigate native artifact to screen \(screenId): \(error)")
+            return false
+        }
+    }
+
+    private func bindPendingNativeScreenIfNeeded() {
+        guard let screenId = pendingNativeScreenBindingId,
+              flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true else {
+            return
+        }
+        pendingNativeScreenBindingId = nil
+        flowRiveView?.advance(delta: 0)
+    }
+    #endif
 
     func sendRuntimeSafeAreaInsets() {
         #if canImport(UIKit)

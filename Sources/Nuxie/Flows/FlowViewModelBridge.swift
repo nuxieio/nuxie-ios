@@ -1,0 +1,1017 @@
+#if canImport(RiveRuntime) && canImport(UIKit)
+import Foundation
+import RiveRuntime
+import UIKit
+
+struct FlowViewModelBridgeProperty: Equatable {
+    let name: String
+    let type: String
+}
+
+struct FlowViewModelBridgeDefinition: Equatable {
+    let name: String
+    let instanceNames: [String]
+    let properties: [FlowViewModelBridgeProperty]
+}
+
+enum FlowViewModelBridgeError: LocalizedError, Equatable {
+    case artboardUnavailable
+    case instanceNotBound
+    case propertyMissing(path: String, expectedType: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .artboardUnavailable:
+            return "The active Rive artboard is not available."
+        case .instanceNotBound:
+            return "No Rive ViewModel instance is bound."
+        case .propertyMissing(let path, let expectedType):
+            return "The bound Rive ViewModel has no \(expectedType) property at \(path)."
+        }
+    }
+}
+
+@MainActor
+final class FlowViewModelBridge {
+    typealias ImageResolver = (String) -> RiveRenderImage?
+
+    private struct ResolvedPath {
+        let viewModelId: String
+        let path: String
+        let property: ViewModelProperty?
+    }
+
+    private let fnvOffsetBasis: UInt32 = 0x811c9dc5
+    private let fnvPrime: UInt32 = 0x01000193
+
+    private let model: RiveModel
+    private let remoteFlow: RemoteFlow?
+    private let imageResolver: ImageResolver?
+    private var flowViewModelsById: [String: ViewModel] = [:]
+    private var flowViewModelsByName: [String: ViewModel] = [:]
+    private var riveViewModelsByName: [String: RiveDataBindingViewModel] = [:]
+    private var boundFlowViewModelId: String?
+    private var selectedFlowInstanceId: String?
+    private var flowInstanceViewModelIds: [String: String] = [:]
+    private var flowInstanceIdsByViewModelId: [String: [String]] = [:]
+    private var riveInstancesByFlowInstanceId: [String: RiveDataBindingViewModel.Instance] = [:]
+    private var boundViewModel: RiveDataBindingViewModel?
+    private var boundInstance: RiveDataBindingViewModel.Instance?
+
+    var boundViewModelName: String? {
+        boundViewModel?.name
+    }
+
+    var boundInstanceName: String? {
+        boundInstance?.name
+    }
+
+    init(
+        model: RiveModel,
+        remoteFlow: RemoteFlow? = nil,
+        imageResolver: ImageResolver? = nil
+    ) {
+        self.model = model
+        self.remoteFlow = remoteFlow
+        self.imageResolver = imageResolver
+
+        if let remoteFlow {
+            for viewModel in remoteFlow.viewModels {
+                flowViewModelsById[viewModel.id] = viewModel
+                flowViewModelsByName[viewModel.name] = viewModel
+            }
+            for instance in remoteFlow.viewModelInstances ?? [] {
+                recordFlowInstance(instance.instanceId, viewModelId: instance.viewModelId)
+            }
+        }
+
+        for index in 0..<model.riveFile.viewModelCount {
+            guard let viewModel = model.riveFile.viewModel(at: index) else { continue }
+            riveViewModelsByName[viewModel.name] = viewModel
+        }
+    }
+
+    func discoverViewModels() -> [FlowViewModelBridgeDefinition] {
+        (0..<model.riveFile.viewModelCount).compactMap { index in
+            guard let viewModel = model.riveFile.viewModel(at: index) else { return nil }
+            return FlowViewModelBridgeDefinition(
+                name: viewModel.name,
+                instanceNames: viewModel.instanceNames,
+                properties: viewModel.properties.map { property in
+                    FlowViewModelBridgeProperty(
+                        name: property.name,
+                        type: Self.propertyTypeName(property.type)
+                    )
+                }
+            )
+        }
+    }
+
+    @discardableResult
+    func bindDefaultInstanceForActiveArtboard() throws -> Bool {
+        guard let artboard = model.artboard else {
+            throw FlowViewModelBridgeError.artboardUnavailable
+        }
+
+        guard let viewModel = model.riveFile.defaultViewModel(for: artboard) else {
+            return false
+        }
+
+        guard let instance = viewModel.createDefaultInstance() ?? viewModel.createInstance() else {
+            return false
+        }
+
+        artboard.bind(viewModelInstance: instance)
+        model.stateMachine?.bind(viewModelInstance: instance)
+
+        boundViewModel = viewModel
+        boundInstance = instance
+        boundFlowViewModelId = flowViewModelsByName[viewModel.name]?.id
+        return true
+    }
+
+    @discardableResult
+    func handleRuntimeMessage(type: String, payload: [String: Any]) -> Bool {
+        switch type {
+        case "runtime/view_model_init":
+            return applyViewModelInit(payload)
+        case "runtime/view_model_patch":
+            return applyViewModelPatch(payload)
+        case "runtime/view_model_trigger":
+            return applyViewModelTrigger(payload)
+        case "runtime/view_model_list_insert":
+            return applyViewModelListOperation("insert", payload: payload)
+        case "runtime/view_model_list_remove":
+            return applyViewModelListOperation("remove", payload: payload)
+        case "runtime/view_model_list_swap":
+            return applyViewModelListOperation("swap", payload: payload)
+        case "runtime/view_model_list_move":
+            return applyViewModelListOperation("move", payload: payload)
+        case "runtime/view_model_list_set":
+            return applyViewModelListOperation("set", payload: payload)
+        case "runtime/view_model_list_clear":
+            return applyViewModelListOperation("clear", payload: payload)
+        default:
+            return false
+        }
+    }
+
+    func setString(_ value: String, path: String) throws {
+        guard let property = try boundInstanceOrThrow().stringProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "string")
+        }
+        property.value = value
+    }
+
+    func stringValue(path: String) throws -> String {
+        guard let property = try boundInstanceOrThrow().stringProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "string")
+        }
+        return property.value
+    }
+
+    func stringValue(path: String, instanceId: String) throws -> String {
+        guard let instance = riveInstancesByFlowInstanceId[instanceId] else {
+            throw FlowViewModelBridgeError.instanceNotBound
+        }
+        guard let property = instance.stringProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "string")
+        }
+        return property.value
+    }
+
+    func setNumber(_ value: Float, path: String) throws {
+        guard let property = try boundInstanceOrThrow().numberProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "number")
+        }
+        property.value = value
+    }
+
+    func numberValue(path: String) throws -> Float {
+        guard let property = try boundInstanceOrThrow().numberProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "number")
+        }
+        return property.value
+    }
+
+    func numberValue(path: String, instanceId: String) throws -> Float {
+        guard let instance = riveInstancesByFlowInstanceId[instanceId] else {
+            throw FlowViewModelBridgeError.instanceNotBound
+        }
+        guard let property = instance.numberProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "number")
+        }
+        return property.value
+    }
+
+    func listCount(path: String) throws -> Int {
+        guard let property = try boundInstanceOrThrow().listProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "list")
+        }
+        return Int(property.count)
+    }
+
+    func setBoolean(_ value: Bool, path: String) throws {
+        guard let property = try boundInstanceOrThrow().booleanProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "boolean")
+        }
+        property.value = value
+    }
+
+    func booleanValue(path: String) throws -> Bool {
+        guard let property = try boundInstanceOrThrow().booleanProperty(fromPath: path) else {
+            throw FlowViewModelBridgeError.propertyMissing(path: path, expectedType: "boolean")
+        }
+        return property.value
+    }
+
+    @discardableResult
+    func fireTrigger(path: String) throws -> Bool {
+        guard let trigger = try boundInstanceOrThrow().triggerProperty(fromPath: path) else {
+            return false
+        }
+        trigger.trigger()
+        return true
+    }
+
+    private func applyViewModelInit(_ payload: [String: Any]) -> Bool {
+        guard let instancesPayload = payload["viewModelInstances"] ?? payload["instances"] else {
+            return false
+        }
+        guard let instances = instancesPayload as? [[String: Any]] else {
+            return false
+        }
+
+        let selectedInstanceId = selectedFlowInstanceId ?? defaultFlowInstanceId(from: payload, instances: instances)
+        selectedFlowInstanceId = selectedInstanceId
+
+        var didApply = false
+        for instancePayload in instances {
+            guard let viewModelId = instancePayload["viewModelId"] as? String else { continue }
+            guard let flowViewModel = flowViewModelsById[viewModelId] else { continue }
+            let instanceId = instancePayload["instanceId"] as? String
+            let values = dictionaryValue(instancePayload["values"]) ?? [:]
+
+            if let instanceId {
+                recordFlowInstance(instanceId, viewModelId: viewModelId)
+            }
+
+            guard let riveInstance = riveInstance(
+                forFlowInstanceId: instanceId,
+                flowViewModel: flowViewModel
+            ) else {
+                continue
+            }
+
+            didApply = applyValues(values, schema: flowViewModel.properties, rootPath: "", to: riveInstance) || didApply
+        }
+        boundInstance?.updateListeners()
+        return didApply
+    }
+
+    @discardableResult
+    func bindDefaultInstance(forScreenId screenId: String) -> Bool {
+        guard let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
+              let target = defaultRiveInstance(for: screen) else {
+            return false
+        }
+
+        model.artboard?.bind(viewModelInstance: target.instance)
+        model.stateMachine?.bind(viewModelInstance: target.instance)
+        selectedFlowInstanceId = target.instanceId
+        boundFlowViewModelId = target.viewModelId
+        boundViewModel = target.viewModelId
+            .flatMap { flowViewModelsById[$0] }
+            .flatMap { riveViewModelsByName[$0.name] }
+        boundInstance = target.instance
+        return true
+    }
+
+    private func applyViewModelPatch(_ payload: [String: Any]) -> Bool {
+        guard let ref = pathRef(from: payload),
+              let resolved = resolvePath(ref, instanceId: payload["instanceId"] as? String),
+              let instance = instance(for: resolved.viewModelId, instanceId: payload["instanceId"] as? String),
+              let value = payload["value"] else {
+            return false
+        }
+        let didApply = applyValue(value, property: resolved.property, path: resolved.path, to: instance)
+        if didApply {
+            if let list = instance.listProperty(fromPath: resolved.path) {
+                _ = syncListIndexValues(property: resolved.property, list: list)
+            }
+            instance.updateListeners()
+        }
+        return didApply
+    }
+
+    private func applyViewModelTrigger(_ payload: [String: Any]) -> Bool {
+        guard let ref = pathRef(from: payload),
+              let resolved = resolvePath(ref, instanceId: payload["instanceId"] as? String),
+              let instance = instance(for: resolved.viewModelId, instanceId: payload["instanceId"] as? String),
+              let trigger = instance.triggerProperty(fromPath: resolved.path) else {
+            return false
+        }
+        trigger.trigger()
+        instance.updateListeners()
+        return true
+    }
+
+    private func applyViewModelListOperation(_ operation: String, payload: [String: Any]) -> Bool {
+        guard let ref = pathRef(from: payload),
+              let resolved = resolvePath(ref, instanceId: payload["instanceId"] as? String),
+              let instance = instance(for: resolved.viewModelId, instanceId: payload["instanceId"] as? String),
+              let list = instance.listProperty(fromPath: resolved.path) else {
+            return false
+        }
+
+        let didApply: Bool
+        switch operation {
+        case "insert":
+            guard let item = listItemInstance(from: payload["value"], property: resolved.property) else { return false }
+            if let index = intValue(payload["index"]) {
+                let clampedIndex = min(max(index, 0), Int(list.count))
+                didApply = list.insert(item, at: Int32(clampedIndex))
+            } else {
+                list.append(item)
+                didApply = true
+            }
+        case "remove":
+            guard let index = intValue(payload["index"]), index >= 0, index < Int(list.count) else { return false }
+            list.remove(at: Int32(index))
+            didApply = true
+        case "swap":
+            let from = intValue(payload["from"]) ?? intValue(payload["indexA"])
+            let to = intValue(payload["to"]) ?? intValue(payload["indexB"])
+            guard let from, let to, from >= 0, to >= 0, from < Int(list.count), to < Int(list.count) else { return false }
+            list.swap(at: UInt32(from), with: UInt32(to))
+            didApply = true
+        case "move":
+            guard let from = intValue(payload["from"]),
+                  let to = intValue(payload["to"]),
+                  from >= 0,
+                  to >= 0,
+                  from < Int(list.count),
+                  let item = list.instance(at: Int32(from)) else {
+                return false
+            }
+            list.remove(at: Int32(from))
+            didApply = list.insert(item, at: Int32(min(to, Int(list.count))))
+        case "set":
+            guard let index = intValue(payload["index"]),
+                  index >= 0,
+                  index < Int(list.count),
+                  let item = listItemInstance(from: payload["value"], property: resolved.property) else {
+                return false
+            }
+            list.remove(at: Int32(index))
+            didApply = list.insert(item, at: Int32(index))
+        case "clear":
+            _ = clearList(list)
+            didApply = true
+        default:
+            return false
+        }
+
+        if didApply {
+            _ = syncListIndexValues(property: resolved.property, list: list)
+            instance.updateListeners()
+        }
+        return didApply
+    }
+
+    private func applyValues(
+        _ values: [String: Any],
+        schema: [String: ViewModelProperty],
+        rootPath: String,
+        to instance: RiveDataBindingViewModel.Instance
+    ) -> Bool {
+        var didApply = false
+        for (key, value) in values {
+            guard let property = schema[key] else { continue }
+            let path = rootPath.isEmpty ? key : "\(rootPath)/\(key)"
+            didApply = applyValue(value, property: property, path: path, to: instance) || didApply
+        }
+        return didApply
+    }
+
+    private func applyValue(
+        _ rawValue: Any,
+        property: ViewModelProperty?,
+        path: String,
+        to instance: RiveDataBindingViewModel.Instance
+    ) -> Bool {
+        let value = unwrap(rawValue)
+
+        switch property?.type {
+        case .string:
+            guard let string = stringValue(value) else { return false }
+            instance.stringProperty(fromPath: path)?.value = string
+            return instance.stringProperty(fromPath: path) != nil
+        case .image:
+            guard let imageProperty = instance.imageProperty(fromPath: path) else { return false }
+            if let image = value as? RiveRenderImage {
+                imageProperty.setValue(image)
+                return true
+            }
+            guard let imageKey = stringValue(value),
+                  let image = imageResolver?(imageKey) else {
+                return false
+            }
+            imageProperty.setValue(image)
+            return true
+        case .number, .list_index:
+            guard let number = floatValue(value) else { return false }
+            instance.numberProperty(fromPath: path)?.value = number
+            return instance.numberProperty(fromPath: path) != nil
+        case .boolean:
+            guard let bool = boolValue(value) else { return false }
+            instance.booleanProperty(fromPath: path)?.value = bool
+            return instance.booleanProperty(fromPath: path) != nil
+        case .enum:
+            guard let string = stringValue(value) else { return false }
+            instance.enumProperty(fromPath: path)?.value = string
+            return instance.enumProperty(fromPath: path) != nil
+        case .color:
+            guard let color = colorValue(value),
+                  let property = instance.colorProperty(fromPath: path) else {
+                return false
+            }
+            property.value = color
+            return true
+        case .trigger:
+            guard boolValue(value) == true || intValue(value).map({ $0 != 0 }) == true else { return false }
+            instance.triggerProperty(fromPath: path)?.trigger()
+            return instance.triggerProperty(fromPath: path) != nil
+        case .object:
+            guard let nested = dictionaryValue(value), let schema = property?.schema else { return false }
+            return applyValues(nested, schema: schema, rootPath: path, to: instance)
+        case .viewModel:
+            return applyNestedViewModel(value, property: property, path: path, to: instance)
+        case .list:
+            return applyListValue(value, property: property, path: path, to: instance)
+        case nil:
+            return applyBestEffortValue(value, path: path, to: instance)
+        }
+    }
+
+    private func applyBestEffortValue(
+        _ value: Any,
+        path: String,
+        to instance: RiveDataBindingViewModel.Instance
+    ) -> Bool {
+        if let string = stringValue(value), let property = instance.stringProperty(fromPath: path) {
+            property.value = string
+            return true
+        }
+        if let number = floatValue(value), let property = instance.numberProperty(fromPath: path) {
+            property.value = number
+            return true
+        }
+        if let bool = boolValue(value), let property = instance.booleanProperty(fromPath: path) {
+            property.value = bool
+            return true
+        }
+        if let string = stringValue(value), let property = instance.enumProperty(fromPath: path) {
+            property.value = string
+            return true
+        }
+        return false
+    }
+
+    private func applyNestedViewModel(
+        _ value: Any,
+        property: ViewModelProperty?,
+        path: String,
+        to instance: RiveDataBindingViewModel.Instance
+    ) -> Bool {
+        if let replacement = listItemInstance(from: value, property: property) {
+            return instance.setViewModelInstanceProperty(fromPath: path, to: replacement)
+        }
+
+        guard let nestedValues = dictionaryValue(value),
+              let nestedViewModelId = property?.viewModelId,
+              let nestedViewModel = flowViewModelsById[nestedViewModelId] else {
+            return false
+        }
+        return applyValues(nestedValues, schema: nestedViewModel.properties, rootPath: path, to: instance)
+    }
+
+    private func applyListValue(
+        _ value: Any,
+        property: ViewModelProperty?,
+        path: String,
+        to instance: RiveDataBindingViewModel.Instance
+    ) -> Bool {
+        guard let values = arrayValue(value),
+              let list = instance.listProperty(fromPath: path) else {
+            return false
+        }
+
+        let didClear = clearList(list)
+
+        var didApply = didClear || values.isEmpty
+        for value in values {
+            guard let item = listItemInstance(from: value, property: property) else { continue }
+            list.append(item)
+            didApply = true
+        }
+        if didApply {
+            _ = syncListIndexValues(property: property, list: list)
+        }
+        return didApply
+    }
+
+    private func clearList(_ list: RiveDataBindingViewModel.Instance.ListProperty) -> Bool {
+        guard list.count > 0 else { return false }
+        for index in stride(from: Int(list.count) - 1, through: 0, by: -1) {
+            list.remove(at: Int32(index))
+        }
+        return true
+    }
+
+    private func listItemInstance(
+        from rawValue: Any?,
+        property: ViewModelProperty?
+    ) -> RiveDataBindingViewModel.Instance? {
+        guard let value = rawValue.map(unwrap) else { return nil }
+        let dict = dictionaryValue(value)
+        let instanceId = dict?["vmInstanceId"] as? String ?? dict?["instanceId"] as? String
+        let viewModelId = dict?["viewModelId"] as? String
+            ?? instanceId.flatMap { flowInstanceViewModelIds[$0] }
+            ?? property?.itemType?.viewModelId
+            ?? property?.viewModelId
+        if let instanceId, let existing = riveInstancesByFlowInstanceId[instanceId] {
+            if let viewModelId,
+               let flowViewModel = flowViewModelsById[viewModelId],
+               let values = dictionaryValue(dict?["values"] ?? value) {
+                _ = applyValues(values, schema: flowViewModel.properties, rootPath: "", to: existing)
+            }
+            return existing
+        }
+
+        guard let viewModelId,
+              let flowViewModel = flowViewModelsById[viewModelId],
+              let instance = createRiveInstance(for: flowViewModel) else {
+            return nil
+        }
+
+        if let instanceId {
+            recordFlowInstance(instanceId, viewModelId: viewModelId)
+            riveInstancesByFlowInstanceId[instanceId] = instance
+        }
+        if let values = dictionaryValue(dict?["values"] ?? value) {
+            _ = applyValues(values, schema: flowViewModel.properties, rootPath: "", to: instance)
+        }
+        return instance
+    }
+
+    private func createRiveInstance(for flowViewModel: ViewModel) -> RiveDataBindingViewModel.Instance? {
+        riveViewModelsByName[flowViewModel.name]?.createInstance()
+    }
+
+    private func riveInstance(
+        forFlowInstanceId instanceId: String?,
+        flowViewModel: ViewModel
+    ) -> RiveDataBindingViewModel.Instance? {
+        if let instanceId, let existing = riveInstancesByFlowInstanceId[instanceId] {
+            return existing
+        }
+
+        let instance: RiveDataBindingViewModel.Instance?
+        if flowViewModel.id == boundFlowViewModelId && shouldUseBoundInstance(for: instanceId) {
+            instance = boundInstance
+        } else {
+            instance = createRiveInstance(for: flowViewModel)
+        }
+
+        if let instance, let instanceId {
+            riveInstancesByFlowInstanceId[instanceId] = instance
+        }
+        return instance
+    }
+
+    private func recordFlowInstance(_ instanceId: String, viewModelId: String) {
+        flowInstanceViewModelIds[instanceId] = viewModelId
+        var instanceIds = flowInstanceIdsByViewModelId[viewModelId] ?? []
+        if !instanceIds.contains(instanceId) {
+            instanceIds.append(instanceId)
+            flowInstanceIdsByViewModelId[viewModelId] = instanceIds
+        }
+    }
+
+    private func defaultRiveInstance(
+        for screen: RemoteFlowScreen
+    ) -> (instanceId: String?, viewModelId: String?, instance: RiveDataBindingViewModel.Instance)? {
+        if let instanceId = screen.defaultInstanceId,
+           let instance = riveInstancesByFlowInstanceId[instanceId] {
+            return (
+                instanceId,
+                flowInstanceViewModelIds[instanceId] ?? screen.defaultViewModelId,
+                instance
+            )
+        }
+
+        if let viewModelId = screen.defaultViewModelId {
+            if let instanceId = flowInstanceIdsByViewModelId[viewModelId]?.first(where: {
+                riveInstancesByFlowInstanceId[$0] != nil
+            }),
+               let instance = riveInstancesByFlowInstanceId[instanceId] {
+                return (instanceId, viewModelId, instance)
+            }
+            if viewModelId == boundFlowViewModelId, let boundInstance {
+                return (selectedFlowInstanceId, viewModelId, boundInstance)
+            }
+        }
+
+        return nil
+    }
+
+    private func shouldUseBoundInstance(for instanceId: String?) -> Bool {
+        guard let instanceId else { return true }
+        if let selectedFlowInstanceId {
+            return selectedFlowInstanceId == instanceId
+        }
+        selectedFlowInstanceId = instanceId
+        return true
+    }
+
+    private func defaultFlowInstanceId(from payload: [String: Any], instances: [[String: Any]]) -> String? {
+        let state = dictionaryValue(payload["state"])
+        let screenDefaults = dictionaryValue(payload["screenDefaults"])
+            ?? dictionaryValue(state?["screenDefaults"])
+            ?? [:]
+
+        for screen in remoteFlow?.screens ?? [] {
+            if let defaultInstanceId = screen.defaultInstanceId {
+                return defaultInstanceId
+            }
+            if let entry = dictionaryValue(screenDefaults[screen.id]),
+               let defaultInstanceId = entry["defaultInstanceId"] as? String {
+                return defaultInstanceId
+            }
+            if let defaultViewModelId = screen.defaultViewModelId,
+               let instanceId = firstInstanceId(for: defaultViewModelId, in: instances) {
+                return instanceId
+            }
+            if let entry = dictionaryValue(screenDefaults[screen.id]),
+               let defaultViewModelId = entry["defaultViewModelId"] as? String,
+               let instanceId = firstInstanceId(for: defaultViewModelId, in: instances) {
+                return instanceId
+            }
+        }
+
+        guard let boundFlowViewModelId else { return nil }
+        return instances.first { $0["viewModelId"] as? String == boundFlowViewModelId }?["instanceId"] as? String
+    }
+
+    private func firstInstanceId(for viewModelId: String, in instances: [[String: Any]]) -> String? {
+        instances.first { $0["viewModelId"] as? String == viewModelId }?["instanceId"] as? String
+    }
+
+    @discardableResult
+    private func syncListIndexValues(
+        property: ViewModelProperty?,
+        list: RiveDataBindingViewModel.Instance.ListProperty
+    ) -> Bool {
+        guard property?.type == .list,
+              let itemType = property?.itemType,
+              itemType.type == .viewModel,
+              let itemViewModelId = itemType.viewModelId,
+              let itemViewModel = flowViewModelsById[itemViewModelId] else {
+            return false
+        }
+
+        let indexKeys = itemViewModel.properties.compactMap { key, property in
+            property.type == .list_index ? key : nil
+        }
+        guard !indexKeys.isEmpty else { return false }
+
+        var didApply = false
+        for index in 0..<Int(list.count) {
+            guard let item = list.instance(at: Int32(index)) else { continue }
+            var didUpdateItem = false
+            for key in indexKeys {
+                guard let property = item.numberProperty(fromPath: key) else { continue }
+                let value = Float(index)
+                if property.value != value {
+                    property.value = value
+                    didApply = true
+                    didUpdateItem = true
+                }
+            }
+            if didUpdateItem {
+                item.updateListeners()
+            }
+        }
+        return didApply
+    }
+
+    private func instance(
+        for viewModelId: String,
+        instanceId: String?
+    ) -> RiveDataBindingViewModel.Instance? {
+        if let instanceId, let instance = riveInstancesByFlowInstanceId[instanceId] {
+            return instance
+        }
+        if viewModelId == boundFlowViewModelId {
+            return boundInstance
+        }
+        if let cachedInstanceId = flowInstanceIdsByViewModelId[viewModelId]?.first(where: {
+            riveInstancesByFlowInstanceId[$0] != nil
+        }) {
+            return riveInstancesByFlowInstanceId[cachedInstanceId]
+        }
+        guard let flowViewModel = flowViewModelsById[viewModelId] else { return nil }
+        let instance = createRiveInstance(for: flowViewModel)
+        if let instance, let instanceId {
+            riveInstancesByFlowInstanceId[instanceId] = instance
+        }
+        return instance
+    }
+
+    private func pathRef(from payload: [String: Any]) -> VmPathRef? {
+        let isRelative = payload["isRelative"] as? Bool
+        let nameBased = payload["nameBased"] as? Bool
+        if let ids = payload["pathIds"] as? [Int] {
+            return .ids(VmPathIds(pathIds: ids, isRelative: isRelative, nameBased: nameBased))
+        }
+        if let ids = payload["pathIds"] as? [NSNumber] {
+            return .ids(VmPathIds(pathIds: ids.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+        }
+        return nil
+    }
+
+    private func resolvePath(_ path: VmPathRef, instanceId: String?) -> ResolvedPath? {
+        guard remoteFlow != nil else { return nil }
+
+        switch path {
+        case .ids(let ref):
+            let viewModel: ViewModel?
+            let propertyIds: [Int]
+            if ref.isRelative == true {
+                if let instanceId, let viewModelId = flowInstanceViewModelIds[instanceId] {
+                    viewModel = flowViewModelsById[viewModelId]
+                } else if let boundFlowViewModelId {
+                    viewModel = flowViewModelsById[boundFlowViewModelId]
+                } else {
+                    viewModel = nil
+                }
+                propertyIds = ref.pathIds
+            } else {
+                guard let root = ref.pathIds.first else { return nil }
+                if ref.nameBased == true {
+                    viewModel = resolveRootViewModel(
+                        instanceId: instanceId,
+                        root: root,
+                        matches: { hashNameId($0.name) == root }
+                    )
+                } else {
+                    viewModel = resolveRootViewModel(
+                        instanceId: instanceId,
+                        root: root,
+                        matches: { viewModelPathId($0) == root }
+                    )
+                }
+                propertyIds = Array(ref.pathIds.dropFirst())
+            }
+            guard let viewModel, !propertyIds.isEmpty else { return nil }
+            guard let resolved = resolveProperties(
+                propertyIds,
+                schema: viewModel.properties,
+                nameBased: ref.nameBased == true
+            ) else {
+                return nil
+            }
+            return ResolvedPath(
+                viewModelId: viewModel.id,
+                path: resolved.segments.joined(separator: "/"),
+                property: resolved.property
+            )
+        }
+    }
+
+    private func resolveRootViewModel(
+        instanceId: String?,
+        root: Int,
+        matches: (ViewModel) -> Bool
+    ) -> ViewModel? {
+        if let instanceId,
+           let viewModelId = flowInstanceViewModelIds[instanceId],
+           let viewModel = flowViewModelsById[viewModelId],
+           matches(viewModel) {
+            return viewModel
+        }
+        if let boundFlowViewModelId,
+           let viewModel = flowViewModelsById[boundFlowViewModelId],
+           matches(viewModel) {
+            return viewModel
+        }
+        return remoteFlow?.viewModels.first(where: matches)
+    }
+
+    private func resolveProperties(
+        _ propertyIds: [Int],
+        schema: [String: ViewModelProperty],
+        nameBased: Bool
+    ) -> (segments: [String], property: ViewModelProperty)? {
+        var currentSchema = schema
+        var segments: [String] = []
+        var resolvedProperty: ViewModelProperty?
+
+        for (index, propertyId) in propertyIds.enumerated() {
+            let found: (name: String, property: ViewModelProperty)?
+            if nameBased {
+                found = currentSchema.first { hashNameId($0.key) == propertyId }.map { ($0.key, $0.value) }
+            } else {
+                found = currentSchema.first { $0.value.propertyId == propertyId }.map { ($0.key, $0.value) }
+            }
+            guard let found else { return nil }
+            segments.append(found.name)
+            resolvedProperty = found.property
+
+            if index == propertyIds.count - 1 {
+                break
+            }
+
+            switch found.property.type {
+            case .object:
+                guard let schema = found.property.schema else { return nil }
+                currentSchema = schema
+            case .viewModel:
+                guard let viewModelId = found.property.viewModelId,
+                      let viewModel = flowViewModelsById[viewModelId] else {
+                    return nil
+                }
+                currentSchema = viewModel.properties
+            default:
+                return nil
+            }
+        }
+
+        guard let resolvedProperty else { return nil }
+        return (segments, resolvedProperty)
+    }
+
+    private func boundInstanceOrThrow() throws -> RiveDataBindingViewModel.Instance {
+        guard let boundInstance else {
+            throw FlowViewModelBridgeError.instanceNotBound
+        }
+        return boundInstance
+    }
+
+    private func hashNameId(_ value: String) -> Int {
+        if value.isEmpty { return Int(fnvOffsetBasis) }
+        var hash = fnvOffsetBasis
+        for byte in value.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* fnvPrime
+        }
+        return Int(hash)
+    }
+
+    private func viewModelPathId(_ viewModel: ViewModel) -> Int {
+        viewModel.viewModelPathId ?? hashNameId(viewModel.id)
+    }
+
+    private func unwrap(_ value: Any) -> Any {
+        if let anyCodable = value as? AnyCodable {
+            return anyCodable.value
+        }
+        return value
+    }
+
+    private func dictionaryValue(_ value: Any?) -> [String: Any]? {
+        guard let value = value.map(unwrap) else { return nil }
+        if let dict = value as? [String: Any] {
+            return dict.mapValues(unwrap)
+        }
+        if let dict = value as? [String: AnyCodable] {
+            return dict.mapValues { $0.value }
+        }
+        return nil
+    }
+
+    private func arrayValue(_ value: Any) -> [Any]? {
+        let value = unwrap(value)
+        if let array = value as? [Any] {
+            return array.map(unwrap)
+        }
+        if let array = value as? [AnyCodable] {
+            return array.map { $0.value }
+        }
+        return nil
+    }
+
+    private func stringValue(_ value: Any) -> String? {
+        let value = unwrap(value)
+        if let string = value as? String { return string }
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            return number.stringValue
+        }
+        return nil
+    }
+
+    private func floatValue(_ value: Any) -> Float? {
+        let value = unwrap(value)
+        if let float = value as? Float { return float }
+        if let double = value as? Double { return Float(double) }
+        if let int = value as? Int { return Float(int) }
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            return number.floatValue
+        }
+        return nil
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        guard let value = value.map(unwrap) else { return nil }
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+            return number.intValue
+        }
+        return nil
+    }
+
+    private func boolValue(_ value: Any) -> Bool? {
+        let value = unwrap(value)
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue
+        }
+        return nil
+    }
+
+    private func colorValue(_ value: Any) -> UIColor? {
+        let value = unwrap(value)
+        if let color = value as? UIColor { return color }
+        if let int = intValue(value) {
+            return UIColor(
+                red: CGFloat((int >> 16) & 0xff) / 255,
+                green: CGFloat((int >> 8) & 0xff) / 255,
+                blue: CGFloat(int & 0xff) / 255,
+                alpha: CGFloat((int >> 24) & 0xff) / 255
+            )
+        }
+        guard var hex = stringValue(value)?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        if hex.hasPrefix("#") {
+            hex.removeFirst()
+        }
+        guard let int = Int(hex, radix: 16) else { return nil }
+        if hex.count == 6 {
+            return UIColor(
+                red: CGFloat((int >> 16) & 0xff) / 255,
+                green: CGFloat((int >> 8) & 0xff) / 255,
+                blue: CGFloat(int & 0xff) / 255,
+                alpha: 1
+            )
+        }
+        if hex.count == 8 {
+            return UIColor(
+                red: CGFloat((int >> 16) & 0xff) / 255,
+                green: CGFloat((int >> 8) & 0xff) / 255,
+                blue: CGFloat(int & 0xff) / 255,
+                alpha: CGFloat((int >> 24) & 0xff) / 255
+            )
+        }
+        return nil
+    }
+
+    private static func propertyTypeName(_ type: RiveDataBindingViewModel.Instance.Property.Data.DataType) -> String {
+        switch type {
+        case .none:
+            return "none"
+        case .string:
+            return "string"
+        case .number:
+            return "number"
+        case .boolean:
+            return "boolean"
+        case .color:
+            return "color"
+        case .list:
+            return "list"
+        case .enum:
+            return "enum"
+        case .trigger:
+            return "trigger"
+        case .viewModel:
+            return "viewModel"
+        case .integer:
+            return "integer"
+        case .symbolListIndex:
+            return "symbolListIndex"
+        case .assetImage:
+            return "assetImage"
+        case .artboard:
+            return "artboard"
+        case .input:
+            return "input"
+        case .any:
+            return "any"
+        @unknown default:
+            return String(describing: type)
+        }
+    }
+}
+#endif

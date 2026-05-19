@@ -125,6 +125,8 @@ targets:
       - package: Nimble
       - package: Factory
         product: FactoryKit
+      - package: RiveRuntime
+        product: RiveRuntime
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.unittests
       TEST_HOST: ""

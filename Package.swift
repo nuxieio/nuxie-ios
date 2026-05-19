@@ -60,8 +60,16 @@ let package = Package(
                 "Quick",
                 "Nimble",
                 .product(name: "FactoryKit", package: "Factory"),
+                .product(
+                    name: "RiveRuntime",
+                    package: "rive-ios",
+                    condition: .when(platforms: [.iOS])
+                ),
             ],
-            path: "Tests/NuxieUnitTests"
+            path: "Tests/NuxieUnitTests",
+            resources: [
+                .process("Fixtures")
+            ]
         ),
         .testTarget(
             name: "NuxieIntegrationTests",
