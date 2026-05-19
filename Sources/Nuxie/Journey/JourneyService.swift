@@ -1059,11 +1059,7 @@ public actor JourneyService: JourneyServiceProtocol {
         if let controller {
           runner?.attach(viewController: controller)
           await MainActor.run {
-            var payload: [String: Any] = ["screenId": screenId]
-            if let transition {
-              payload["transition"] = transition.value
-            }
-            controller.sendRuntimeMessage(type: "runtime/navigate", payload: payload)
+            controller.navigate(to: screenId, transition: transition?.value)
           }
         }
       }

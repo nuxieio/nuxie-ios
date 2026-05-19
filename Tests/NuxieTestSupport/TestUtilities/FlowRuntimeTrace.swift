@@ -42,27 +42,20 @@ final class FlowRuntimeTraceRecorder {
     private var nextStep: Int = 1
     private var entries: [FlowRuntimeTraceEntry] = []
 
+    func recordNavigation(screenId: String?, name: String = "navigate") {
+        append(
+            kind: .navigation,
+            name: name,
+            screenId: screenId,
+            output: screenId,
+            metadata: nil
+        )
+    }
+
     func recordRuntimeMessage(type: String, payload: [String: Any]) {
         switch type {
-        case "runtime/navigate":
-            let screenId = payload["screenId"] as? String
-            append(
-                kind: .navigation,
-                name: "navigate",
-                screenId: screenId,
-                output: screenId,
-                metadata: nil
-            )
-
         case "runtime/screen_changed":
-            let screenId = payload["screenId"] as? String
-            append(
-                kind: .navigation,
-                name: "screen_changed",
-                screenId: screenId,
-                output: screenId,
-                metadata: nil
-            )
+            recordNavigation(screenId: payload["screenId"] as? String, name: "screen_changed")
 
         case "action/did_set":
             let pathIds = Self.pathIds(from: payload["pathIds"])

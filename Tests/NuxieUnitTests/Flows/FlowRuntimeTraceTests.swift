@@ -8,61 +8,11 @@ import Nimble
 
 final class FlowRuntimeTraceTests: QuickSpec {
     override class func spec() {
-        func makeFlow(id: String = "trace-flow") -> Flow {
-            let remoteFlow = RemoteFlow(
-                id: id,
-                flowArtifact: FlowArtifact(
-                    url: "https://cdn.example/\(id)/",
-                    manifest: BuildManifest(
-                        totalFiles: 1,
-                        totalSize: 100,
-                        contentHash: "hash-\(id)",
-                        files: [BuildFile(path: "flow.riv", size: 100, contentType: "application/octet-stream")]
-                    )
-                ),
-                screens: [RemoteFlowScreen(id: "screen-entry", defaultViewModelId: nil, defaultInstanceId: nil)],
-                interactions: [:],
-                viewModels: [],
-                viewModelInstances: nil,
-                converters: nil
-            )
-            return Flow(remoteFlow: remoteFlow, products: [])
-        }
-
-        final class TraceOnlyRuntimeDelegate: FlowRuntimeDelegate {
-            private let recorder: FlowRuntimeTraceRecorder
-
-            init(recorder: FlowRuntimeTraceRecorder) {
-                self.recorder = recorder
-            }
-
-            func flowViewController(
-                _ controller: FlowViewController,
-                didReceiveRuntimeMessage type: String,
-                payload: [String : Any],
-                id: String?
-            ) {}
-
-            func flowViewController(
-                _ controller: FlowViewController,
-                didSendRuntimeMessage type: String,
-                payload: [String : Any],
-                replyTo: String?
-            ) {
-                recorder.recordRuntimeMessage(type: type, payload: payload)
-            }
-
-            func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {}
-        }
-
         describe("FlowRuntimeTraceRecorder") {
             it("records navigation and binding entries in deterministic step order") {
                 let recorder = FlowRuntimeTraceRecorder()
 
-                recorder.recordRuntimeMessage(
-                    type: "runtime/navigate",
-                    payload: ["screenId": "screen-2"]
-                )
+                recorder.recordNavigation(screenId: "screen-2")
                 recorder.recordRuntimeMessage(
                     type: "action/did_set",
                     payload: [
@@ -143,24 +93,17 @@ final class FlowRuntimeTraceTests: QuickSpec {
                 expect(decoded.entries.map(\.kind)).to(equal([.event, .event]))
             }
 
-            it("records host-sent runtime navigation messages via runtime delegate") { @MainActor in
+            it("records runtime screen change notifications") {
                 let recorder = FlowRuntimeTraceRecorder()
-                let delegate = TraceOnlyRuntimeDelegate(recorder: recorder)
 
-                let viewController = FlowViewController(
-                    flow: makeFlow(id: "trace-host-sent"),
-                    artifactStore: FlowArtifactStore()
-                )
-                viewController.runtimeDelegate = delegate
-
-                viewController.sendRuntimeMessage(
-                    type: "runtime/navigate",
+                recorder.recordRuntimeMessage(
+                    type: "runtime/screen_changed",
                     payload: ["screenId": "screen-2"]
                 )
 
                 let trace = recorder.trace(
-                    fixtureId: "fixture-host-sent-navigation",
-                    rendererBackend: "react"
+                    fixtureId: "fixture-screen-changed",
+                    rendererBackend: "app"
                 )
                 guard let entry = trace.entries.first else {
                     fail("Expected at least one trace entry")
@@ -168,7 +111,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
                 }
 
                 expect(entry.kind).to(equal(.navigation))
-                expect(entry.name).to(equal("navigate"))
+                expect(entry.name).to(equal("screen_changed"))
                 expect(entry.screenId).to(equal("screen-2"))
             }
         }

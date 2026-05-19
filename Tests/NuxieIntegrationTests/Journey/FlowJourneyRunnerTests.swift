@@ -117,7 +117,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(journey.flowState.pendingAction?.kind).to(equal(.delay))
             }
 
-            it("sends v2 view model init payloads with schema and state") {
+            it("applies initial view model state through the native controller API") {
                 let flowId = "flow-view-model-init-v2"
                 let viewModel = ViewModel(
                     id: "vm-1",
@@ -156,28 +156,11 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 _ = await runner.handleRuntimeReady()
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_init"))
-                let payload = controller.messages.first(where: { $0.type == "runtime/view_model_init" })?.payload
-                expect(payload?["schemaVersion"] as? Int).to(equal(2))
-
-                let schema = payload?["schema"] as? [String: Any]
-                let state = payload?["state"] as? [String: Any]
-                let viewModels = schema?["viewModels"] as? [[String: Any]]
-                let instances = state?["viewModelInstances"] as? [[String: Any]]
-                let screenDefaults = state?["screenDefaults"] as? [String: Any]
-                let legacyViewModels = payload?["viewModels"] as? [[String: Any]]
-                let legacyInstances = payload?["instances"] as? [[String: Any]]
-                let legacyViewModelInstances = payload?["viewModelInstances"] as? [[String: Any]]
-                let legacyScreenDefaults = payload?["screenDefaults"] as? [String: Any]
-
-                expect(viewModels?.first?["id"] as? String).to(equal("vm-1"))
-                expect(instances?.first?["viewModelId"] as? String).to(equal("vm-1"))
-                expect(screenDefaults?["screen-1"]).toNot(beNil())
-                expect(legacyViewModels?.first?["id"] as? String).to(equal("vm-1"))
-                expect(legacyInstances?.first?["viewModelId"] as? String).to(equal("vm-1"))
-                expect(legacyViewModelInstances?.first?["viewModelId"] as? String).to(equal("vm-1"))
-                expect(legacyScreenDefaults?["screen-1"]).toNot(beNil())
-                expect(payload?["converters"]).toNot(beNil())
+                await expect(controller.viewModelSnapshots.count).toEventually(equal(1))
+                let snapshot = controller.viewModelSnapshots.first
+                expect(snapshot?.screenId).to(beNil())
+                expect(snapshot?.snapshot.viewModelInstances.first?.viewModelId).to(equal("vm-1"))
+                expect(controller.messages).to(beEmpty())
             }
 
             it("dispatches global event interactions") {
@@ -215,9 +198,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     event: nil
                 )
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
-                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
-                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
             }
 
             it("dispatches global did_set interactions") {
@@ -274,9 +255,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     instanceId: nil
                 )
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
-                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
-                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
             }
 
             it("isolates debounced did_set dispatch per interaction across screen and global scopes") {
@@ -412,7 +391,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let flag = values?["flag"]?.value as? Bool
                 expect(flag).to(equal(true))
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_patch"))
+                await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
+                    contain(VmPathRef.ids(VmPathIds(pathIds: [0, 1])).normalizedPath)
+                )
             }
 
             it("handles list_insert and fire_trigger actions") {
@@ -494,8 +475,10 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let items = values?["items"]?.value as? [Any]
                 expect(items?.first as? String).to(equal("a"))
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_insert"))
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_trigger"))
+                await expect(controller.viewModelListOperations.map(\.operation)).toEventually(contain(.insert))
+                await expect(controller.viewModelTriggers.map(\.path.normalizedPath)).toEventually(
+                    contain(VmPathRef.ids(VmPathIds(pathIds: [0, 4])).normalizedPath)
+                )
             }
 
             it("handles list_move, list_set, and list_clear actions") {
@@ -570,9 +553,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let items = values?["items"]?.value as? [Any]
                 expect(items?.isEmpty).to(equal(true))
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_move"))
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_set"))
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/view_model_list_clear"))
+                await expect(controller.viewModelListOperations.map(\.operation)).toEventually(contain(.move))
+                expect(controller.viewModelListOperations.map(\.operation)).to(contain(.set))
+                expect(controller.viewModelListOperations.map(\.operation)).to(contain(.clear))
             }
 
             it("executes system actions on screen shown") {
@@ -833,9 +816,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 _ = await runner.handleRuntimeReady()
 
                 expect(journey.flowState.pendingAction).to(beNil())
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
-                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
-                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
             }
 
             it("resumes nested time_window actions after a delay pause") {
@@ -882,9 +863,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 _ = await runner.resumePendingAction(reason: .timer, event: nil)
 
                 expect(journey.flowState.pendingAction).to(beNil())
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
-                let navigatePayload = controller.messages.first(where: { $0.type == "runtime/navigate" })?.payload
-                expect(navigatePayload?["screenId"] as? String).to(equal("screen-2"))
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
             }
 
             it("resumes nested time_window actions and continues outer actions") {
@@ -1593,10 +1572,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 _ = await runner.handleScreenChanged("screen-2")
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
-                let payload = controller.messages.last?.payload
-                let transitionPayload = payload?["transition"] as? [String: Any]
-                expect(payload?["screenId"] as? String).to(equal("screen-1"))
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-1"))
+                let transitionPayload = controller.navigationRequests.last?.transition as? [String: Any]
                 expect(transitionPayload?["type"] as? String).to(equal("push"))
                 expect(transitionPayload?["direction"] as? String).to(equal("left"))
             }
@@ -1631,10 +1608,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 _ = await runner.handleScreenChanged("screen-2")
 
-                await expect(controller.messages.map(\.type)).toEventually(contain("runtime/navigate"))
-                let payload = controller.messages.last?.payload
-                expect(payload?["screenId"] as? String).to(equal("screen-1"))
-                expect(payload?["transition"]).to(beNil())
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-1"))
+                expect(controller.navigationRequests.last?.transition).to(beNil())
             }
 
             it("no-ops back when history is empty") {
@@ -1791,7 +1766,43 @@ private final class SpyFlowViewController: FlowViewController {
         let target: String?
     }
 
+    struct ViewModelSnapshotRequest {
+        let snapshot: FlowViewModelSnapshot
+        let screenId: String?
+    }
+
+    struct ViewModelValueRequest {
+        let path: VmPathRef
+        let value: Any
+        let screenId: String?
+        let instanceId: String?
+    }
+
+    struct ViewModelListOperationRequest {
+        let operation: FlowViewModelListOperation
+        let path: VmPathRef
+        let payload: [String: Any]
+        let screenId: String?
+        let instanceId: String?
+    }
+
+    struct ViewModelTriggerRequest {
+        let path: VmPathRef
+        let screenId: String?
+        let instanceId: String?
+    }
+
+    struct NavigationRequest {
+        let screenId: String
+        let transition: Any?
+    }
+
     private(set) var messages: [Message] = []
+    private(set) var viewModelSnapshots: [ViewModelSnapshotRequest] = []
+    private(set) var viewModelValues: [ViewModelValueRequest] = []
+    private(set) var viewModelListOperations: [ViewModelListOperationRequest] = []
+    private(set) var viewModelTriggers: [ViewModelTriggerRequest] = []
+    private(set) var navigationRequests: [NavigationRequest] = []
     private(set) var purchaseRequests: [PurchaseRequest] = []
     private(set) var restoreRequests = 0
     private(set) var requestNotificationJourneyIds: [String?] = []
@@ -1815,6 +1826,62 @@ private final class SpyFlowViewController: FlowViewController {
         completion: ((Any?, Error?) -> Void)? = nil
     ) {
         messages.append(Message(type: type, payload: payload))
+    }
+
+    override func applyViewModelSnapshot(_ snapshot: FlowViewModelSnapshot, screenId: String? = nil) {
+        viewModelSnapshots.append(ViewModelSnapshotRequest(snapshot: snapshot, screenId: screenId))
+    }
+
+    override func applyViewModelValue(
+        path: VmPathRef,
+        value: Any,
+        screenId: String? = nil,
+        instanceId: String? = nil
+    ) {
+        viewModelValues.append(
+            ViewModelValueRequest(
+                path: path,
+                value: value,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    override func applyViewModelListOperation(
+        _ operation: FlowViewModelListOperation,
+        path: VmPathRef,
+        payload: [String: Any],
+        screenId: String? = nil,
+        instanceId: String? = nil
+    ) {
+        viewModelListOperations.append(
+            ViewModelListOperationRequest(
+                operation: operation,
+                path: path,
+                payload: payload,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    override func fireViewModelTrigger(
+        path: VmPathRef,
+        screenId: String? = nil,
+        instanceId: String? = nil
+    ) {
+        viewModelTriggers.append(
+            ViewModelTriggerRequest(
+                path: path,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    override func navigate(to screenId: String, transition: Any? = nil) {
+        navigationRequests.append(NavigationRequest(screenId: screenId, transition: transition))
     }
 
     override func performPurchase(productId: String, placementIndex: Any? = nil) {

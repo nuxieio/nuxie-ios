@@ -123,10 +123,11 @@ private final class OrderingMockFlowViewController: MockFlowViewController {
         replyTo: String? = nil,
         completion: ((Any?, Error?) -> Void)? = nil
     ) {
-        if type == "runtime/navigate", let screenId = payload["screenId"] as? String {
-            recorder.append("navigate:\(screenId)")
-        }
         completion?(nil, nil)
+    }
+
+    override func navigate(to screenId: String, transition: Any? = nil) {
+        recorder.append("navigate:\(screenId)")
     }
 }
 

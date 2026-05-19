@@ -380,6 +380,13 @@ extension FlowRuntimeDelegate {
 
 /// FlowViewController - displays native flow content with loading and error states.
 public class FlowViewController: NuxiePlatformViewController {
+    private enum NativeRuntimeCommand {
+        case viewModelSnapshot(FlowViewModelSnapshot, screenId: String?)
+        case viewModelValue(path: VmPathRef, value: Any, screenId: String?, instanceId: String?)
+        case viewModelList(operation: FlowViewModelListOperation, path: VmPathRef, payload: [String: Any], screenId: String?, instanceId: String?)
+        case viewModelTrigger(path: VmPathRef, screenId: String?, instanceId: String?)
+        case navigate(screenId: String, transition: Any?)
+    }
 
     // MARK: - Properties
 
@@ -467,6 +474,7 @@ public class FlowViewController: NuxiePlatformViewController {
     // Runtime readiness + message buffering
     private var runtimeReady = false
     private var pendingRuntimeMessages: [(type: String, payload: [String: Any], replyTo: String?)] = []
+    private var pendingNativeRuntimeCommands: [NativeRuntimeCommand] = []
     private var didInvokeClose = false
     private var lastSentColorSchemePayload: [String: String]?
 
@@ -717,8 +725,63 @@ public class FlowViewController: NuxiePlatformViewController {
             pendingRuntimeMessages.append((type: type, payload: payload, replyTo: replyTo))
             return
         }
-        deliverRuntimeMessageToNativeRuntime(type: type, payload: payload)
         completion?(nil, nil)
+    }
+
+    func applyViewModelSnapshot(_ snapshot: FlowViewModelSnapshot, screenId: String? = nil) {
+        enqueueNativeRuntimeCommand(.viewModelSnapshot(snapshot, screenId: screenId))
+    }
+
+    func applyViewModelValue(
+        path: VmPathRef,
+        value: Any,
+        screenId: String? = nil,
+        instanceId: String? = nil
+    ) {
+        enqueueNativeRuntimeCommand(
+            .viewModelValue(
+                path: path,
+                value: value,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    func applyViewModelListOperation(
+        _ operation: FlowViewModelListOperation,
+        path: VmPathRef,
+        payload: [String: Any],
+        screenId: String? = nil,
+        instanceId: String? = nil
+    ) {
+        enqueueNativeRuntimeCommand(
+            .viewModelList(
+                operation: operation,
+                path: path,
+                payload: payload,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    func fireViewModelTrigger(
+        path: VmPathRef,
+        screenId: String? = nil,
+        instanceId: String? = nil
+    ) {
+        enqueueNativeRuntimeCommand(
+            .viewModelTrigger(
+                path: path,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        )
+    }
+
+    func navigate(to screenId: String, transition: Any? = nil) {
+        enqueueNativeRuntimeCommand(.navigate(screenId: screenId, transition: transition))
     }
 
     fileprivate func sendImmediateBridgeResult(
@@ -769,6 +832,7 @@ public class FlowViewController: NuxiePlatformViewController {
             flowViewModelBridge = nil
             flowArtifact = nil
             pendingNativeScreenBindingId = nil
+            pendingNativeRuntimeCommands.removeAll()
 
             let data = try Data(contentsOf: artifact.rivURL)
             let riveFile = try RiveFile(
@@ -831,6 +895,7 @@ public class FlowViewController: NuxiePlatformViewController {
         } catch {
             flowArtifact = nil
             pendingNativeScreenBindingId = nil
+            pendingNativeRuntimeCommands.removeAll()
             viewModel.handleLoadingFailed(error)
         }
         #else
@@ -848,6 +913,7 @@ public class FlowViewController: NuxiePlatformViewController {
             id: nil
         )
         flushPendingRuntimeMessages()
+        flushPendingNativeRuntimeCommands()
         sendRuntimeSafeAreaInsets()
         sendCurrentColorSchemeToRuntimeIfNeeded(force: true)
     }
@@ -1230,7 +1296,6 @@ private extension FlowViewController {
         let queued = pendingRuntimeMessages
         pendingRuntimeMessages.removeAll()
         for message in queued {
-            deliverRuntimeMessageToNativeRuntime(type: message.type, payload: message.payload)
             runtimeDelegate?.flowViewController(
                 self,
                 didSendRuntimeMessage: message.type,
@@ -1240,24 +1305,62 @@ private extension FlowViewController {
         }
     }
 
-    private func deliverRuntimeMessageToNativeRuntime(type: String, payload: [String: Any]) {
-        #if canImport(RiveRuntime) && canImport(UIKit)
-        if type == "runtime/navigate" {
-            _ = handleNativeRuntimeNavigate(payload)
+    private func enqueueNativeRuntimeCommand(_ command: NativeRuntimeCommand) {
+        guard runtimeReady else {
+            pendingNativeRuntimeCommands.append(command)
             return
         }
-        _ = flowViewModelBridge?.handleRuntimeMessage(type: type, payload: payload)
-        if type == "runtime/view_model_init" {
+        performNativeRuntimeCommand(command)
+    }
+
+    private func flushPendingNativeRuntimeCommands() {
+        guard runtimeReady, !pendingNativeRuntimeCommands.isEmpty else { return }
+        let commands = pendingNativeRuntimeCommands
+        pendingNativeRuntimeCommands.removeAll()
+        commands.forEach(performNativeRuntimeCommand)
+    }
+
+    private func performNativeRuntimeCommand(_ command: NativeRuntimeCommand) {
+        #if canImport(RiveRuntime) && canImport(UIKit)
+        switch command {
+        case .viewModelSnapshot(let snapshot, let screenId):
+            _ = flowViewModelBridge?.applySnapshot(snapshot, screenId: screenId)
+            if let screenId,
+               flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true {
+                pendingNativeScreenBindingId = nil
+            }
             bindPendingNativeScreenIfNeeded()
+        case .viewModelValue(let path, let value, let screenId, let instanceId):
+            _ = flowViewModelBridge?.applyValue(
+                path: path,
+                value: value,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        case .viewModelList(let operation, let path, let payload, let screenId, let instanceId):
+            _ = flowViewModelBridge?.applyListOperation(
+                operation,
+                path: path,
+                payload: payload,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        case .viewModelTrigger(let path, let screenId, let instanceId):
+            _ = flowViewModelBridge?.fireTrigger(
+                path: path,
+                screenId: screenId,
+                instanceId: instanceId
+            )
+        case .navigate(let screenId, let transition):
+            _ = handleNativeRuntimeNavigate(to: screenId, transition: transition)
         }
         #endif
     }
 
     #if canImport(RiveRuntime) && canImport(UIKit)
     @discardableResult
-    private func handleNativeRuntimeNavigate(_ payload: [String: Any]) -> Bool {
-        guard let screenId = payload["screenId"] as? String,
-              let artifact = flowArtifact,
+    private func handleNativeRuntimeNavigate(to screenId: String, transition: Any?) -> Bool {
+        guard let artifact = flowArtifact,
               let screen = artifact.manifest.screens.first(where: { $0.screenId == screenId }),
               let riveViewModel = flowRiveViewModel else {
             return false
