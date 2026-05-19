@@ -92,7 +92,7 @@ public final class IdentityService: IdentityServiceProtocol {
       // If no anonymous ID present, create one & persist
       if anonymousId == nil {
         anonymousId = IdentityService.generateAnonymousId()
-        persistLockedAsync()
+        persistLocked()
       }
     }
   }
@@ -119,7 +119,7 @@ public final class IdentityService: IdentityServiceProtocol {
       if let anon = anonymousId { return anon }
       let newAnon = IdentityService.generateAnonymousId()
       anonymousId = newAnon
-      persistLockedAsync()
+      persistLocked()
       return newAnon
     }
   }
@@ -147,7 +147,7 @@ public final class IdentityService: IdentityServiceProtocol {
         )
       }
 
-      persistLockedAsync()
+      persistLocked()
       LogInfo(
         "Set distinct ID: \(NuxieLogger.shared.logDistinctID(distinctId)) (previous: \(NuxieLogger.shared.logDistinctID(prev)))"
       )
@@ -171,7 +171,7 @@ public final class IdentityService: IdentityServiceProtocol {
         self.anonymousId = IdentityService.generateAnonymousId()
       }
 
-      persistLockedAsync()
+      persistLocked()
       LogInfo(
         "Reset identity - distinct ID: \(NuxieLogger.shared.logDistinctID(prev)) -> nil, anonymous kept: \(keepAnonymousId)"
       )
@@ -199,7 +199,7 @@ public final class IdentityService: IdentityServiceProtocol {
       var currentProps = userPropertiesById[key] ?? [:]
       for (k, v) in properties { currentProps[k] = v }
       userPropertiesById[key] = currentProps
-      persistLockedAsync()
+      persistLocked()
       LogDebug(
         "Set \(properties.count) user properties for \(NuxieLogger.shared.logDistinctID(key))")
     }
@@ -220,7 +220,7 @@ public final class IdentityService: IdentityServiceProtocol {
       }
       if setCount > 0 {
         userPropertiesById[key] = currentProps
-        persistLockedAsync()
+        persistLocked()
       }
       LogDebug(
         "Set \(setCount) new user properties for \(NuxieLogger.shared.logDistinctID(key)) (\(properties.count - setCount) existed)"
@@ -278,7 +278,7 @@ public final class IdentityService: IdentityServiceProtocol {
     }
   }
 
-  private func persistLockedAsync() {
+  private func persistLocked() {
     let distinctId = self.distinctId
     let anonymousId = self.anonymousId
 
@@ -298,24 +298,22 @@ public final class IdentityService: IdentityServiceProtocol {
       propsById[userId] = codableProps
     }
 
-    queue.async { [encoder, fileURL] in
-      let model = IdentityDiskModel(
-        distinctId: distinctId,
-        anonymousId: anonymousId,
-        userPropertiesById: propsById
-      )
-      do {
-        let data = try encoder.encode(model)
-        try data.write(to: fileURL, options: .atomic)
-        #if os(iOS) || os(tvOS) || os(watchOS)
-          try? FileManager.default.setAttributes(
-            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-            ofItemAtPath: fileURL.path
-          )
-        #endif
-      } catch {
-        LogWarning("Failed to persist identity: \(error)")
-      }
+    let model = IdentityDiskModel(
+      distinctId: distinctId,
+      anonymousId: anonymousId,
+      userPropertiesById: propsById
+    )
+    do {
+      let data = try encoder.encode(model)
+      try data.write(to: fileURL, options: .atomic)
+      #if os(iOS) || os(tvOS) || os(watchOS)
+        try? FileManager.default.setAttributes(
+          [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+          ofItemAtPath: fileURL.path
+        )
+      #endif
+    } catch {
+      LogWarning("Failed to persist identity: \(error)")
     }
   }
 
@@ -331,7 +329,7 @@ public final class IdentityService: IdentityServiceProtocol {
     if let anon = service.anonymousId { return anon }
     let anon = generateAnonymousId()
     service.anonymousId = anon
-    service.persistLockedAsync()
+    service.persistLocked()
     return anon
   }
 }
