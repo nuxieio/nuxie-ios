@@ -148,8 +148,40 @@ public enum FlowRuntimeFixtureHost {
         }
     }
 
-    private final class FlowRuntimeFixtureExecutionRuntime: FlowRuntimeDelegate {
+    private actor FlowRuntimeFixtureRunnerBridge {
         private let runner: FlowJourneyRunner
+        private var didHandleReady = false
+        private var currentScreenId: String?
+
+        init(runner: FlowJourneyRunner) {
+            self.runner = runner
+        }
+
+        func handleReady() async -> FlowJourneyRunner.RunOutcome? {
+            guard !didHandleReady else { return nil }
+            didHandleReady = true
+            return await runner.handleRuntimeReady()
+        }
+
+        func handleScreenChanged(_ screenId: String) async -> FlowJourneyRunner.RunOutcome? {
+            currentScreenId = screenId
+            return await runner.handleScreenChanged(screenId)
+        }
+
+        func handleInteraction(_ interaction: FlowRendererInteraction) async -> FlowJourneyRunner.RunOutcome? {
+            await runner.dispatchTrigger(
+                trigger: interaction.trigger,
+                screenId: interaction.screenId ?? currentScreenId,
+                componentId: interaction.componentId,
+                instanceId: interaction.instanceId,
+                event: nil
+            )
+        }
+    }
+
+    private final class FlowRuntimeFixtureExecutionRuntime: FlowRuntimeDelegate {
+        private let bridge: FlowRuntimeFixtureRunnerBridge
+        private weak var flowViewController: FlowViewController?
         weak var statusLabel: UILabel?
 
         init(flow: Flow, flowViewController: FlowViewController) {
@@ -172,25 +204,24 @@ public enum FlowRuntimeFixtureHost {
                 campaign: campaign,
                 distinctId: "fixture-distinct-id"
             )
-            self.runner = FlowJourneyRunner(
+            let runner = FlowJourneyRunner(
                 journey: journey,
                 campaign: campaign,
                 flow: flow
             )
             runner.attach(viewController: flowViewController)
-            runner.onShowScreen = { [weak flowViewController, weak self] screenId, transition in
-                await MainActor.run {
-                    flowViewController?.navigate(to: screenId, transition: transition?.value)
-                    self?.statusLabel?.text = "navigated:\(screenId)"
-                }
+            self.flowViewController = flowViewController
+            self.bridge = FlowRuntimeFixtureRunnerBridge(runner: runner)
+            runner.onShowScreen = { [weak self] screenId, transition in
+                await self?.showScreen(screenId, transition: transition?.value)
             }
             flowViewController.runtimeDelegate = self
         }
 
         func flowViewControllerDidBecomeReady(_ controller: FlowViewController) {
-            Task { [weak self] in
+            Task { [bridge, weak self] in
                 guard let self else { return }
-                self.handleOutcome(await self.runner.handleRuntimeReady())
+                await self.handleOutcome(await bridge.handleReady())
             }
         }
 
@@ -198,10 +229,10 @@ public enum FlowRuntimeFixtureHost {
             _ controller: FlowViewController,
             didChangeScreen screenId: String
         ) {
-            statusLabel?.text = "screen:\(screenId)"
-            Task { [weak self] in
+            setStatus("screen:\(screenId)")
+            Task { [bridge, weak self] in
                 guard let self else { return }
-                self.handleOutcome(await self.runner.handleScreenChanged(screenId))
+                await self.handleOutcome(await bridge.handleScreenChanged(screenId))
             }
         }
 
@@ -209,32 +240,48 @@ public enum FlowRuntimeFixtureHost {
             _ controller: FlowViewController,
             didEmitInteraction interaction: FlowRendererInteraction
         ) {
-            statusLabel?.text = "interaction:\(interaction.componentId ?? "unknown")"
-            Task { [weak self] in
+            setStatus("interaction:\(interaction.componentId ?? "unknown")")
+            Task { [bridge, weak self] in
                 guard let self else { return }
-                self.handleOutcome(
-                    await self.runner.dispatchTrigger(
-                        trigger: interaction.trigger,
-                        screenId: interaction.screenId,
-                        componentId: interaction.componentId,
-                        instanceId: interaction.instanceId,
-                        event: nil
-                    )
-                )
+                await self.handleOutcome(await bridge.handleInteraction(interaction))
             }
         }
 
         func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
-            statusLabel?.text = "dismissed:\(String(describing: reason))"
+            setStatus("dismissed:\(String(describing: reason))")
         }
 
+        private func setStatus(_ text: String) {
+            Task { @MainActor [weak self] in
+                self?.appendStatus(text)
+            }
+        }
+
+        @MainActor
+        private func showScreen(_ screenId: String, transition: Any?) {
+            flowViewController?.navigate(to: screenId, transition: transition)
+            appendStatus("navigated:\(screenId)")
+        }
+
+        @MainActor
+        private func appendStatus(_ text: String) {
+            guard let statusLabel else { return }
+            let currentText = statusLabel.text ?? ""
+            if currentText.isEmpty || currentText == "ready" {
+                statusLabel.text = text
+            } else {
+                statusLabel.text = "\(currentText) | \(text)"
+            }
+        }
+
+        @MainActor
         private func handleOutcome(_ outcome: FlowJourneyRunner.RunOutcome?) {
             guard let outcome else { return }
             switch outcome {
             case .paused:
-                statusLabel?.text = "paused"
+                appendStatus("paused")
             case .exited(let reason):
-                statusLabel?.text = "exited:\(reason.rawValue)"
+                appendStatus("exited:\(reason.rawValue)")
             }
         }
     }
