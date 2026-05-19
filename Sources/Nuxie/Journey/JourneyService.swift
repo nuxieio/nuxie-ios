@@ -367,174 +367,222 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  // MARK: - Runtime Bridge
+  // MARK: - Renderer Events
 
-  fileprivate func handleRuntimeMessage(
+  fileprivate func handleRuntimeReady(
     journeyId: String,
-    type: String,
-    payload: [String: Any],
-    id: String?,
     controller: FlowViewController
   ) async {
     guard let journey = inMemoryJourneysById[journeyId],
           let runner = flowRunners[journeyId] else { return }
 
-    switch type {
-    case "runtime/ready":
-      let outcome = await runner.handleRuntimeReady()
-      handleOutcome(outcome, journey: journey)
+    let outcome = await runner.handleRuntimeReady()
+    handleOutcome(outcome, journey: journey)
+  }
 
-    case "runtime/screen_changed":
-      if let screenId = payload["screenId"] as? String {
-        let outcome = await runner.handleScreenChanged(screenId)
-        handleOutcome(outcome, journey: journey)
-        persistJourney(journey)
+  fileprivate func handleRendererScreenChanged(
+    journeyId: String,
+    screenId: String
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
 
-        eventService.track(
-          "$journey_node_executed",
-          properties: [
-            "session_id": journey.id,
-            "node_id": screenId,
-            "async": true,
-            "context": journey.context.mapValues { $0.value },
-          ],
-          userProperties: nil,
-          userPropertiesSetOnce: nil
+    let outcome = await runner.handleScreenChanged(screenId)
+    handleOutcome(outcome, journey: journey)
+    persistJourney(journey)
+
+    eventService.track(
+      "$journey_node_executed",
+      properties: [
+        "session_id": journey.id,
+        "node_id": screenId,
+        "async": true,
+        "context": journey.context.mapValues { $0.value },
+      ],
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+  }
+
+  fileprivate func handleRendererViewModelChange(
+    journeyId: String,
+    change: FlowRendererViewModelChange
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
+
+    let outcome = await runner.handleDidSet(
+      path: change.path,
+      value: change.value,
+      source: change.source,
+      screenId: change.screenId ?? journey.flowState.currentScreenId,
+      instanceId: change.instanceId
+    )
+    handleOutcome(outcome, journey: journey)
+    persistJourney(journey)
+  }
+
+  fileprivate func handleRendererInteraction(
+    journeyId: String,
+    interaction: FlowRendererInteraction
+  ) async {
+    if case .event(let eventName, _) = interaction.trigger {
+      await handleRendererEvent(
+        journeyId: journeyId,
+        event: FlowRendererEvent(
+          name: eventName,
+          properties: interaction.properties,
+          screenId: interaction.screenId,
+          componentId: interaction.componentId,
+          instanceId: interaction.instanceId
         )
-      }
-
-    case "action/did_set":
-      if let path = parsePathRef(payload) {
-        let value = payload["value"] ?? NSNull()
-        let source = payload["source"] as? String
-        let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
-        let instanceId = payload["instanceId"] as? String
-        let outcome = await runner.handleDidSet(
-          path: path,
-          value: value,
-          source: source,
-          screenId: screenId,
-          instanceId: instanceId
-        )
-        handleOutcome(outcome, journey: journey)
-        persistJourney(journey)
-      }
-
-    case "action/event":
-      let name = payload["name"] as? String ?? ""
-      let properties = payload["properties"] as? [String: Any]
-      if !name.isEmpty {
-        eventService.track(
-          name,
-          properties: properties,
-          userProperties: nil,
-          userPropertiesSetOnce: nil
-        )
-      }
-
-    case "action/purchase":
-      let screenId: String? = payload["screenId"] as? String ?? journey.flowState.currentScreenId
-      let instanceId = payload["instanceId"] as? String
-      let resolvedProductId = runner.resolveRuntimeValue(
-        payload["productId"] ?? "",
-        screenId: screenId,
-        instanceId: instanceId
       )
-      if let productId = resolvedProductId as? String, !productId.isEmpty {
-        var userInfo: [String: Any] = [
-          "journeyId": journey.id,
-          "campaignId": journey.campaignId,
-          "productId": productId
-        ]
-        if let screenId {
-          userInfo["screenId"] = screenId
-        }
-        if let placementIndex = payload["placementIndex"] {
-          let resolvedPlacement = runner.resolveRuntimeValue(
-            placementIndex,
-            screenId: screenId,
-            instanceId: instanceId
-          )
-          userInfo["placementIndex"] = resolvedPlacement
-        }
-        NotificationCenter.default.post(
-          name: .nuxiePurchase,
-          object: nil,
-          userInfo: userInfo
-        )
-        await handlePurchase(productId: productId, controller: controller)
-      }
-
-    case "action/restore":
-      NotificationCenter.default.post(
-        name: .nuxieRestore,
-        object: nil,
-        userInfo: [
-          "journeyId": journey.id,
-          "campaignId": journey.campaignId,
-          "screenId": journey.flowState.currentScreenId as Any
-        ]
-      )
-      await handleRestore(controller: controller)
-
-    case "action/request_notifications":
-      runner.beginNotificationPermissionRequest()
-      _ = await MainActor.run {
-        controller.performRequestNotifications(journeyId: journey.id)
-      }
-
-    case "action/request_permission":
-      guard let permissionType = payload["permissionType"] as? String,
-            !permissionType.isEmpty else { return }
-      runner.beginRequestPermissionRequest()
-      _ = await MainActor.run {
-        controller.performRequestPermission(
-          permissionType: permissionType,
-          journeyId: journey.id
-        )
-      }
-
-    case "action/request_tracking":
-      runner.beginTrackingPermissionRequest()
-      _ = await MainActor.run {
-        controller.performRequestTracking(journeyId: journey.id)
-      }
-
-    case "action/open_link":
-      let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
-      let instanceId = payload["instanceId"] as? String
-      let target = payload["target"] as? String
-      await runner.handleRuntimeOpenLink(
-        url: payload["url"] ?? "",
-        target: target,
-        screenId: screenId,
-        instanceId: instanceId
-      )
-
-    case "action/back":
-      let steps = parseInt(payload["steps"] ?? payload["step"])
-      let transition = payload["transition"].map { AnyCodable($0) }
-      await runner.handleRuntimeBack(steps: steps, transition: transition)
-
-    case let action where action.hasPrefix("action/"):
-      if let trigger = parseRuntimeTrigger(type: action, payload: payload) {
-        let screenId = payload["screenId"] as? String ?? journey.flowState.currentScreenId
-        let componentId = payload["componentId"] as? String
-        let instanceId = payload["instanceId"] as? String
-        let outcome = await runner.dispatchTrigger(
-          trigger: trigger,
-          screenId: screenId,
-          componentId: componentId,
-          instanceId: instanceId,
-          event: nil
-        )
-        handleOutcome(outcome, journey: journey)
-        persistJourney(journey)
-      }
-
-    default:
-      break
+      return
     }
+
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
+
+    let screenId = interaction.screenId ?? journey.flowState.currentScreenId
+    let outcome = await runner.dispatchTrigger(
+      trigger: interaction.trigger,
+      screenId: screenId,
+      componentId: interaction.componentId,
+      instanceId: interaction.instanceId,
+      event: nil
+    )
+    handleOutcome(outcome, journey: journey)
+    persistJourney(journey)
+  }
+
+  fileprivate func handleRendererEvent(
+    journeyId: String,
+    event rendererEvent: FlowRendererEvent
+  ) async {
+    guard !rendererEvent.name.isEmpty else { return }
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
+
+    let eventProperties = await eventService.prepareTriggerProperties(
+      rendererEvent.properties,
+      userProperties: nil,
+      userPropertiesSetOnce: nil
+    )
+    let event = NuxieEvent(
+      name: rendererEvent.name,
+      distinctId: journey.distinctId,
+      properties: eventProperties
+    )
+    let outcome = await runner.dispatchTrigger(
+      trigger: .event(eventName: rendererEvent.name, filter: nil),
+      screenId: rendererEvent.screenId ?? journey.flowState.currentScreenId,
+      componentId: rendererEvent.componentId,
+      instanceId: rendererEvent.instanceId,
+      event: event
+    )
+    handleOutcome(outcome, journey: journey)
+    persistJourney(journey)
+
+    let routedEvent: NuxieEvent
+    let response: EventResponse?
+    do {
+      let tracked = try await eventService.trackForTrigger(
+        rendererEvent.name,
+        properties: rendererEvent.properties,
+        userProperties: nil,
+        userPropertiesSetOnce: nil,
+        persistToHistory: true,
+        distinctIdOverride: journey.distinctId
+      )
+      routedEvent = tracked.0
+      response = tracked.1
+    } catch {
+      LogWarning("JourneyService: Failed to track renderer event \(rendererEvent.name): \(error)")
+      routedEvent = event
+      response = nil
+    }
+
+    let campaigns = await getAllCampaigns(for: routedEvent.distinctId) ?? []
+    let sourceCampaign = sourceScopedGoalCampaign(for: journey, campaigns: campaigns)
+    let transientEvent = makeStoredEvent(from: routedEvent)
+    await processActiveJourneys(
+      for: routedEvent,
+      campaigns: campaigns,
+      transientEventsByJourneyId: [journeyId: [transientEvent]],
+      restrictedToJourneyIds: [journeyId],
+      skipEventTriggerForJourneyIds: [journeyId],
+      allowSnapshotFallback: true
+    )
+
+    await routeRendererEventOutsideSourceJourney(
+      routedEvent,
+      sourceJourneyId: journeyId,
+      campaigns: campaigns
+    )
+    await handleScopedGatePlan(
+      response?.gatePlan(),
+      sourceJourney: journey,
+      sourceCampaign: sourceCampaign
+    )
+  }
+
+  private func routeRendererEventOutsideSourceJourney(
+    _ event: NuxieEvent,
+    sourceJourneyId: String,
+    campaigns: [Campaign]
+  ) async {
+    let transientEvent = makeStoredEvent(from: event)
+    let otherActiveJourneyIds = Set(
+      await getActiveJourneys(for: event.distinctId)
+        .map(\.id)
+        .filter { $0 != sourceJourneyId }
+    )
+
+    if !otherActiveJourneyIds.isEmpty {
+      let transientEventsByJourneyId = Dictionary(
+        uniqueKeysWithValues: otherActiveJourneyIds.map { ($0, [transientEvent]) }
+      )
+      await processActiveJourneys(
+        for: event,
+        campaigns: campaigns,
+        transientEventsByJourneyId: transientEventsByJourneyId,
+        restrictedToJourneyIds: otherActiveJourneyIds
+      )
+    }
+
+    let results = await startJourneysMatchingEvent(
+      event,
+      campaigns: campaigns,
+      journeyStartFlushStrategy: .eventService
+    )
+    let startedJourneyIds = Set(results.compactMap { result -> String? in
+      guard case .started(let journey) = result else { return nil }
+      return journey.id
+    })
+    guard !startedJourneyIds.isEmpty else { return }
+
+    let transientEventsByJourneyId = Dictionary(
+      uniqueKeysWithValues: startedJourneyIds.map { ($0, [transientEvent]) }
+    )
+    await processActiveJourneys(
+      for: event,
+      campaigns: campaigns,
+      transientEventsByJourneyId: transientEventsByJourneyId,
+      restrictedToJourneyIds: startedJourneyIds
+    )
+  }
+
+  fileprivate func handleRendererOpenLink(
+    journeyId: String,
+    request: FlowRendererOpenLinkRequest
+  ) async {
+    guard let runner = flowRunners[journeyId] else { return }
+    await runner.handleRuntimeOpenLink(
+      url: request.urlString,
+      target: request.target,
+      screenId: request.screenId,
+      instanceId: request.instanceId
+    )
   }
 
   fileprivate func handleRuntimeDismiss(
@@ -1297,6 +1345,7 @@ public actor JourneyService: JourneyServiceProtocol {
     campaigns: [Campaign],
     transientEventsByJourneyId: [String: [StoredEvent]],
     restrictedToJourneyIds: Set<String>? = nil,
+    skipEventTriggerForJourneyIds: Set<String> = [],
     allowSnapshotFallback: Bool = false
   ) async {
     let journeys = await getActiveJourneys(for: event.distinctId)
@@ -1332,6 +1381,10 @@ public actor JourneyService: JourneyServiceProtocol {
           let outcome = await runner.resumePendingAction(reason: .event(event), event: event)
           handleOutcome(outcome, journey: journey)
         }
+        continue
+      }
+
+      if skipEventTriggerForJourneyIds.contains(journey.id) {
         continue
       }
 
@@ -1644,127 +1697,6 @@ public actor JourneyService: JourneyServiceProtocol {
     }
   }
 
-  // MARK: - Runtime Helpers
-
-  private func parseRuntimeTrigger(type: String, payload: [String: Any]) -> InteractionTrigger? {
-    if let triggerPayload = payload["trigger"] as? [String: Any] {
-      return parseTriggerDict(triggerPayload)
-    }
-    if let triggerType = payload["trigger"] as? String {
-      return parseTriggerType(triggerType, payload: payload)
-    }
-
-    let fallback = type.hasPrefix("action/") ? String(type.dropFirst("action/".count)) : type
-    return parseTriggerType(fallback, payload: payload)
-  }
-
-  private func parseTriggerDict(_ payload: [String: Any]) -> InteractionTrigger? {
-    if let type = payload["type"] as? String {
-      return parseTriggerType(type, payload: payload)
-    }
-    if let type = payload["trigger"] as? String {
-      return parseTriggerType(type, payload: payload)
-    }
-    return nil
-  }
-
-	  private func parseTriggerType(_ raw: String, payload: [String: Any]) -> InteractionTrigger? {
-	    let normalized = raw
-	      .replacingOccurrences(of: "action/", with: "")
-	      .replacingOccurrences(of: "-", with: "_")
-	      .lowercased()
-
-	    switch normalized {
-	    case "long_press", "longpress":
-	      let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
-	      return .longPress(minMs: minMs)
-	    case "hover":
-	      return .hover
-	    case "press":
-	      return .press
-    case "drag":
-      let direction = (payload["direction"] as? String)
-        .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
-      let threshold = parseDouble(payload["threshold"])
-      return .drag(direction: direction, threshold: threshold)
-    case "manual":
-      return .manual(label: payload["label"] as? String)
-    default:
-      return nil
-    }
-  }
-
-  private func parseInt(_ value: Any?) -> Int? {
-    if let value = value as? Int { return value }
-    if let value = value as? Double { return Int(value) }
-    if let value = value as? NSNumber { return value.intValue }
-    if let value = value as? String { return Int(value) }
-    return nil
-  }
-
-  private func parseDouble(_ value: Any?) -> Double? {
-    if let value = value as? Double { return value }
-    if let value = value as? Int { return Double(value) }
-    if let value = value as? NSNumber { return value.doubleValue }
-    if let value = value as? String { return Double(value) }
-    return nil
-  }
-
-  private func parsePathRef(_ payload: [String: Any]) -> VmPathRef? {
-    let isRelative = payload["isRelative"] as? Bool
-    let nameBased = payload["nameBased"] as? Bool
-    if let pathIds = payload["pathIds"] as? [Int] {
-      return .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
-    }
-    if let pathIds = payload["pathIds"] as? [NSNumber] {
-      return .ids(VmPathIds(pathIds: pathIds.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
-    }
-    return nil
-  }
-
-  private func handlePurchase(productId: String, controller: FlowViewController) async {
-    let transactionService = Container.shared.transactionService()
-    let productService = Container.shared.productService()
-
-    _ = await MainActor.run {
-      Task { @MainActor in
-        do {
-          let products = try await productService.fetchProducts(for: [productId])
-          guard let product = products.first else {
-            controller.sendRuntimeMessage(type: "purchase_error", payload: ["error": "Product not found"])
-            return
-          }
-          let syncResult = try await transactionService.purchase(product)
-          controller.sendRuntimeMessage(type: "purchase_ui_success", payload: ["productId": productId])
-          if let syncTask = syncResult.syncTask {
-            let confirmed = await syncTask.value
-            if confirmed {
-              controller.sendRuntimeMessage(type: "purchase_confirmed", payload: ["productId": productId])
-            }
-          }
-        } catch StoreKitError.purchaseCancelled {
-          controller.sendRuntimeMessage(type: "purchase_cancelled", payload: [:])
-        } catch {
-          controller.sendRuntimeMessage(type: "purchase_error", payload: ["error": error.localizedDescription])
-        }
-      }
-    }
-  }
-
-  private func handleRestore(controller: FlowViewController) async {
-    let transactionService = Container.shared.transactionService()
-
-    _ = await MainActor.run {
-      Task { @MainActor in
-        do {
-          try await transactionService.restore()
-          controller.sendRuntimeMessage(type: "restore_success", payload: [:])
-        } catch {
-          controller.sendRuntimeMessage(type: "restore_error", payload: ["error": error.localizedDescription])
-        }
-      }
-    }
-  }
 }
 
 private final class FlowRuntimeDelegateAdapter:
@@ -1783,18 +1715,10 @@ private final class FlowRuntimeDelegateAdapter:
     self.journeyService = journeyService
   }
 
-  func flowViewController(
-    _ controller: FlowViewController,
-    didReceiveRuntimeMessage type: String,
-    payload: [String : Any],
-    id: String?
-  ) {
+  func flowViewControllerDidBecomeReady(_ controller: FlowViewController) {
     Task { [weak journeyService] in
-      await journeyService?.handleRuntimeMessage(
+      await journeyService?.handleRuntimeReady(
         journeyId: journeyId,
-        type: type,
-        payload: payload,
-        id: id,
         controller: controller
       )
     }
@@ -1802,10 +1726,63 @@ private final class FlowRuntimeDelegateAdapter:
 
   func flowViewController(
     _ controller: FlowViewController,
-    didSendRuntimeMessage type: String,
-    payload: [String : Any],
-    replyTo: String?
-  ) {}
+    didChangeScreen screenId: String
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRendererScreenChanged(
+        journeyId: journeyId,
+        screenId: screenId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didEmitInteraction interaction: FlowRendererInteraction
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRendererInteraction(
+        journeyId: journeyId,
+        interaction: interaction
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didEmitEvent event: FlowRendererEvent
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRendererEvent(
+        journeyId: journeyId,
+        event: event
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didEmitViewModelChange change: FlowRendererViewModelChange
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRendererViewModelChange(
+        journeyId: journeyId,
+        change: change
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didRequestOpenLink request: FlowRendererOpenLinkRequest
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRendererOpenLink(
+        journeyId: journeyId,
+        request: request
+      )
+    }
+  }
 
   func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
     Task { [weak journeyService] in

@@ -1,164 +1,177 @@
 import Foundation
 @testable import Nuxie
 
-/// Serializes native runtime messages onto a single execution context,
+/// Serializes native renderer callbacks onto a single execution context,
 /// mirroring production (JourneyService is an actor).
 actor FlowJourneyRunnerRuntimeBridge {
     private let runner: FlowJourneyRunner
+    private let distinctId: String
     private var didHandleReady = false
     private var currentScreenId: String?
 
-    init(runner: FlowJourneyRunner) {
+    init(runner: FlowJourneyRunner, distinctId: String = "test-user") {
         self.runner = runner
+        self.distinctId = distinctId
     }
 
-    private func parseInt(_ value: Any?) -> Int? {
-        if let value = value as? Int { return value }
-        if let value = value as? Double { return Int(value) }
-        if let value = value as? NSNumber { return value.intValue }
-        if let value = value as? String { return Int(value) }
-        return nil
+    func handleReady() async {
+        guard !didHandleReady else { return }
+        didHandleReady = true
+        _ = await runner.handleRuntimeReady()
     }
 
-    private func parseDouble(_ value: Any?) -> Double? {
-        if let value = value as? Double { return value }
-        if let value = value as? Int { return Double(value) }
-        if let value = value as? NSNumber { return value.doubleValue }
-        if let value = value as? String { return Double(value) }
-        return nil
+    func handleScreenChanged(_ screenId: String) async {
+        currentScreenId = screenId
+        _ = await runner.handleScreenChanged(screenId)
     }
 
-    private func parsePathRef(_ payload: [String: Any]) -> VmPathRef? {
-        let isRelative = payload["isRelative"] as? Bool
-        let nameBased = payload["nameBased"] as? Bool
-        if let pathIds = payload["pathIds"] as? [Int] {
-            return .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
-        }
-        if let pathIds = payload["pathIds"] as? [NSNumber] {
-            return .ids(VmPathIds(pathIds: pathIds.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
-        }
-        return nil
+    func handleInteraction(_ interaction: FlowRendererInteraction) async {
+        let screenId = interaction.screenId ?? currentScreenId
+        _ = await runner.dispatchTrigger(
+            trigger: interaction.trigger,
+            screenId: screenId,
+            componentId: interaction.componentId,
+            instanceId: interaction.instanceId,
+            event: nil
+        )
     }
 
-	    func handle(type: String, payload: [String: Any], id: String?) async {
-	        switch type {
-	        case "runtime/ready":
-	            guard !didHandleReady else { return }
-	            didHandleReady = true
-	            _ = await runner.handleRuntimeReady()
+    func handleEvent(_ event: FlowRendererEvent) async {
+        let runtimeEvent = NuxieEvent(
+            name: event.name,
+            distinctId: distinctId,
+            properties: event.properties
+        )
+        _ = await runner.dispatchTrigger(
+            trigger: .event(eventName: event.name, filter: nil),
+            screenId: event.screenId ?? currentScreenId,
+            componentId: event.componentId,
+            instanceId: event.instanceId,
+            event: runtimeEvent
+        )
+    }
 
-	        case "runtime/screen_changed":
-	            guard let screenId = payload["screenId"] as? String else { return }
-	            currentScreenId = screenId
-	            _ = await runner.handleScreenChanged(screenId)
-
-	        case "action/long_press", "action/longpress":
-	            let minMs = parseInt(payload["minMs"] ?? payload["min_ms"])
-	            let screenId = payload["screenId"] as? String ?? currentScreenId
-	            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
-	            let instanceId = payload["instanceId"] as? String
-            _ = await runner.dispatchTrigger(
-                trigger: .longPress(minMs: minMs),
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId,
-                event: nil
-            )
-
-        case "action/hover":
-            let screenId = payload["screenId"] as? String ?? currentScreenId
-            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
-            let instanceId = payload["instanceId"] as? String
-            _ = await runner.dispatchTrigger(
-                trigger: .hover,
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId,
-                event: nil
-            )
-
-        case "action/press":
-            let screenId = payload["screenId"] as? String ?? currentScreenId
-            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
-            let instanceId = payload["instanceId"] as? String
-            _ = await runner.dispatchTrigger(
-                trigger: .press,
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId,
-                event: nil
-            )
-
-        case "action/drag":
-            let direction = (payload["direction"] as? String)
-                .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
-            let threshold = parseDouble(payload["threshold"])
-            let screenId = payload["screenId"] as? String ?? currentScreenId
-            let componentId = payload["componentId"] as? String ?? payload["elementId"] as? String
-            let instanceId = payload["instanceId"] as? String
-            _ = await runner.dispatchTrigger(
-                trigger: .drag(direction: direction, threshold: threshold),
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId,
-                event: nil
-            )
-
-        case "action/did_set":
-            guard let path = parsePathRef(payload) else { return }
-            let value = payload["value"] ?? NSNull()
-            let source = payload["source"] as? String
-            let screenId = payload["screenId"] as? String ?? currentScreenId
-            let instanceId = payload["instanceId"] as? String
-            _ = await runner.handleDidSet(
-                path: path,
-                value: value,
-                source: source,
-                screenId: screenId,
-                instanceId: instanceId
-            )
-
-        default:
-            break
-        }
+    func handleViewModelChange(_ change: FlowRendererViewModelChange) async {
+        _ = await runner.handleDidSet(
+            path: change.path,
+            value: change.value,
+            source: change.source,
+            screenId: change.screenId ?? currentScreenId,
+            instanceId: change.instanceId
+        )
     }
 }
 
 final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
-    typealias OnMessage = (_ type: String, _ payload: [String: Any], _ id: String?) -> Void
+    typealias OnEvent = (_ type: String, _ payload: [String: Any]) -> Void
 
     private let bridge: FlowJourneyRunnerRuntimeBridge
-    private let onMessage: OnMessage?
+    private let onEvent: OnEvent?
     private let traceRecorder: FlowRuntimeTraceRecorder?
 
     init(
         bridge: FlowJourneyRunnerRuntimeBridge,
-        onMessage: OnMessage? = nil,
+        onEvent: OnEvent? = nil,
         traceRecorder: FlowRuntimeTraceRecorder? = nil
     ) {
         self.bridge = bridge
-        self.onMessage = onMessage
+        self.onEvent = onEvent
         self.traceRecorder = traceRecorder
     }
 
-    func flowViewController(_ controller: FlowViewController, didReceiveRuntimeMessage type: String, payload: [String: Any], id: String?) {
-        traceRecorder?.recordRuntimeMessage(type: type, payload: payload)
-        onMessage?(type, payload, id)
+    func flowViewControllerDidBecomeReady(_ controller: FlowViewController) {
+        onEvent?("renderer/ready", [:])
         Task { [bridge] in
-            await bridge.handle(type: type, payload: payload, id: id)
+            await bridge.handleReady()
         }
     }
 
     func flowViewController(
         _ controller: FlowViewController,
-        didSendRuntimeMessage type: String,
-        payload: [String : Any],
-        replyTo: String?
+        didChangeScreen screenId: String
     ) {
-        traceRecorder?.recordRuntimeMessage(type: type, payload: payload)
+        traceRecorder?.recordRendererScreenChanged(screenId: screenId)
+        onEvent?("renderer/screen_changed", ["screenId": screenId])
+        Task { [bridge] in
+            await bridge.handleScreenChanged(screenId)
+        }
+    }
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didEmitInteraction interaction: FlowRendererInteraction
+    ) {
+        var payload = interaction.properties
+        if let screenId = interaction.screenId {
+            payload["screenId"] = screenId
+        }
+        if let componentId = interaction.componentId {
+            payload["componentId"] = componentId
+        }
+        if let instanceId = interaction.instanceId {
+            payload["instanceId"] = instanceId
+        }
+        onEvent?("renderer/interaction", payload)
+        Task { [bridge] in
+            await bridge.handleInteraction(interaction)
+        }
+    }
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didEmitEvent event: FlowRendererEvent
+    ) {
+        var payload = event.properties
+        payload["name"] = event.name
+        if let screenId = event.screenId {
+            payload["screenId"] = screenId
+        }
+        if let componentId = event.componentId {
+            payload["componentId"] = componentId
+        }
+        if let instanceId = event.instanceId {
+            payload["instanceId"] = instanceId
+        }
+        traceRecorder?.recordEvent(name: event.name, properties: event.properties)
+        onEvent?("renderer/event", payload)
+        Task { [bridge] in
+            await bridge.handleEvent(event)
+        }
+    }
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didEmitViewModelChange change: FlowRendererViewModelChange
+    ) {
+        traceRecorder?.recordRendererBindingChange(
+            screenId: change.screenId,
+            pathIds: tracePathIds(from: change.path),
+            value: change.value,
+            source: change.source,
+            instanceId: change.instanceId
+        )
+        onEvent?(
+            "renderer/view_model_change",
+            [
+                "value": change.value,
+                "source": change.source as Any,
+                "screenId": change.screenId as Any,
+                "instanceId": change.instanceId as Any
+            ]
+        )
+        Task { [bridge] in
+            await bridge.handleViewModelChange(change)
+        }
     }
 
     func flowViewControllerDidRequestDismiss(_ controller: FlowViewController, reason: CloseReason) {
         // Not used in these E2E tests.
+    }
+
+    private func tracePathIds(from path: VmPathRef) -> [Int]? {
+        switch path {
+        case .ids(let ref):
+            return ref.pathIds
+        }
     }
 }

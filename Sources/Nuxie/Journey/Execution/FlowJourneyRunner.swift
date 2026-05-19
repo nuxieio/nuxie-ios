@@ -202,7 +202,12 @@ final class FlowJourneyRunner {
             screenId: resolvedScreenId,
             instanceId: instanceId
         )
-        scheduleTriggerReset(path: path, screenId: resolvedScreenId, instanceId: instanceId)
+        scheduleTriggerReset(
+            path: path,
+            screenId: resolvedScreenId,
+            instanceId: instanceId,
+            notifyRenderer: source != "rive"
+        )
         return outcome
     }
 
@@ -283,8 +288,8 @@ final class FlowJourneyRunner {
     ) async -> RunOutcome? {
         if isPaused { return nil }
 
-        // Native runtime payloads include screenId. If the runtime/ready → navigate
-        // handshake is still in flight, we may not have received a runtime/screen_changed yet.
+        // Renderer interaction callbacks include screenId. If the ready → navigate
+        // handshake is still in flight, we may not have received a screen change yet.
         // Seed currentScreenId so navigation stack behavior (navigate/back) can work reliably.
         if journey.flowState.currentScreenId == nil, let screenId, !screenId.isEmpty {
             journey.flowState.currentScreenId = screenId
@@ -1625,7 +1630,11 @@ final class FlowJourneyRunner {
             screenId: screenId,
             instanceId: context.instanceId
         )
-        scheduleTriggerReset(path: action.path, screenId: screenId, instanceId: context.instanceId)
+        scheduleTriggerReset(
+            path: action.path,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
 
         return .continue
     }
@@ -1656,7 +1665,11 @@ final class FlowJourneyRunner {
             screenId: screenId,
             instanceId: context.instanceId
         )
-        scheduleTriggerReset(path: action.path, screenId: screenId, instanceId: context.instanceId)
+        scheduleTriggerReset(
+            path: action.path,
+            screenId: screenId,
+            instanceId: context.instanceId
+        )
 
         return .continue
     }
@@ -1972,7 +1985,12 @@ final class FlowJourneyRunner {
         return "\(interactionId):\(path.normalizedPath)"
     }
 
-    private func scheduleTriggerReset(path: VmPathRef, screenId: String?, instanceId: String?) {
+    private func scheduleTriggerReset(
+        path: VmPathRef,
+        screenId: String?,
+        instanceId: String?,
+        notifyRenderer: Bool = true
+    ) {
         guard viewModelState.isTriggerPath(path: path, screenId: screenId) else { return }
         let key = path.normalizedPath
         triggerResetTasks[key]?.cancel()
@@ -1983,7 +2001,9 @@ final class FlowJourneyRunner {
                 guard let self else { return }
                 _ = self.viewModelState.setValue(path: path, value: 0, screenId: screenId, instanceId: instanceId)
                 self.journey.flowState.viewModelSnapshot = self.viewModelState.getSnapshot()
-                self.fireViewModelTrigger(path: path, screenId: screenId, instanceId: instanceId)
+                if notifyRenderer {
+                    self.fireViewModelTrigger(path: path, screenId: screenId, instanceId: instanceId)
+                }
             }
         }
     }

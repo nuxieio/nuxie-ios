@@ -13,18 +13,15 @@ final class FlowRuntimeTraceTests: QuickSpec {
                 let recorder = FlowRuntimeTraceRecorder()
 
                 recorder.recordNavigation(screenId: "screen-2")
-                recorder.recordRuntimeMessage(
-                    type: "action/did_set",
-                    payload: [
-                        "screenId": "screen-2",
-                        "pathIds": [1, 2, 3],
-                        "source": "input",
-                        "value": ["title": "Hello", "count": 2],
-                    ]
+                recorder.recordRendererBindingChange(
+                    screenId: "screen-2",
+                    pathIds: [1, 2, 3],
+                    value: ["title": "Hello", "count": 2],
+                    source: "input",
+                    instanceId: nil
                 )
-                recorder.recordRuntimeMessage(
-                    type: "runtime/screen_changed",
-                    payload: ["screenId": "screen-2"]
+                recorder.recordRendererScreenChanged(
+                    screenId: "screen-2"
                 )
 
                 let trace = recorder.trace(
@@ -93,12 +90,11 @@ final class FlowRuntimeTraceTests: QuickSpec {
                 expect(decoded.entries.map(\.kind)).to(equal([.event, .event]))
             }
 
-            it("records runtime screen change notifications") {
+            it("records renderer screen change notifications") {
                 let recorder = FlowRuntimeTraceRecorder()
 
-                recorder.recordRuntimeMessage(
-                    type: "runtime/screen_changed",
-                    payload: ["screenId": "screen-2"]
+                recorder.recordRendererScreenChanged(
+                    screenId: "screen-2"
                 )
 
                 let trace = recorder.trace(

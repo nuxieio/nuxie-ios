@@ -34,6 +34,7 @@ enum FlowViewModelBridgeError: LocalizedError, Equatable {
 @MainActor
 final class FlowViewModelBridge {
     typealias ImageResolver = (String) -> RiveRenderImage?
+    typealias ValueChangeHandler = (_ path: VmPathRef, _ value: Any, _ source: String?) -> Void
 
     private struct ResolvedPath {
         let viewModelId: String
@@ -47,6 +48,7 @@ final class FlowViewModelBridge {
     private let model: RiveModel
     private let remoteFlow: RemoteFlow?
     private let imageResolver: ImageResolver?
+    private let onValueChange: ValueChangeHandler?
     private var flowViewModelsById: [String: ViewModel] = [:]
     private var flowViewModelsByName: [String: ViewModel] = [:]
     private var riveViewModelsByName: [String: RiveDataBindingViewModel] = [:]
@@ -56,7 +58,9 @@ final class FlowViewModelBridge {
     private var flowInstanceIdsByViewModelId: [String: [String]] = [:]
     private var riveInstancesByFlowInstanceId: [String: RiveDataBindingViewModel.Instance] = [:]
     private var boundViewModel: RiveDataBindingViewModel?
-    private var boundInstance: RiveDataBindingViewModel.Instance?
+    private(set) var boundInstance: RiveDataBindingViewModel.Instance?
+    private var boundValueListeners: [(property: RiveDataBindingViewModel.Instance.Property, listenerId: UUID)] = []
+    private var suppressingValueChangeNotifications = false
 
     var boundViewModelName: String? {
         boundViewModel?.name
@@ -69,11 +73,13 @@ final class FlowViewModelBridge {
     init(
         model: RiveModel,
         remoteFlow: RemoteFlow? = nil,
-        imageResolver: ImageResolver? = nil
+        imageResolver: ImageResolver? = nil,
+        onValueChange: ValueChangeHandler? = nil
     ) {
         self.model = model
         self.remoteFlow = remoteFlow
         self.imageResolver = imageResolver
+        self.onValueChange = onValueChange
 
         if let remoteFlow {
             for viewModel in remoteFlow.viewModels {
@@ -127,6 +133,7 @@ final class FlowViewModelBridge {
         boundViewModel = viewModel
         boundInstance = instance
         boundFlowViewModelId = flowViewModelsByName[viewModel.name]?.id
+        installBoundValueListeners()
         return true
     }
 
@@ -214,25 +221,28 @@ final class FlowViewModelBridge {
         let selectedInstanceId = selectedFlowInstanceId ?? defaultFlowInstanceId(screenId: screenId, instances: instances)
         selectedFlowInstanceId = selectedInstanceId
 
-        var didApply = false
-        for instancePayload in instances {
-            let viewModelId = instancePayload.viewModelId
-            guard let flowViewModel = flowViewModelsById[viewModelId] else { continue }
-            let instanceId = instancePayload.instanceId
-            let values = instancePayload.values.mapValues(\.value)
+        let didApply = withHostMutation {
+            var didApply = false
+            for instancePayload in instances {
+                let viewModelId = instancePayload.viewModelId
+                guard let flowViewModel = flowViewModelsById[viewModelId] else { continue }
+                let instanceId = instancePayload.instanceId
+                let values = instancePayload.values.mapValues(\.value)
 
-            recordFlowInstance(instanceId, viewModelId: viewModelId)
+                recordFlowInstance(instanceId, viewModelId: viewModelId)
 
-            guard let riveInstance = riveInstance(
-                forFlowInstanceId: instanceId,
-                flowViewModel: flowViewModel
-            ) else {
-                continue
+                guard let riveInstance = riveInstance(
+                    forFlowInstanceId: instanceId,
+                    flowViewModel: flowViewModel
+                ) else {
+                    continue
+                }
+
+                didApply = applyValues(values, schema: flowViewModel.properties, rootPath: "", to: riveInstance) || didApply
             }
-
-            didApply = applyValues(values, schema: flowViewModel.properties, rootPath: "", to: riveInstance) || didApply
+            boundInstance?.updateListeners()
+            return didApply
         }
-        boundInstance?.updateListeners()
         return didApply
     }
 
@@ -251,6 +261,7 @@ final class FlowViewModelBridge {
             .flatMap { flowViewModelsById[$0] }
             .flatMap { riveViewModelsByName[$0.name] }
         boundInstance = target.instance
+        installBoundValueListeners()
         return true
     }
 
@@ -265,7 +276,9 @@ final class FlowViewModelBridge {
             if let list = instance.listProperty(fromPath: resolved.path) {
                 _ = syncListIndexValues(property: resolved.property, list: list)
             }
-            instance.updateListeners()
+            withHostMutation {
+                instance.updateListeners()
+            }
         }
         return didApply
     }
@@ -278,7 +291,9 @@ final class FlowViewModelBridge {
             return false
         }
         trigger.trigger()
-        instance.updateListeners()
+        withHostMutation {
+            instance.updateListeners()
+        }
         return true
     }
 
@@ -344,9 +359,160 @@ final class FlowViewModelBridge {
 
         if didApply {
             _ = syncListIndexValues(property: resolved.property, list: list)
-            instance.updateListeners()
+            withHostMutation {
+                instance.updateListeners()
+            }
         }
         return didApply
+    }
+
+    private func withHostMutation<T>(_ body: () -> T) -> T {
+        suppressingValueChangeNotifications = true
+        defer { suppressingValueChangeNotifications = false }
+        return body()
+    }
+
+    private func installBoundValueListeners() {
+        removeBoundValueListeners()
+        guard let onValueChange,
+              let instance = boundInstance,
+              let viewModelId = boundFlowViewModelId,
+              let viewModel = flowViewModelsById[viewModelId] else {
+            return
+        }
+
+        installValueListeners(
+            in: instance,
+            schema: viewModel.properties,
+            pathPrefix: "",
+            pathIds: [viewModelPathId(viewModel)],
+            namePathIds: [hashNameId(viewModel.name)],
+            usesNameBasedPath: false,
+            onValueChange: onValueChange
+        )
+    }
+
+    private func removeBoundValueListeners() {
+        for listener in boundValueListeners {
+            listener.property.removeListener(listener.listenerId)
+        }
+        boundValueListeners.removeAll()
+    }
+
+    private func installValueListeners(
+        in instance: RiveDataBindingViewModel.Instance,
+        schema: [String: ViewModelProperty],
+        pathPrefix: String,
+        pathIds: [Int],
+        namePathIds: [Int],
+        usesNameBasedPath: Bool,
+        onValueChange: @escaping ValueChangeHandler
+    ) {
+        for (name, property) in schema {
+            let path = pathPrefix.isEmpty ? name : "\(pathPrefix)/\(name)"
+            let namePathId = hashNameId(name)
+            let nextPathIds = pathIds + [property.propertyId ?? namePathId]
+            let nextNamePathIds = namePathIds + [namePathId]
+            let nextUsesNameBasedPath = usesNameBasedPath || property.propertyId == nil
+            switch property.type {
+            case .string:
+                guard let riveProperty = instance.stringProperty(fromPath: path) else { continue }
+                let listenerId = riveProperty.addListener { [weak self] value in
+                    self?.emitValueChange(
+                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
+                        nameBased: nextUsesNameBasedPath,
+                        value: value,
+                        onValueChange: onValueChange
+                    )
+                }
+                boundValueListeners.append((riveProperty, listenerId))
+            case .number, .list_index:
+                guard let riveProperty = instance.numberProperty(fromPath: path) else { continue }
+                let listenerId = riveProperty.addListener { [weak self] value in
+                    self?.emitValueChange(
+                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
+                        nameBased: nextUsesNameBasedPath,
+                        value: value,
+                        onValueChange: onValueChange
+                    )
+                }
+                boundValueListeners.append((riveProperty, listenerId))
+            case .boolean:
+                guard let riveProperty = instance.booleanProperty(fromPath: path) else { continue }
+                let listenerId = riveProperty.addListener { [weak self] value in
+                    self?.emitValueChange(
+                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
+                        nameBased: nextUsesNameBasedPath,
+                        value: value,
+                        onValueChange: onValueChange
+                    )
+                }
+                boundValueListeners.append((riveProperty, listenerId))
+            case .enum:
+                guard let riveProperty = instance.enumProperty(fromPath: path) else { continue }
+                let listenerId = riveProperty.addListener { [weak self] value in
+                    self?.emitValueChange(
+                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
+                        nameBased: nextUsesNameBasedPath,
+                        value: value,
+                        onValueChange: onValueChange
+                    )
+                }
+                boundValueListeners.append((riveProperty, listenerId))
+            case .trigger:
+                guard let riveProperty = instance.triggerProperty(fromPath: path) else { continue }
+                let listenerId = riveProperty.addListener { [weak self] in
+                    self?.emitValueChange(
+                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
+                        nameBased: nextUsesNameBasedPath,
+                        value: true,
+                        onValueChange: onValueChange
+                    )
+                }
+                boundValueListeners.append((riveProperty, listenerId))
+            case .object:
+                guard let nestedSchema = property.schema else { continue }
+                installValueListeners(
+                    in: instance,
+                    schema: nestedSchema,
+                    pathPrefix: path,
+                    pathIds: nextPathIds,
+                    namePathIds: nextNamePathIds,
+                    usesNameBasedPath: nextUsesNameBasedPath,
+                    onValueChange: onValueChange
+                )
+            case .viewModel:
+                guard let nestedViewModelId = property.viewModelId,
+                      let nestedViewModel = flowViewModelsById[nestedViewModelId] else {
+                    continue
+                }
+                installValueListeners(
+                    in: instance,
+                    schema: nestedViewModel.properties,
+                    pathPrefix: path,
+                    pathIds: nextPathIds,
+                    namePathIds: nextNamePathIds,
+                    usesNameBasedPath: nextUsesNameBasedPath,
+                    onValueChange: onValueChange
+                )
+            case .color, .image, .list:
+                continue
+            }
+        }
+    }
+
+    private func emitValueChange(
+        pathIds: [Int],
+        nameBased: Bool,
+        value: Any,
+        onValueChange: ValueChangeHandler
+    ) {
+        guard !suppressingValueChangeNotifications else { return }
+        onValueChange(
+            .ids(VmPathIds(pathIds: pathIds, nameBased: nameBased ? true : nil)),
+            value,
+            "rive"
+        )
     }
 
     func isTriggerPath(path: VmPathRef, screenId: String?, instanceId: String?) -> Bool {

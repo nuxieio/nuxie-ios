@@ -420,6 +420,78 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertTrue(bridge.applyValue(path: path([100, 6]), value: image, screenId: "screen-1", instanceId: nil))
     }
 
+    func testEmitsBoundValueChangesFromRiveListeners() throws {
+        var changes: [(path: VmPathRef, value: Any, source: String?)] = []
+        let bridge = try makeBridge(
+            remoteFlow: makeRemoteFlow(),
+            onValueChange: { path, value, source in
+                changes.append((path, value, source))
+            }
+        )
+        XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
+
+        let property = try XCTUnwrap(bridge.boundInstance?.stringProperty(fromPath: "String"))
+        property.value = "from-rive"
+        bridge.boundInstance?.updateListeners()
+
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes.first?.path, path([100, 1]))
+        XCTAssertEqual(changes.first?.value as? String, "from-rive")
+        XCTAssertEqual(changes.first?.source, "rive")
+    }
+
+    func testEmitsNameBasedBoundValueChangesWhenPropertyIdsAreAbsent() throws {
+        var changes: [(path: VmPathRef, value: Any, source: String?)] = []
+        let bridge = try makeBridge(
+            remoteFlow: makeRemoteFlow(properties: [
+                "String": Nuxie.ViewModelProperty(type: .string, propertyId: nil),
+            ]),
+            onValueChange: { path, value, source in
+                changes.append((path, value, source))
+            }
+        )
+        XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
+
+        let property = try XCTUnwrap(bridge.boundInstance?.stringProperty(fromPath: "String"))
+        property.value = "name-based"
+        bridge.boundInstance?.updateListeners()
+
+        let emittedPath = try XCTUnwrap(changes.first?.path)
+        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(emittedPath, nameBasedPath(["Test", "String"]))
+        XCTAssertEqual(changes.first?.value as? String, "name-based")
+        XCTAssertEqual(changes.first?.source, "rive")
+
+        XCTAssertTrue(bridge.applyValue(
+            path: emittedPath,
+            value: "patched-by-name",
+            screenId: "screen-1",
+            instanceId: nil
+        ))
+        XCTAssertEqual(try bridge.stringValue(path: "String"), "patched-by-name")
+    }
+
+    func testHostAppliedValuesDoNotReemitBoundValueChanges() throws {
+        var changes: [(path: VmPathRef, value: Any, source: String?)] = []
+        let bridge = try makeBridge(
+            remoteFlow: makeRemoteFlow(),
+            onValueChange: { path, value, source in
+                changes.append((path, value, source))
+            }
+        )
+        XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
+
+        XCTAssertTrue(bridge.applyValue(
+            path: path([100, 1]),
+            value: "from-host",
+            screenId: "screen-1",
+            instanceId: nil
+        ))
+
+        XCTAssertTrue(changes.isEmpty)
+        XCTAssertEqual(try bridge.stringValue(path: "String"), "from-host")
+    }
+
     func testThrowsWhenWritingBeforeBinding() throws {
         let bridge = try makeBridge()
 
@@ -434,6 +506,20 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
     private func relativePath(_ pathIds: [Int]) -> VmPathRef {
         .ids(VmPathIds(pathIds: pathIds, isRelative: true))
+    }
+
+    private func nameBasedPath(_ names: [String]) -> VmPathRef {
+        .ids(VmPathIds(pathIds: names.map(hashNameId), nameBased: true))
+    }
+
+    private func hashNameId(_ value: String) -> Int {
+        if value.isEmpty { return Int(0x811c9dc5 as UInt32) }
+        var hash: UInt32 = 0x811c9dc5
+        for byte in value.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 0x01000193
+        }
+        return Int(hash)
     }
 
     private func makeSnapshot(_ instances: [Nuxie.ViewModelInstance]) -> FlowViewModelSnapshot {
@@ -454,7 +540,10 @@ final class FlowViewModelBridgeTests: XCTestCase {
         )
     }
 
-    private func makeBridge(remoteFlow: RemoteFlow? = nil) throws -> FlowViewModelBridge {
+    private func makeBridge(
+        remoteFlow: RemoteFlow? = nil,
+        onValueChange: FlowViewModelBridge.ValueChangeHandler? = nil
+    ) throws -> FlowViewModelBridge {
         let bundle = Bundle(for: FlowViewModelBridgeTests.self)
         let url = bundle.url(forResource: "data_binding_test", withExtension: "riv", subdirectory: "Fixtures")
             ?? bundle.url(forResource: "data_binding_test", withExtension: "riv")
@@ -464,7 +553,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
         let model = RiveModel(riveFile: file)
         try model.setArtboard()
         try model.setStateMachine("State Machine 1")
-        return FlowViewModelBridge(model: model, remoteFlow: remoteFlow)
+        return FlowViewModelBridge(model: model, remoteFlow: remoteFlow, onValueChange: onValueChange)
     }
 
     private func makeRenderImage() throws -> RiveRenderImage {
@@ -478,6 +567,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
     private func makeRemoteFlow(
         screens: [RemoteFlowScreen]? = nil,
+        properties: [String: Nuxie.ViewModelProperty]? = nil,
         extraViewModels: [ViewModel] = []
     ) -> RemoteFlow {
         let nestedViewModel = ViewModel(
@@ -493,7 +583,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
             id: "vm-test",
             name: "Test",
             viewModelPathId: 100,
-            properties: [
+            properties: properties ?? [
                 "String": ViewModelProperty(type: .string, propertyId: 1),
                 "Number": ViewModelProperty(type: .list_index, propertyId: 2),
                 "Boolean": ViewModelProperty(type: .boolean, propertyId: 3),
