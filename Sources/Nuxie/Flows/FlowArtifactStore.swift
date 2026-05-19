@@ -43,29 +43,26 @@ struct LoadedFlowArtifact {
     let rivURL: URL
     let manifestURL: URL
     let manifest: FlowArtifactManifest
+    let assetURLsByRiveUniqueName: [String: URL]
     let source: FlowArtifactSource
 
     func localImageURL(for asset: FlowArtifactImageAsset) throws -> URL {
-        try localURL(forRelativePath: asset.path)
+        try preparedAssetURL(forRiveUniqueName: asset.riveUniqueName)
     }
 
     func localFontURL(for asset: FlowArtifactFontAsset) throws -> URL {
-        try localURL(forRelativePath: FlowArtifactStore.localFontPath(for: asset))
+        try preparedAssetURL(forRiveUniqueName: asset.riveUniqueName)
     }
 
     func localAssetURL(forRiveUniqueName uniqueName: String) -> URL? {
-        if let image = manifest.assets.images.first(where: { $0.riveUniqueName == uniqueName }) {
-            return try? localImageURL(for: image)
-        }
-        if let font = manifest.assets.fonts.first(where: { $0.riveUniqueName == uniqueName }) {
-            return try? localFontURL(for: font)
-        }
-        return nil
+        assetURLsByRiveUniqueName[uniqueName]
     }
 
-    private func localURL(forRelativePath relativePath: String) throws -> URL {
-        let path = try FlowArtifactStore.validateRelativePath(relativePath)
-        return directoryURL.appendingPathComponent(path)
+    private func preparedAssetURL(forRiveUniqueName uniqueName: String) throws -> URL {
+        guard let url = assetURLsByRiveUniqueName[uniqueName] else {
+            throw RuntimeAssetStoreError.missingPreparedAsset(uniqueName)
+        }
+        return url
     }
 }
 
@@ -197,12 +194,18 @@ actor FlowArtifactStore {
 
     private let cacheDirectory: URL
     private let urlSession: URLSession
+    private let runtimeAssetStore: RuntimeAssetStore
     private var activeDownloads: [String: Task<LoadedFlowArtifact, Error>] = [:]
 
-    init(urlSession: URLSession = .shared, cacheDirectory: URL? = nil) {
+    init(
+        urlSession: URLSession = .shared,
+        cacheDirectory: URL? = nil,
+        runtimeAssetStore: RuntimeAssetStore = RuntimeAssetStore()
+    ) {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         self.cacheDirectory = cacheDirectory ?? caches.appendingPathComponent("nuxie_flow_artifacts")
         self.urlSession = urlSession
+        self.runtimeAssetStore = runtimeAssetStore
         try? FileManager.default.createDirectory(
             at: self.cacheDirectory,
             withIntermediateDirectories: true
@@ -218,7 +221,7 @@ actor FlowArtifactStore {
         }
     }
 
-    func getCachedArtifact(for flow: Flow) throws -> LoadedFlowArtifact? {
+    func getCachedArtifact(for flow: Flow) async throws -> LoadedFlowArtifact? {
         let directoryURL = canonicalDirectoryURL(for: flow)
         let manifestURL = directoryURL.appendingPathComponent(Self.manifestPath)
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
@@ -227,6 +230,10 @@ actor FlowArtifactStore {
 
         let manifest = try decodeManifest(at: manifestURL)
         let rivURL = try verifyManifestFiles(manifest, directoryURL: directoryURL)
+        let assetURLs = try await prepareRuntimeAssetURLs(
+            manifest,
+            directoryURL: directoryURL
+        )
 
         return LoadedFlowArtifact(
             flow: flow,
@@ -234,13 +241,14 @@ actor FlowArtifactStore {
             rivURL: rivURL,
             manifestURL: manifestURL,
             manifest: manifest,
+            assetURLsByRiveUniqueName: assetURLs,
             source: .cachedArtifact
         )
     }
 
     func getOrDownloadArtifact(for flow: Flow) async throws -> LoadedFlowArtifact {
         do {
-            if let cached = try getCachedArtifact(for: flow) {
+            if let cached = try await getCachedArtifact(for: flow) {
                 return cached
             }
         } catch {
@@ -309,11 +317,11 @@ actor FlowArtifactStore {
         }
 
         let manifest = try decodeManifest(at: manifestURL)
-        for font in manifest.assets.fonts {
-            try await downloadFontAsset(font, directoryURL: directoryURL)
-        }
-
         let rivURL = try verifyManifestFiles(manifest, directoryURL: directoryURL)
+        let assetURLs = try await prepareRuntimeAssetURLs(
+            manifest,
+            directoryURL: directoryURL
+        )
 
         return LoadedFlowArtifact(
             flow: flow,
@@ -321,6 +329,7 @@ actor FlowArtifactStore {
             rivURL: rivURL,
             manifestURL: manifestURL,
             manifest: manifest,
+            assetURLsByRiveUniqueName: assetURLs,
             source: .downloadedArtifact
         )
     }
@@ -349,50 +358,11 @@ actor FlowArtifactStore {
         try data.write(to: localURL)
     }
 
-    private func downloadFontAsset(
-        _ font: FlowArtifactFontAsset,
-        directoryURL: URL
-    ) async throws {
-        guard let fontURL = URL(string: font.assetUrl) else {
-            throw FlowArtifactStoreError.invalidBaseURL(font.assetUrl)
-        }
-
-        let localPath = Self.localFontPath(for: font)
-        let localURL = try localURL(forRelativePath: localPath, in: directoryURL)
-        if FileManager.default.fileExists(atPath: localURL.path) {
-            try verifyFile(
-                at: localURL,
-                path: localPath,
-                expectedSize: font.sizeBytes,
-                expectedSha256: font.sha256
-            )
-            return
-        }
-
-        try FileManager.default.createDirectory(
-            at: localURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let data = try await downloadData(from: fontURL, path: localPath)
-        if data.count != font.sizeBytes {
-            throw FlowArtifactStoreError.fileSizeMismatch(
-                path: localPath,
-                expected: font.sizeBytes,
-                actual: data.count
-            )
-        }
-        let actualSha = Self.sha256Hex(data)
-        guard actualSha.caseInsensitiveCompare(font.sha256) == .orderedSame else {
-            throw FlowArtifactStoreError.sha256Mismatch(
-                path: localPath,
-                expected: font.sha256,
-                actual: actualSha
-            )
-        }
-        try data.write(to: localURL)
-    }
-
     private func downloadData(from url: URL, path: String) async throws -> Data {
+        if url.isFileURL {
+            return try Data(contentsOf: url)
+        }
+
         let (data, response) = try await urlSession.data(from: url)
         if let httpResponse = response as? HTTPURLResponse,
            !(200...299).contains(httpResponse.statusCode) {
@@ -405,6 +375,40 @@ actor FlowArtifactStore {
     private func decodeManifest(at url: URL) throws -> FlowArtifactManifest {
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(FlowArtifactManifest.self, from: data)
+    }
+
+    private func prepareRuntimeAssetURLs(
+        _ manifest: FlowArtifactManifest,
+        directoryURL: URL
+    ) async throws -> [String: URL] {
+        var urlsByRiveUniqueName: [String: URL] = [:]
+
+        for image in manifest.assets.images {
+            do {
+                urlsByRiveUniqueName[image.riveUniqueName] = try await runtimeAssetStore.cachedImageURL(
+                    for: image,
+                    artifactDirectoryURL: directoryURL
+                )
+            } catch {
+                if image.required {
+                    throw error
+                }
+                LogDebug("Skipped optional image asset \(image.riveUniqueName): \(error)")
+            }
+        }
+
+        for font in manifest.assets.fonts {
+            do {
+                urlsByRiveUniqueName[font.riveUniqueName] = try await runtimeAssetStore.cachedFontURL(for: font)
+            } catch {
+                if font.required {
+                    throw error
+                }
+                LogDebug("Skipped optional font asset \(font.riveUniqueName): \(error)")
+            }
+        }
+
+        return urlsByRiveUniqueName
     }
 
     private func verifyManifestFiles(
@@ -422,27 +426,6 @@ actor FlowArtifactStore {
             expectedSize: manifest.riv.sizeBytes,
             expectedSha256: manifest.riv.sha256
         )
-
-        for image in manifest.assets.images {
-            let imageURL = try localURL(forRelativePath: image.path, in: directoryURL)
-            try verifyFile(
-                at: imageURL,
-                path: image.path,
-                expectedSize: nil,
-                expectedSha256: image.sha256
-            )
-        }
-
-        for font in manifest.assets.fonts {
-            let fontPath = Self.localFontPath(for: font)
-            let fontURL = try localURL(forRelativePath: fontPath, in: directoryURL)
-            try verifyFile(
-                at: fontURL,
-                path: fontPath,
-                expectedSize: font.sizeBytes,
-                expectedSha256: font.sha256
-            )
-        }
 
         return rivURL
     }
@@ -501,11 +484,6 @@ actor FlowArtifactStore {
             }
         }
         return path
-    }
-
-    static func localFontPath(for font: FlowArtifactFontAsset) -> String {
-        let format = font.format.lowercased()
-        return "assets/fonts/\(font.sha256.lowercased()).\(format)"
     }
 
     static func sha256Hex(_ data: Data) -> String {

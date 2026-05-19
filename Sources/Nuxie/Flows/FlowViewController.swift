@@ -787,6 +787,8 @@ public class FlowViewController: NuxiePlatformViewController {
             )
             let riveView = riveViewModel.createRiveView()
             riveView.translatesAutoresizingMaskIntoConstraints = false
+            riveView.accessibilityIdentifier = "nuxie-flow-surface"
+            riveView.isAccessibilityElement = true
             riveView.isHidden = true
 
             view.insertSubview(riveView, at: 0)
@@ -831,21 +833,32 @@ public class FlowViewController: NuxiePlatformViewController {
         artifact: LoadedFlowArtifact
     ) -> Bool {
         let assetName = asset.uniqueName()
-        guard let assetURL = artifact.localAssetURL(forRiveUniqueName: assetName),
-              let data = try? Data(contentsOf: assetURL) else {
+        guard let assetURL = artifact.localAssetURL(forRiveUniqueName: assetName) else {
+            LogError("Missing prepared runtime asset for Rive asset \(assetName)")
+            return false
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: assetURL)
+        } catch {
+            LogError("Failed to read prepared runtime asset \(assetName) at \(assetURL.path): \(error)")
             return false
         }
 
         if let imageAsset = asset as? RiveImageAsset {
             imageAsset.renderImage(factory.decodeImage(data))
+            LogDebug("Loaded Rive image asset \(assetName) from \(assetURL.path)")
             return true
         }
 
         if let fontAsset = asset as? RiveFontAsset {
             fontAsset.font(factory.decodeFont(data))
+            LogDebug("Loaded Rive font asset \(assetName) from \(assetURL.path)")
             return true
         }
 
+        LogDebug("Unsupported Rive asset type for prepared asset \(assetName)")
         return false
     }
     #endif
