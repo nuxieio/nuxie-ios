@@ -1,0 +1,31 @@
+{
+  "screens": [
+    {
+      "id": "screen_1",
+      "defaultViewModelId": null,
+      "defaultInstanceId": null
+    },
+    {
+      "id": "screen_2",
+      "defaultViewModelId": null,
+      "defaultInstanceId": null
+    }
+  ],
+  "interactions": {
+    "cta_pressable": [
+      {
+        "id": "interaction_runtime_actions",
+        "enabled": true,
+        "trigger": {
+          "type": "press"
+        },
+        "actions": [
+          {
+            "type": "navigate",
+            "screenId": "screen_2"
+          }
+        ]
+      }
+    ]
+  }
+}

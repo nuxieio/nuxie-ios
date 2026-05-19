@@ -29,6 +29,34 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         try launchAndCapture(fixtureName: "published-font")
     }
 
+    func testPublishedPressableFixtureRunsNativeInteractionAction() throws {
+        app.launchArguments = [
+            "--nuxie-fixture",
+            "pressable-interaction",
+        ]
+        app.launch()
+
+        let surface = app.otherElements["nuxie-flow-surface"]
+        XCTAssertTrue(
+            surface.waitForExistence(timeout: 20),
+            "Expected the native Rive flow surface to mount"
+        )
+
+        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        let eventLog = app.staticTexts["nuxie-flow-event-log"]
+        XCTAssertTrue(
+            eventLog.waitForExistence(timeout: 5),
+            "Expected the fixture runtime event log to mount"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "navigated:screen_2", timeout: 10),
+            "Expected tapping the published Pressable to emit a native interaction and run the flow navigate action"
+        )
+
+        try captureScreenshot(named: "pressable-interaction")
+    }
+
     private func launchAndCapture(fixtureName: String) throws {
         app.launch()
         let surface = app.otherElements["nuxie-flow-surface"]
@@ -66,5 +94,13 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             to: screenshotsURL.appendingPathComponent("\(name).png"),
             options: .atomic
         )
+    }
+}
+
+private extension XCUIElement {
+    func waitForLabel(containing expectedValue: String, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "label CONTAINS %@", expectedValue)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }
 }
