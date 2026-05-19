@@ -92,13 +92,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             return Int(hash)
         }
 
-        func expectNoLegacyRendererMessages(_ controller: SpyFlowViewController) {
-            let legacyMessages = controller.messages.map(\.type).filter { type in
-                type.hasPrefix("runtime/view_model") || type == "runtime/navigate"
-            }
-            expect(legacyMessages).to(beEmpty())
-        }
-
         describe("FlowJourneyRunner") {
             it("pauses on entry delay") {
                 let flowId = "flow-delay"
@@ -167,7 +160,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let snapshot = controller.viewModelSnapshots.first
                 expect(snapshot?.screenId).to(beNil())
                 expect(snapshot?.snapshot.viewModelInstances.first?.viewModelId).to(equal("vm-1"))
-                expect(controller.messages).to(beEmpty())
             }
 
             it("dispatches global event interactions") {
@@ -206,7 +198,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
 
                 await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
-                expectNoLegacyRendererMessages(controller)
             }
 
             it("dispatches global did_set interactions") {
@@ -264,6 +255,72 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
 
                 await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
+            }
+
+            it("does not echo Rive-origin trigger did_set changes back into the renderer") {
+                let flowId = "flow-rive-trigger-no-echo"
+                let path = VmPathRef.ids(VmPathIds(pathIds: [0, 1]))
+                let viewModel = ViewModel(
+                    id: "vm-1",
+                    name: "VM",
+                    viewModelPathId: 0,
+                    properties: [
+                        "pulse": ViewModelProperty(
+                            type: .trigger,
+                            propertyId: 1,
+                            defaultValue: AnyCodable(0),
+                            required: nil,
+                            enumValues: nil,
+                            itemType: nil,
+                            schema: nil,
+                            viewModelId: nil,
+                            validation: nil
+                        )
+                    ]
+                )
+                let interaction = Interaction(
+                    id: "int-rive-did-set",
+                    trigger: .didSet(path: path, debounceMs: nil),
+                    actions: [
+                        .sendEvent(
+                            SendEventAction(
+                                eventName: "rive_trigger_seen",
+                                properties: nil
+                            )
+                        )
+                    ],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-1": [interaction]],
+                    viewModels: [viewModel],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil)
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.currentScreenId = "screen-1"
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleDidSet(
+                    path: path,
+                    value: true,
+                    source: "rive",
+                    screenId: "screen-1",
+                    instanceId: nil
+                )
+
+                await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("rive_trigger_seen"))
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                expect(controller.viewModelTriggers).to(beEmpty())
             }
 
             it("isolates debounced did_set dispatch per interaction across screen and global scopes") {
@@ -402,7 +459,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
                     contain(VmPathRef.ids(VmPathIds(pathIds: [0, 1])).normalizedPath)
                 )
-                expectNoLegacyRendererMessages(controller)
             }
 
             it("handles list_insert and fire_trigger actions") {
@@ -488,7 +544,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.viewModelTriggers.map(\.path.normalizedPath)).toEventually(
                     contain(VmPathRef.ids(VmPathIds(pathIds: [0, 4])).normalizedPath)
                 )
-                expectNoLegacyRendererMessages(controller)
             }
 
             it("handles list_move, list_set, and list_clear actions") {
@@ -1646,7 +1701,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 _ = await runner.handleScreenChanged("screen-1")
 
-                expect(controller.messages.isEmpty).to(beTrue())
             }
 
             it("tracks send_event and updates customer properties") {
@@ -1761,11 +1815,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 }
 
 private final class SpyFlowViewController: FlowViewController {
-    struct Message {
-        let type: String
-        let payload: [String: Any]
-    }
-
     struct PurchaseRequest {
         let productId: String
         let placementIndex: Any?
@@ -1807,7 +1856,6 @@ private final class SpyFlowViewController: FlowViewController {
         let transition: Any?
     }
 
-    private(set) var messages: [Message] = []
     private(set) var viewModelSnapshots: [ViewModelSnapshotRequest] = []
     private(set) var viewModelValues: [ViewModelValueRequest] = []
     private(set) var viewModelListOperations: [ViewModelListOperationRequest] = []
@@ -1827,15 +1875,6 @@ private final class SpyFlowViewController: FlowViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    override func sendRuntimeMessage(
-        type: String,
-        payload: [String: Any] = [:],
-        replyTo: String? = nil,
-        completion: ((Any?, Error?) -> Void)? = nil
-    ) {
-        messages.append(Message(type: type, payload: payload))
     }
 
     override func applyViewModelSnapshot(_ snapshot: FlowViewModelSnapshot, screenId: String? = nil) {

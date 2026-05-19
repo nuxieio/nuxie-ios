@@ -52,39 +52,39 @@ final class FlowRuntimeTraceRecorder {
         )
     }
 
-    func recordRuntimeMessage(type: String, payload: [String: Any]) {
-        switch type {
-        case "runtime/screen_changed":
-            recordNavigation(screenId: payload["screenId"] as? String, name: "screen_changed")
+    func recordRendererScreenChanged(screenId: String?) {
+        recordNavigation(screenId: screenId, name: "screen_changed")
+    }
 
-        case "action/did_set":
-            let pathIds = Self.pathIds(from: payload["pathIds"])
-            let value = payload["value"] ?? NSNull()
+    func recordRendererBindingChange(
+        screenId: String?,
+        pathIds: Any?,
+        value: Any,
+        source: String?,
+        instanceId: String?
+    ) {
+        let resolvedPathIds = Self.pathIds(from: pathIds)
 
-            var bindingOutput: [String: Any] = ["value": value]
-            if let pathIds {
-                bindingOutput["path_ids"] = pathIds
-            }
-
-            var metadata: [String: String] = [:]
-            if let source = payload["source"] as? String {
-                metadata["source"] = source
-            }
-            if let instanceId = payload["instanceId"] as? String {
-                metadata["instance_id"] = instanceId
-            }
-
-            append(
-                kind: .binding,
-                name: "did_set",
-                screenId: payload["screenId"] as? String,
-                output: Self.canonicalJSONString(from: bindingOutput),
-                metadata: metadata.isEmpty ? nil : metadata
-            )
-
-        default:
-            break
+        var bindingOutput: [String: Any] = ["value": value]
+        if let resolvedPathIds {
+            bindingOutput["path_ids"] = resolvedPathIds
         }
+
+        var metadata: [String: String] = [:]
+        if let source {
+            metadata["source"] = source
+        }
+        if let instanceId {
+            metadata["instance_id"] = instanceId
+        }
+
+        append(
+            kind: .binding,
+            name: "did_set",
+            screenId: screenId,
+            output: Self.canonicalJSONString(from: bindingOutput),
+            metadata: metadata.isEmpty ? nil : metadata
+        )
     }
 
     func recordEvent(name: String, properties: [String: Any]?) {

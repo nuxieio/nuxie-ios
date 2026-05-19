@@ -117,15 +117,6 @@ private final class OrderingMockFlowViewController: MockFlowViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func sendRuntimeMessage(
-        type: String,
-        payload: [String: Any] = [:],
-        replyTo: String? = nil,
-        completion: ((Any?, Error?) -> Void)? = nil
-    ) {
-        completion?(nil, nil)
-    }
-
     override func navigate(to screenId: String, transition: Any? = nil) {
         recorder.append("navigate:\(screenId)")
     }
@@ -255,6 +246,58 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             return Flow(remoteFlow: remoteFlow, products: [])
         }
 
+        func pressInteractions(_ actions: [InteractionAction]) -> [String: [Interaction]] {
+            [
+                "screen-1": [
+                    Interaction(
+                        id: "press-host-action",
+                        trigger: .press,
+                        actions: actions,
+                        enabled: true
+                    )
+                ]
+            ]
+        }
+
+        func emitScreenPress(_ controller: FlowViewController) {
+            controller.runtimeDelegate?.flowViewController(
+                controller,
+                didEmitInteraction: FlowRendererInteraction(
+                    trigger: .press,
+                    screenId: "screen-1",
+                    componentId: nil,
+                    instanceId: nil,
+                    properties: [:]
+                )
+            )
+        }
+
+        func emitRendererEvent(_ controller: FlowViewController, name: String) {
+            controller.runtimeDelegate?.flowViewController(
+                controller,
+                didEmitEvent: FlowRendererEvent(
+                    name: name,
+                    properties: [:],
+                    screenId: "screen-1",
+                    componentId: nil,
+                    instanceId: nil
+                )
+            )
+        }
+
+        func emitTaggedRendererEvent(_ controller: FlowViewController, name: String) {
+            controller.runtimeDelegate?.flowViewController(
+                controller,
+                didEmitInteraction: FlowRendererInteraction(
+                    trigger: .event(eventName: name, filter: nil),
+                    screenId: "screen-1",
+                    componentId: nil,
+                    instanceId: nil,
+                    properties: ["eventName": name]
+                )
+            )
+        }
+
         func primeProfile(campaign: Campaign, flow: Flow) async {
             await primeProfile(campaigns: [campaign], flows: [flow])
         }
@@ -366,6 +409,170 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await expect {
                     await service.getActiveJourneys(for: distinctId)
                 }.toEventually(beEmpty(), timeout: .seconds(2))
+            }
+
+            it("tracks renderer events once while routing them outside the source journey") {
+                let ordering = OrderingRecorder()
+                let eventController = OrderingMockFlowViewController(mockFlowId: flowId, recorder: ordering)
+                controller = eventController
+                mocks.flowPresentationService.defaultMockViewController = eventController
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let routedCampaign = makeCampaign(
+                    id: "camp-renderer-event",
+                    flowId: "flow-renderer-event",
+                    trigger: .event(EventTriggerConfig(eventName: "renderer_event", condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let flow = makeFlow(interactions: [
+                    "screen-1": [
+                        Interaction(
+                            id: "renderer-event-interaction",
+                            trigger: .event(eventName: "renderer_event", filter: nil),
+                            actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
+                            enabled: true
+                        )
+                    ]
+                ])
+                let routedFlow = makeFlow(flowId: "flow-renderer-event")
+                await primeProfile(campaigns: [campaign, routedCampaign], flows: [flow, routedFlow])
+                await service.initialize()
+                let journey = await startJourney()
+                journey.flowState.pendingAction = FlowPendingAction(
+                    interactionId: "wait-renderer-event",
+                    screenId: "screen-1",
+                    componentId: nil,
+                    actionIndex: 0,
+                    kind: .waitUntil,
+                    resumeAt: nil,
+                    condition: nil,
+                    maxTimeMs: nil,
+                    startedAt: Date(),
+                    resumeActions: [.navigate(NavigateAction(screenId: "screen-3", transition: nil))]
+                )
+
+                controller.runtimeDelegate?.flowViewController(controller, didChangeScreen: "screen-1")
+                emitRendererEvent(controller, name: "renderer_event")
+
+                await expect(ordering.events).toEventually(contain("navigate:screen-2"))
+                await expect {
+                    ordering.events.filter { $0 == "navigate:screen-2" }
+                }.toEventually(equal(["navigate:screen-2"]), timeout: .seconds(2))
+                await expect {
+                    ordering.events
+                }.toEventually(contain("navigate:screen-3"), timeout: .seconds(2))
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId)
+                }.toEventually(contain("camp-renderer-event"))
+                await expect(mocks.eventService.trackForTriggerCalls.map(\.event)).toEventually(contain("renderer_event"))
+                let trackedRendererEvent = mocks.eventService.routedEvents.first {
+                    $0.name == "renderer_event"
+                }
+                let routedJourney = await service.getActiveJourneys(for: distinctId).first {
+                    $0.campaignId == "camp-renderer-event"
+                }
+                expect(routedJourney?.getContext("_origin_event_id") as? String)
+                    .to(equal(trackedRendererEvent?.id))
+                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("renderer_event"))
+            }
+
+            it("tracks tagged renderer event interactions through the event routing path") {
+                let ordering = OrderingRecorder()
+                let eventController = OrderingMockFlowViewController(mockFlowId: flowId, recorder: ordering)
+                controller = eventController
+                mocks.flowPresentationService.defaultMockViewController = eventController
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let routedCampaign = makeCampaign(
+                    id: "camp-tagged-renderer-event",
+                    flowId: "flow-tagged-renderer-event",
+                    trigger: .event(EventTriggerConfig(eventName: "tagged_renderer_event", condition: nil)),
+                    goal: nil,
+                    exitPolicy: nil
+                )
+                let flow = makeFlow(interactions: [
+                    "screen-1": [
+                        Interaction(
+                            id: "tagged-renderer-event-interaction",
+                            trigger: .event(eventName: "tagged_renderer_event", filter: nil),
+                            actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
+                            enabled: true
+                        )
+                    ]
+                ])
+                let routedFlow = makeFlow(flowId: "flow-tagged-renderer-event")
+                await primeProfile(campaigns: [campaign, routedCampaign], flows: [flow, routedFlow])
+                await service.initialize()
+                _ = await startJourney()
+
+                controller.runtimeDelegate?.flowViewController(controller, didChangeScreen: "screen-1")
+                emitTaggedRendererEvent(controller, name: "tagged_renderer_event")
+
+                await expect(ordering.events).toEventually(contain("navigate:screen-2"))
+                await expect {
+                    await service.getActiveJourneys(for: distinctId).map(\.campaignId)
+                }.toEventually(contain("camp-tagged-renderer-event"))
+                await expect(mocks.eventService.trackForTriggerCalls.map(\.event))
+                    .toEventually(contain("tagged_renderer_event"))
+                let trackedRendererEvent = mocks.eventService.routedEvents.first {
+                    $0.name == "tagged_renderer_event"
+                }
+                let routedJourney = await service.getActiveJourneys(for: distinctId).first {
+                    $0.campaignId == "camp-tagged-renderer-event"
+                }
+                expect(routedJourney?.getContext("_origin_event_id") as? String)
+                    .to(equal(trackedRendererEvent?.id))
+            }
+
+            it("honors gate plans returned for renderer events") {
+                let orderingPresentationService = OrderingFlowPresentationService(recorder: OrderingRecorder())
+                orderingPresentationService.defaultMockViewController = controller
+                Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
+                service = JourneyService(journeyStore: journeyStore)
+
+                let campaign = makeCampaign(goal: nil, exitPolicy: nil)
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+                _ = await startJourney()
+                mocks.eventService.trackWithResponseResult = makeGatePlanResponse(
+                    decision: "show_flow",
+                    flowId: "gate-flow"
+                )
+
+                controller.runtimeDelegate?.flowViewController(controller, didChangeScreen: "screen-1")
+                emitRendererEvent(controller, name: "renderer_gate_event")
+
+                await expect {
+                    await MainActor.run {
+                        orderingPresentationService.wasFlowPresented("gate-flow")
+                    }
+                }.toEventually(beTrue(), timeout: .seconds(2))
+                await expect(mocks.eventService.trackForTriggerCalls.map(\.event))
+                    .toEventually(contain("renderer_gate_event"))
+            }
+
+            it("evaluates source renderer event goals from snapshots when profile cache is missing") {
+                let campaign = makeCampaign(
+                    goal: GoalConfig(kind: .event, eventName: "renderer_goal_event"),
+                    exitPolicy: ExitPolicy(mode: .onGoal)
+                )
+                let flow = makeFlow()
+                await primeProfile(campaign: campaign, flow: flow)
+                await service.initialize()
+                let journey = await startJourney()
+                await MainActor.run {
+                    mocks.flowPresentationService.isPresentingFlow = false
+                }
+                await mocks.profileService.clearCache(distinctId: distinctId)
+
+                controller.runtimeDelegate?.flowViewController(controller, didChangeScreen: "screen-1")
+                emitRendererEvent(controller, name: "renderer_goal_event")
+
+                await expect {
+                    journeyStore.getCompletions(for: distinctId).last { $0.journeyId == journey.id }?.exitReason
+                }.toEventually(equal(.goalMet), timeout: .seconds(2))
             }
         }
 
@@ -1327,7 +1534,11 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     exitPolicy: ExitPolicy(mode: .onGoal)
                 )
                 let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let primaryFlow = makeFlow()
+                let primaryFlow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestTracking(RequestTrackingAction())
+                    ])
+                )
                 let trackingFlow = makeFlow(flowId: "flow-tracking-denied-replay")
 
                 await primeProfile(
@@ -1339,12 +1550,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 _ = await startJourney()
                 await MainActor.run {
                     controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_tracking",
-                        payload: [:],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 await expect {
@@ -1356,7 +1562,11 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("completes dismissed journeys after unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestTracking(RequestTrackingAction())
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1366,12 +1576,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }
 
                 await MainActor.run {
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_tracking",
-                        payload: [:],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 try? await Task.sleep(nanoseconds: 50_000_000)
@@ -1431,7 +1636,11 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("completes deferred dismissals after scoped tracking outcomes resolve") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestTracking(RequestTrackingAction())
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1443,12 +1652,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         delayNanoseconds: 100_000_000,
                         result: .authorized
                     )
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_tracking",
-                        payload: [:],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                     controller.runtimeDelegate?.flowViewControllerDidRequestDismiss(
                         controller,
                         reason: .userDismissed
@@ -1469,19 +1673,18 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("completes dismissed journeys after unsupported request permission kinds") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestPermission(RequestPermissionAction(permissionType: "location_always"))
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
                 let journey = await startJourney()
 
                 await MainActor.run {
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_permission",
-                        payload: ["permissionType": "location_always"],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 try? await Task.sleep(nanoseconds: 50_000_000)
@@ -1505,7 +1708,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("keeps deferred dismiss waiting when another request permission is still pending") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestPermission(RequestPermissionAction(permissionType: "location_always")),
+                        .requestPermission(RequestPermissionAction(permissionType: "camera"))
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1518,18 +1726,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         result: .granted
                     )
                     controller.cameraUsageDescriptionProvider = { "Camera usage description" }
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_permission",
-                        payload: ["permissionType": "location_always"],
-                        id: nil
-                    )
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_permission",
-                        payload: ["permissionType": "camera"],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 try? await Task.sleep(nanoseconds: 50_000_000)
@@ -1557,7 +1754,11 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("resumes wait_until work on unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestTracking(RequestTrackingAction())
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1577,12 +1778,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 await MainActor.run {
                     controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_tracking",
-                        payload: [:],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 await expect {
@@ -1639,7 +1835,11 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("tracks unsupported scoped tracking outcomes against the original user across identify races") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestTracking(RequestTrackingAction())
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1648,12 +1848,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 await MainActor.run {
                     controller.trackingAuthorizationHandler = UnsupportedTrackingAuthorizationHandler()
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_tracking",
-                        payload: [:],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 await expect {
@@ -1663,7 +1858,11 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
             it("tracks unsupported scoped request permission outcomes against the original user across identify races") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow()
+                let flow = makeFlow(
+                    interactions: pressInteractions([
+                        .requestPermission(RequestPermissionAction(permissionType: "camera"))
+                    ])
+                )
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1672,12 +1871,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 await MainActor.run {
                     controller.cameraPermissionAuthorizationHandler = UnsupportedRequestPermissionAuthorizationHandler()
-                    controller.runtimeDelegate?.flowViewController(
-                        controller,
-                        didReceiveRuntimeMessage: "action/request_permission",
-                        payload: ["permissionType": "camera"],
-                        id: nil
-                    )
+                    emitScreenPress(controller)
                 }
 
                 await expect {

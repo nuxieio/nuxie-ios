@@ -7,6 +7,14 @@ import FactoryKit
 @testable import NuxieTestSupport
 #endif
 
+private final class RecordingPurchaseFlowViewController: MockFlowViewController {
+    private(set) var emittedSystemEvents: [(name: String, properties: [String: Any])] = []
+
+    override func emitSystemEvent(_ name: String, properties: [String: Any]) {
+        emittedSystemEvents.append((name, properties))
+    }
+}
+
 final class TransactionServiceTests: AsyncSpec {
     override class func spec() {
         describe("TransactionService") {
@@ -90,6 +98,26 @@ final class TransactionServiceTests: AsyncSpec {
                         }.to(throwError(StoreKitError.purchasePending))
                         
                         expect(mockPurchaseDelegate.purchaseCalled).to(beTrue())
+                    }
+
+                    it("should not emit purchase_failed from native purchase when purchase is pending") {
+                        mockPurchaseDelegate.simulatedDelay = 0
+                        mockPurchaseDelegate.configureForPending()
+                        mocks.productService.mockProducts = [mockProduct]
+                        let controller = await MainActor.run {
+                            RecordingPurchaseFlowViewController(mockFlowId: "flow-purchase-pending")
+                        }
+
+                        await MainActor.run {
+                            controller.performPurchase(productId: mockProduct.id)
+                        }
+
+                        await expect(mockPurchaseDelegate.purchaseCalled).toEventually(beTrue(), timeout: .seconds(2))
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        let emittedNames = await MainActor.run {
+                            controller.emittedSystemEvents.map(\.name)
+                        }
+                        expect(emittedNames).toNot(contain(SystemEventNames.purchaseFailed))
                     }
                 }
                 
