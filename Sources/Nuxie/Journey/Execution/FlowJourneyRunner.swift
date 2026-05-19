@@ -283,7 +283,7 @@ final class FlowJourneyRunner {
     ) async -> RunOutcome? {
         if isPaused { return nil }
 
-        // The web runtime includes screenId in action payloads. If the runtime/ready → navigate
+        // Native runtime payloads include screenId. If the runtime/ready → navigate
         // handshake is still in flight, we may not have received a runtime/screen_changed yet.
         // Seed currentScreenId so navigation stack behavior (navigate/back) can work reliably.
         if journey.flowState.currentScreenId == nil, let screenId, !screenId.isEmpty {
@@ -2105,7 +2105,7 @@ final class FlowJourneyRunner {
             }
         }
         let triggerNote = hasViewModelTriggers ? " View-model triggers evaluate raw values on native." : ""
-        LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters; ensure converter-dependent logic runs in the web bundle.\(triggerNote)")
+        LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters.\(triggerNote)")
     }
 
     private func sendViewModelPatch(path: VmPathRef, value: Any, source: String?, instanceId: String? = nil) {

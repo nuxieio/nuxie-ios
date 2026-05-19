@@ -11,13 +11,13 @@ final class FlowRuntimeTraceTests: QuickSpec {
         func makeFlow(id: String = "trace-flow") -> Flow {
             let remoteFlow = RemoteFlow(
                 id: id,
-                bundle: FlowBundleRef(
-                    url: "https://cdn.example/\(id)/index.html",
+                flowArtifact: FlowArtifact(
+                    url: "https://cdn.example/\(id)/",
                     manifest: BuildManifest(
                         totalFiles: 1,
                         totalSize: 100,
                         contentHash: "hash-\(id)",
-                        files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
+                        files: [BuildFile(path: "flow.riv", size: 100, contentType: "application/octet-stream")]
                     )
                 ),
                 screens: [RemoteFlowScreen(id: "screen-entry", defaultViewModelId: nil, defaultInstanceId: nil)],
@@ -149,7 +149,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
 
                 let viewController = FlowViewController(
                     flow: makeFlow(id: "trace-host-sent"),
-                    archiveService: FlowArchiver()
+                    artifactStore: FlowArtifactStore()
                 )
                 viewController.runtimeDelegate = delegate
 

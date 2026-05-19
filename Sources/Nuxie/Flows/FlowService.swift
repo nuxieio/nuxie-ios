@@ -3,7 +3,7 @@ import FactoryKit
 
 /// Protocol defining the FlowService interface
 protocol FlowServiceProtocol: AnyObject {
-    /// Prefetch flows - triggers fetch of flow data and preloads web archives
+    /// Prefetch flows - triggers fetch of flow data and preloads flow artifacts.
     func prefetchFlows(_ remoteFlows: [RemoteFlow])
     
     /// Remove flows from cache
@@ -35,7 +35,7 @@ protocol FlowServiceProtocol: AnyObject {
         colorSchemeMode: FlowColorSchemeMode
     ) async throws -> FlowViewController
     
-    /// Clear all cached data (flows and WebArchives)
+    /// Clear all cached data.
     func clearCache() async
 }
 
@@ -46,63 +46,41 @@ final class FlowService: FlowServiceProtocol {
     // MARK: - Subsystems
     
     private let flowStore: FlowStore
-    private let flowArchiver: FlowArchiver
-    private let fontStore: FontStore
-    private let rendererAdapterRegistry: FlowRendererAdapterRegistry
+    private let flowArtifactStore: FlowArtifactStore
     
     // Lazy initialization ensures this is created on MainActor when first accessed
     @MainActor
     private lazy var viewControllerCache: FlowViewControllerCache = {
         FlowViewControllerCache(
-            flowArchiver: self.flowArchiver,
-            fontStore: self.fontStore,
-            rendererAdapterRegistry: self.rendererAdapterRegistry
+            flowArtifactStore: self.flowArtifactStore
         )
     }()
     
     // MARK: - Initialization
     
     internal init(
-        flowArchiver: FlowArchiver? = nil,
-        rendererAdapter: (any FlowRendererAdapter)? = nil,
-        rendererAdapterRegistry: FlowRendererAdapterRegistry? = nil
+        flowArtifactStore: FlowArtifactStore? = nil
     ) {
         self.flowStore = FlowStore()
-        // Use injected flowArchiver or create new instance
-        self.flowArchiver = flowArchiver ?? FlowArchiver()
-        self.fontStore = FontStore()
-        if let rendererAdapterRegistry {
-            self.rendererAdapterRegistry = rendererAdapterRegistry
-        } else if let rendererAdapter {
-            self.rendererAdapterRegistry = FlowRendererAdapterRegistry(
-                adapters: [rendererAdapter],
-                defaultCompilerBackend: rendererAdapter.id
-            )
-        } else {
-            self.rendererAdapterRegistry = FlowRendererAdapterRegistry.standard()
-        }
+        self.flowArtifactStore = flowArtifactStore ?? FlowArtifactStore()
         
-        LogInfo("FlowService initialized with all subsystems (default renderer: \(self.rendererAdapterRegistry.defaultCompilerBackend))")
+        LogInfo("FlowService initialized with native flow artifact delivery")
     }
     
     // MARK: - Flow Lifecycle Management (called by ProfileService)
     
-    /// Prefetch flows - triggers fetch of flow data and preloads web archives
+    /// Prefetch flows - triggers fetch of flow data and preloads flow artifacts.
     func prefetchFlows(_ remoteFlows: [RemoteFlow]) {
         LogInfo("Prefetching \(remoteFlows.count) flows")
         
         Task {
-            let fontEntries = remoteFlows.flatMap { $0.fontManifest?.fonts ?? [] }
-            if !fontEntries.isEmpty {
-                await fontStore.prefetchFonts(fontEntries)
-            }
             // Preload all flows with products into cache (concurrent)
             await flowStore.preloadFlows(remoteFlows)
             
-            // Preload web archives for all flows
+            // Preload native flow artifacts for all flows.
             for remoteFlow in remoteFlows {
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
-                await flowArchiver.preloadArchive(for: flow)
+                await flowArtifactStore.preloadArtifact(for: flow)
             }
         }
     }
@@ -117,7 +95,7 @@ final class FlowService: FlowServiceProtocol {
                     guard let self = self else { return }
                     // Remove from all caches
                     await self.flowStore.removeFlow(id: flowId)
-                    await self.flowArchiver.removeArchive(for: flowId)
+                    await self.flowArtifactStore.removeArtifact(for: flowId)
                 }
             }
         }
@@ -146,30 +124,13 @@ final class FlowService: FlowServiceProtocol {
     /// Must be called from main thread as it creates UIViewController
     @MainActor
     func viewController(for flow: Flow) -> FlowViewController {
-        let targetSelection = flow.remoteFlow.selectedTargetResult
-        let adapterResolution = rendererAdapterRegistry.resolve(
-            for: targetSelection.selectedCompilerBackend
-        )
-
         // Path A: Check cache first
         if let cached = viewControllerCache.updateCachedViewControllerIfNeeded(for: flow) {
-            logRendererSelection(
-                flow: flow,
-                targetSelection: targetSelection,
-                adapterResolution: adapterResolution,
-                cacheHit: true
-            )
             LogDebug("Cache hit: returning cached view controller for flow: \(flow.id)")
             return cached
         }
         
         // Path B: Create new view controller and cache it
-        logRendererSelection(
-            flow: flow,
-            targetSelection: targetSelection,
-            adapterResolution: adapterResolution,
-            cacheHit: false
-        )
         LogDebug("Cache miss: creating new view controller for flow: \(flow.id)")
         let viewController = viewControllerCache.createViewController(for: flow)
         return viewController
@@ -226,17 +187,14 @@ final class FlowService: FlowServiceProtocol {
     
     // MARK: - Cache Management
     
-    /// Clear all cached data (flows and WebArchives)
+    /// Clear all cached data.
     func clearCache() async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in
                 await self?.flowStore.clearCache()
             }
             group.addTask { [weak self] in
-                await self?.flowArchiver.clearAllArchives()
-            }
-            group.addTask { [weak self] in
-                await self?.fontStore.clearCache()
+                await self?.flowArtifactStore.clearAllArtifacts()
             }
         }
         
@@ -253,20 +211,6 @@ final class FlowService: FlowServiceProtocol {
     func clearViewControllerCache() {
         viewControllerCache.clearCache()
         LogInfo("Cleared view controller cache")
-    }
-
-    @MainActor
-    private func logRendererSelection(
-        flow: Flow,
-        targetSelection: RemoteFlow.TargetSelectionResult,
-        adapterResolution: FlowRendererAdapterResolution,
-        cacheHit: Bool
-    ) {
-        let selectedCompilerBackend = targetSelection.selectedCompilerBackend ?? "legacy"
-        let selectedBuildId = targetSelection.selectedBuildId ?? "legacy"
-        LogInfo(
-            "Flow renderer selection: flowId=\(flow.id) targetBackend=\(selectedCompilerBackend) targetBuildId=\(selectedBuildId) targetReason=\(targetSelection.reason.rawValue) adapterBackend=\(adapterResolution.resolvedCompilerBackend) adapterFallback=\(adapterResolution.didFallback) cacheHit=\(cacheHit)"
-        )
     }
 }
 

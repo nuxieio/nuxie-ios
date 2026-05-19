@@ -48,42 +48,31 @@ final class FlowEventsTests: AsyncSpec {
                 expect(properties["error_message"] as? String).to(equal("oops"))
             }
 
-            it("flowArtifactLoadSucceededProperties includes renderer metadata") {
+            it("flowArtifactLoadSucceededProperties includes artifact metadata") {
                 let properties = JourneyEvents.flowArtifactLoadSucceededProperties(
                     flowId: "flow-abc",
-                    targetCompilerBackend: "rive",
-                    targetBuildId: "build-1",
-                    targetSelectionReason: "selected_preferred_backend",
-                    adapterCompilerBackend: "react",
-                    adapterFallback: true,
-                    artifactSource: "cached_archive",
+                    artifactBuildId: "build-1",
+                    artifactSource: "cached_artifact",
                     artifactContentHash: "hash-123"
                 )
 
                 expect(properties["flow_id"] as? String).to(equal("flow-abc"))
-                expect(properties["target_backend"] as? String).to(equal("rive"))
-                expect(properties["target_build_id"] as? String).to(equal("build-1"))
-                expect(properties["adapter_backend"] as? String).to(equal("react"))
-                expect(properties["adapter_fallback"] as? Bool).to(beTrue())
-                expect(properties["artifact_source"] as? String).to(equal("cached_archive"))
+                expect(properties["artifact_build_id"] as? String).to(equal("build-1"))
+                expect(properties["artifact_source"] as? String).to(equal("cached_artifact"))
                 expect(properties["artifact_content_hash"] as? String).to(equal("hash-123"))
             }
 
             it("flowArtifactLoadFailedProperties includes error message when provided") {
                 let properties = JourneyEvents.flowArtifactLoadFailedProperties(
                     flowId: "flow-abc",
-                    targetCompilerBackend: "react",
-                    targetBuildId: nil,
-                    targetSelectionReason: "targets_missing",
-                    adapterCompilerBackend: "react",
-                    adapterFallback: false,
-                    artifactSource: "remote_url",
+                    artifactBuildId: "build-1",
+                    artifactSource: "downloaded_artifact",
                     artifactContentHash: "hash-123",
                     errorMessage: "loading_timeout"
                 )
 
                 expect(properties["error_message"] as? String).to(equal("loading_timeout"))
-                expect(properties["target_build_id"] as? String).to(beNil())
+                expect(properties["artifact_build_id"] as? String).to(equal("build-1"))
             }
         }
     }

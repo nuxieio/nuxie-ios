@@ -17,6 +17,9 @@ packages:
   Factory:
     url: https://github.com/hmlongco/Factory.git
     from: 2.5.0
+  RiveRuntime:
+    url: https://github.com/rive-app/rive-ios.git
+    from: 6.20.3
     
 targets:
   NuxieSDK:
@@ -30,6 +33,8 @@ targets:
     dependencies:
       - package: Factory
         product: FactoryKit
+      - package: RiveRuntime
+        product: RiveRuntime
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk
       PRODUCT_NAME: Nuxie
@@ -182,34 +187,6 @@ targets:
         - NuxieSDKIntegrationTests
       gatherCoverageData: false
 
-  NuxieSDKE2ETests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: Tests/NuxieE2ETests
-        name: NuxieE2ETests
-    resources:
-      - path: Tests/NuxieE2ETests/Fixtures/experiment-ab-compiled-bundle
-        type: folder
-    dependencies:
-      - target: NuxieSDK
-      - target: NuxieTestSupportiOS
-      - package: Quick
-      - package: Nimble
-      - package: Factory
-        product: FactoryKit
-    settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.e2etests
-      TEST_HOST: ""
-      SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) SWIFT_PACKAGE
-      GENERATE_INFOPLIST_FILE: YES
-      CODE_SIGN_STYLE: Automatic
-      CODE_SIGN_IDENTITY: ""
-    scheme:
-      testTargets:
-        - NuxieSDKE2ETests
-      gatherCoverageData: false
-      
 schemes:
   NuxieSDK:
     build:
@@ -258,13 +235,4 @@ schemes:
     test:
       targets:
         - NuxieSDKIntegrationTests
-      gatherCoverageData: false
-
-  NuxieSDKE2ETests:
-    build:
-      targets:
-        NuxieSDK: all
-    test:
-      targets:
-        - NuxieSDKE2ETests
       gatherCoverageData: false

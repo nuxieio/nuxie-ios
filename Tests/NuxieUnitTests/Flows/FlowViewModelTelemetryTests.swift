@@ -14,13 +14,13 @@ final class FlowViewModelTelemetryTests: AsyncSpec {
         func makeFlow(id: String = "flow-telemetry", url: String = "https://cdn.example/flow/index.html") -> Flow {
             let remoteFlow = RemoteFlow(
                 id: id,
-                bundle: FlowBundleRef(
+                flowArtifact: FlowArtifact(
                     url: url,
                     manifest: BuildManifest(
                         totalFiles: 1,
                         totalSize: 100,
                         contentHash: "hash-\(id)",
-                        files: [BuildFile(path: "index.html", size: 100, contentType: "text/html")]
+                        files: [BuildFile(path: "flow.riv", size: 100, contentType: "application/octet-stream")]
                     )
                 ),
                 screens: [
@@ -49,13 +49,9 @@ final class FlowViewModelTelemetryTests: AsyncSpec {
             it("tracks success once per load attempt") { @MainActor in
                 let viewModel = FlowViewModel(
                     flow: makeFlow(),
-                    archiveService: FlowArchiver(),
+                    artifactStore: FlowArtifactStore(),
                     artifactTelemetryContext: FlowArtifactTelemetryContext(
-                        targetCompilerBackend: "rive",
-                        targetBuildId: "build-rive",
-                        targetSelectionReason: "selected_preferred_backend",
-                        adapterCompilerBackend: "react",
-                        adapterFallback: true
+                        artifactBuildId: "build-rive"
                     )
                 )
 
@@ -67,15 +63,13 @@ final class FlowViewModelTelemetryTests: AsyncSpec {
                 }
                 expect(successEvents.count).to(equal(1))
                 let properties = successEvents.first?.properties
-                expect(properties?["target_backend"] as? String).to(equal("rive"))
-                expect(properties?["adapter_backend"] as? String).to(equal("react"))
-                expect(properties?["adapter_fallback"] as? Bool).to(beTrue())
+                expect(properties?["artifact_build_id"] as? String).to(equal("build-rive"))
             }
 
             it("tracks failure when no valid content URL exists") { @MainActor in
                 let viewModel = FlowViewModel(
                     flow: makeFlow(id: "flow-invalid", url: ""),
-                    archiveService: FlowArchiver()
+                    artifactStore: FlowArtifactStore()
                 )
 
                 viewModel.loadFlow()
@@ -91,7 +85,7 @@ final class FlowViewModelTelemetryTests: AsyncSpec {
                 }
                 let properties = failureEvent?.properties
                 expect(properties?["artifact_source"] as? String).to(equal("unavailable"))
-                expect(properties?["error_message"] as? String).to(equal("no_content_available"))
+                expect(properties?["error_message"] as? String).to(contain("Invalid flow artifact URL"))
             }
         }
     }

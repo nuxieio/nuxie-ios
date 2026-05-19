@@ -13,21 +13,14 @@ final class FlowViewControllerCache {
     // Track which VCs are loaded vs just cached
     private var loadedViewControllers: Set<String> = []
     
-    // Flow archiver for creating view controllers
-    private let flowArchiver: FlowArchiver
-    private let fontStore: FontStore
-    private let rendererAdapterRegistry: FlowRendererAdapterRegistry
+    private let flowArtifactStore: FlowArtifactStore
     
     // MARK: - Initialization
     
     init(
-        flowArchiver: FlowArchiver,
-        fontStore: FontStore,
-        rendererAdapterRegistry: FlowRendererAdapterRegistry
+        flowArtifactStore: FlowArtifactStore
     ) {
-        self.flowArchiver = flowArchiver
-        self.fontStore = fontStore
-        self.rendererAdapterRegistry = rendererAdapterRegistry
+        self.flowArtifactStore = flowArtifactStore
         LogDebug("FlowViewControllerCache initialized")
     }
     
@@ -44,21 +37,18 @@ final class FlowViewControllerCache {
             return nil
         }
 
-        let rendererInput = resolveRendererInput(for: flow)
-        cached.updateFlowIfNeeded(rendererInput.flow)
-        cached.updateArtifactTelemetryContext(rendererInput.telemetryContext)
+        cached.updateFlowIfNeeded(flow)
+        cached.updateArtifactTelemetryContext(.from(flow: flow))
         return cached
     }
     
     /// 2. Create view controller and insert into cache
     func createViewController(for flow: Flow) -> FlowViewController {
-        let rendererInput = resolveRendererInput(for: flow)
-        let viewController = rendererInput.adapter.makeViewController(
-            flow: rendererInput.flow,
-            archiveService: flowArchiver,
-            fontStore: fontStore
+        let viewController = FlowViewController(
+            flow: flow,
+            artifactStore: flowArtifactStore
         )
-        viewController.updateArtifactTelemetryContext(rendererInput.telemetryContext)
+        viewController.updateArtifactTelemetryContext(.from(flow: flow))
         cache[flow.id] = viewController
         return viewController
     }
@@ -87,61 +77,4 @@ final class FlowViewControllerCache {
         return loadedViewControllers.count
     }
 
-    private func resolveRendererInput(
-        for flow: Flow
-    ) -> (
-        adapter: any FlowRendererAdapter,
-        flow: Flow,
-        telemetryContext: FlowArtifactTelemetryContext
-    ) {
-        let targetSelection = flow.remoteFlow.selectedTargetResult
-        let selectedCompilerBackend = targetSelection.selectedCompilerBackend
-        let resolution = rendererAdapterRegistry.resolve(for: selectedCompilerBackend)
-
-        let normalizedFlow: Flow
-        if resolution.didFallback {
-            normalizedFlow = forceFlow(flow, toCompilerBackend: resolution.resolvedCompilerBackend)
-        } else {
-            normalizedFlow = flow
-        }
-
-        let telemetryContext = FlowArtifactTelemetryContext(
-            targetCompilerBackend: selectedCompilerBackend ?? "legacy",
-            targetBuildId: targetSelection.selectedBuildId,
-            targetSelectionReason: targetSelection.reason.rawValue,
-            adapterCompilerBackend: resolution.resolvedCompilerBackend,
-            adapterFallback: resolution.didFallback
-        )
-
-        return (
-            adapter: resolution.adapter,
-            flow: resolution.adapter.prepareFlowForRendering(normalizedFlow),
-            telemetryContext: telemetryContext
-        )
-    }
-
-    private func forceFlow(
-        _ flow: Flow,
-        toCompilerBackend compilerBackend: String
-    ) -> Flow {
-        let source = flow.remoteFlow
-        let backendTarget = source.selectedTarget(
-            supportedCapabilities: RemoteFlow.supportedCapabilities,
-            preferredCompilerBackends: [compilerBackend],
-            renderableCompilerBackends: [compilerBackend]
-        )
-        let forcedBundle = backendTarget?.bundle ?? source.bundle
-
-        let forcedRemoteFlow = RemoteFlow(
-            id: source.id,
-            bundle: forcedBundle,
-            targets: nil,
-            screens: source.screens,
-            interactions: source.interactions,
-            viewModels: source.viewModels,
-            viewModelInstances: source.viewModelInstances,
-            converters: source.converters
-        )
-        return Flow(remoteFlow: forcedRemoteFlow, products: flow.products)
-    }
 }

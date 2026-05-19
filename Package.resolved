@@ -55,6 +55,15 @@
       }
     },
     {
+      "identity" : "rive-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/rive-app/rive-ios.git",
+      "state" : {
+        "revision" : "0bab74395b47df0423be3c1b3eec0e86751889b2",
+        "version" : "6.20.3"
+      }
+    },
+    {
       "identity" : "superscript-ios",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/superwall/Superscript-iOS",

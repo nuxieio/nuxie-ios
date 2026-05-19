@@ -97,7 +97,7 @@ final class GlobalQuickConfiguration: QuickConfiguration {
         break
       }
 
-      // Avoid blocking the main runloop (some tests involve WebKit/UI work).
+      // Avoid blocking the main runloop (some tests involve UIKit work).
       RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Canonical runtime trace envelope for fixture parity checks.
-/// This stays renderer-neutral so React and future Rive runs can share assertions.
+/// This stays renderer-neutral so native runtime fixtures can share assertions.
 struct FlowRuntimeTrace: Codable, Equatable {
     static let currentSchemaVersion = 1
 

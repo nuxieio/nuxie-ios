@@ -214,7 +214,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
         
         return RemoteFlow(
             id: flowId,
-            bundle: FlowBundleRef(
+            flowArtifact: FlowArtifact(
                 url: "https://example.com/flow",
                 manifest: BuildManifest(
                     totalFiles: 5,

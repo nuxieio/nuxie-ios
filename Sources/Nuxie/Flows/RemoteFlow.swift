@@ -3,48 +3,8 @@ import Foundation
 // MARK: - Remote Flow
 
 public struct RemoteFlow: Codable {
-    private static let defaultRequiredCapabilitiesByBackend: [String: [String]] = [
-        "react": ["renderer.react.webview.v1"],
-        "rive": ["renderer.rive.native.v1"],
-    ]
-
-    public static var supportedCapabilities: Set<String> = [
-        "renderer.react.webview.v1",
-    ]
-    public static var preferredCompilerBackends: [String] = [
-        "react",
-        "rive",
-    ]
-    public static var renderableCompilerBackends: Set<String> = [
-        "react",
-    ]
-
-    public enum TargetSelectionReason: String {
-        case selectedPreferredBackend = "selected_preferred_backend"
-        case targetsMissing = "targets_missing"
-        case noSucceededTargets = "no_succeeded_targets"
-        case noCapabilityCompatibleTargets = "no_capability_compatible_targets"
-        case noRenderableTargets = "no_renderable_targets"
-        case noPreferredBackendMatch = "no_preferred_backend_match"
-    }
-
-    public struct TargetSelectionResult {
-        public let target: RemoteFlowTarget?
-        public let reason: TargetSelectionReason
-
-        public var selectedCompilerBackend: String? {
-            target?.compilerBackend.lowercased()
-        }
-
-        public var selectedBuildId: String? {
-            target?.buildId
-        }
-    }
-
     public let id: String
-    public let bundle: FlowBundleRef
-    public let targets: [RemoteFlowTarget]?
-    public let fontManifest: FontManifest? = nil
+    public let flowArtifact: FlowArtifact
     public let screens: [RemoteFlowScreen]
     public let interactions: [String: [Interaction]]
     public let viewModels: [ViewModel]
@@ -53,8 +13,7 @@ public struct RemoteFlow: Codable {
 
     public init(
         id: String,
-        bundle: FlowBundleRef,
-        targets: [RemoteFlowTarget]? = nil,
+        flowArtifact: FlowArtifact,
         screens: [RemoteFlowScreen],
         interactions: [String: [Interaction]],
         viewModels: [ViewModel],
@@ -62,242 +21,44 @@ public struct RemoteFlow: Codable {
         converters: [String: [String: AnyCodable]]?
     ) {
         self.id = id
-        self.bundle = bundle
-        self.targets = targets
+        self.flowArtifact = flowArtifact
         self.screens = screens
         self.interactions = interactions
         self.viewModels = viewModels
         self.viewModelInstances = viewModelInstances
         self.converters = converters
     }
-
-    public func selectedTarget(
-        supportedCapabilities: Set<String>
-    ) -> RemoteFlowTarget? {
-        selectedTargetResult(
-            supportedCapabilities: supportedCapabilities,
-            preferredCompilerBackends: Self.preferredCompilerBackends
-        ).target
-    }
-
-    public func selectedTarget(
-        supportedCapabilities: Set<String>,
-        preferredCompilerBackends: [String]
-    ) -> RemoteFlowTarget? {
-        selectedTargetResult(
-            supportedCapabilities: supportedCapabilities,
-            preferredCompilerBackends: preferredCompilerBackends,
-            renderableCompilerBackends: Self.renderableCompilerBackends
-        ).target
-    }
-
-    public func selectedTargetResult(
-        supportedCapabilities: Set<String>,
-        preferredCompilerBackends: [String],
-        renderableCompilerBackends: Set<String>
-    ) -> TargetSelectionResult {
-        guard let targets, !targets.isEmpty else {
-            return TargetSelectionResult(
-                target: nil,
-                reason: .targetsMissing
-            )
-        }
-
-        let succeededTargets = targets.filter {
-            $0.status.lowercased() == "succeeded"
-        }
-        guard !succeededTargets.isEmpty else {
-            return TargetSelectionResult(
-                target: nil,
-                reason: .noSucceededTargets
-            )
-        }
-        let compatibleTargets = succeededTargets.filter {
-            supportsRequiredCapabilities(
-                target: $0,
-                supportedCapabilities: supportedCapabilities
-            )
-        }
-        guard !compatibleTargets.isEmpty else {
-            return TargetSelectionResult(
-                target: nil,
-                reason: .noCapabilityCompatibleTargets
-            )
-        }
-
-        let normalizedRenderableBackends = Set(
-            renderableCompilerBackends.map { $0.lowercased() }
-        )
-        let renderableTargets = compatibleTargets.filter { target in
-            normalizedRenderableBackends.contains(target.compilerBackend.lowercased())
-        }
-        guard !renderableTargets.isEmpty else {
-            return TargetSelectionResult(
-                target: nil,
-                reason: .noRenderableTargets
-            )
-        }
-
-        let normalizedPreferredBackends = preferredCompilerBackends.map {
-            $0.lowercased()
-        }
-        var preferredBackendRanks: [String: Int] = [:]
-        for (index, backend) in normalizedPreferredBackends.enumerated()
-        where preferredBackendRanks[backend] == nil {
-            preferredBackendRanks[backend] = index
-        }
-
-        let orderedTargets = renderableTargets.enumerated().sorted { lhs, rhs in
-            let lhsTarget = lhs.element
-            let rhsTarget = rhs.element
-
-            let lhsRecommendation = lhsTarget.recommendedSelectionOrder ?? Int.max
-            let rhsRecommendation = rhsTarget.recommendedSelectionOrder ?? Int.max
-            if lhsRecommendation != rhsRecommendation {
-                return lhsRecommendation < rhsRecommendation
-            }
-
-            let lhsPreferredRank = preferredBackendRanks[lhsTarget.compilerBackend.lowercased()] ?? Int.max
-            let rhsPreferredRank = preferredBackendRanks[rhsTarget.compilerBackend.lowercased()] ?? Int.max
-            if lhsPreferredRank != rhsPreferredRank {
-                return lhsPreferredRank < rhsPreferredRank
-            }
-
-            return lhs.offset < rhs.offset
-        }.map(\.element)
-
-        if let target = orderedTargets.first(where: {
-            preferredBackendRanks[$0.compilerBackend.lowercased()] != nil
-        }) {
-            return TargetSelectionResult(
-                target: target,
-                reason: .selectedPreferredBackend
-            )
-        }
-
-        return TargetSelectionResult(
-            target: nil,
-            reason: .noPreferredBackendMatch
-        )
-    }
-
-    public func selectedTarget(
-        supportedCapabilities: Set<String>,
-        preferredCompilerBackends: [String],
-        renderableCompilerBackends: Set<String>
-    ) -> RemoteFlowTarget? {
-        selectedTargetResult(
-            supportedCapabilities: supportedCapabilities,
-            preferredCompilerBackends: preferredCompilerBackends,
-            renderableCompilerBackends: renderableCompilerBackends
-        ).target
-    }
-
-    public func selectedTargetResult(
-        supportedCapabilities: Set<String>,
-        preferredCompilerBackends: [String]
-    ) -> TargetSelectionResult {
-        selectedTargetResult(
-            supportedCapabilities: supportedCapabilities,
-            preferredCompilerBackends: preferredCompilerBackends,
-            renderableCompilerBackends: Self.renderableCompilerBackends
-        )
-    }
-
-    public func selectedTargetResult(
-        supportedCapabilities: Set<String>
-    ) -> TargetSelectionResult {
-        selectedTargetResult(
-            supportedCapabilities: supportedCapabilities,
-            preferredCompilerBackends: Self.preferredCompilerBackends,
-            renderableCompilerBackends: Self.renderableCompilerBackends
-        )
-    }
-
-    public var selectedTarget: RemoteFlowTarget? {
-        selectedTarget(supportedCapabilities: Self.supportedCapabilities)
-    }
-
-    public var selectedTargetResult: TargetSelectionResult {
-        selectedTargetResult(supportedCapabilities: Self.supportedCapabilities)
-    }
-
-    private func supportsRequiredCapabilities(
-        target: RemoteFlowTarget,
-        supportedCapabilities: Set<String>
-    ) -> Bool {
-        let requiredCapabilities: [String]
-        if let explicitRequiredCapabilities = target.requiredCapabilities {
-            requiredCapabilities = explicitRequiredCapabilities
-        } else {
-            requiredCapabilities =
-                Self.defaultRequiredCapabilitiesByBackend[
-                    target.compilerBackend.lowercased()
-                ] ?? []
-        }
-
-        guard !requiredCapabilities.isEmpty else {
-            return true
-        }
-        return requiredCapabilities.allSatisfy { capability in
-            supportedCapabilities.contains(capability)
-        }
-    }
-
-    public func selectedBundle(
-        supportedCapabilities: Set<String>
-    ) -> FlowBundleRef {
-        selectedTarget(supportedCapabilities: supportedCapabilities)?.bundle ?? bundle
-    }
-
-    public var selectedBundle: FlowBundleRef {
-        selectedBundle(supportedCapabilities: Self.supportedCapabilities)
-    }
 }
 
-public struct FlowBundleRef: Codable {
+public struct FlowArtifact: Codable {
     public let url: String
-    public let manifest: BuildManifest
-}
-
-public struct RemoteFlowTarget: Codable {
-    public let compilerBackend: String
     public let buildId: String
-    public let bundle: FlowBundleRef
-    public let status: String
-    public let requiredCapabilities: [String]?
-    public let recommendedSelectionOrder: Int?
+    public let manifest: BuildManifest
+    public let status: String?
 
     public init(
-        compilerBackend: String,
+        url: String,
         buildId: String,
-        bundle: FlowBundleRef,
-        status: String,
-        requiredCapabilities: [String]? = nil,
-        recommendedSelectionOrder: Int? = nil
+        manifest: BuildManifest,
+        status: String? = nil
     ) {
-        self.compilerBackend = compilerBackend
+        self.url = url
         self.buildId = buildId
-        self.bundle = bundle
+        self.manifest = manifest
         self.status = status
-        self.requiredCapabilities = requiredCapabilities
-        self.recommendedSelectionOrder = recommendedSelectionOrder
     }
-}
 
-public struct FontManifest: Codable {
-    public let version: Int
-    public let fonts: [FontManifestEntry]
-}
-
-public struct FontManifestEntry: Codable {
-    public let id: String
-    public let family: String
-    public let style: String
-    public let weight: String
-    public let format: String
-    public let contentHash: String
-    public let assetUrl: String
+    public init(
+        url: String,
+        manifest: BuildManifest,
+        buildId: String = "unknown",
+        status: String? = nil
+    ) {
+        self.url = url
+        self.buildId = buildId
+        self.manifest = manifest
+        self.status = status
+    }
 }
 
 public struct RemoteFlowScreen: Codable {

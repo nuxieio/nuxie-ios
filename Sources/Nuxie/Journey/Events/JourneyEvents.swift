@@ -263,21 +263,13 @@ public class JourneyEvents {
 
     public static func flowArtifactLoadSucceededProperties(
         flowId: String,
-        targetCompilerBackend: String,
-        targetBuildId: String?,
-        targetSelectionReason: String,
-        adapterCompilerBackend: String,
-        adapterFallback: Bool,
+        artifactBuildId: String,
         artifactSource: String,
         artifactContentHash: String
     ) -> [String: Any] {
         return flowArtifactLoadBaseProperties(
             flowId: flowId,
-            targetCompilerBackend: targetCompilerBackend,
-            targetBuildId: targetBuildId,
-            targetSelectionReason: targetSelectionReason,
-            adapterCompilerBackend: adapterCompilerBackend,
-            adapterFallback: adapterFallback,
+            artifactBuildId: artifactBuildId,
             artifactSource: artifactSource,
             artifactContentHash: artifactContentHash
         )
@@ -285,22 +277,14 @@ public class JourneyEvents {
 
     public static func flowArtifactLoadFailedProperties(
         flowId: String,
-        targetCompilerBackend: String,
-        targetBuildId: String?,
-        targetSelectionReason: String,
-        adapterCompilerBackend: String,
-        adapterFallback: Bool,
+        artifactBuildId: String,
         artifactSource: String,
         artifactContentHash: String,
         errorMessage: String?
     ) -> [String: Any] {
         var properties = flowArtifactLoadBaseProperties(
             flowId: flowId,
-            targetCompilerBackend: targetCompilerBackend,
-            targetBuildId: targetBuildId,
-            targetSelectionReason: targetSelectionReason,
-            adapterCompilerBackend: adapterCompilerBackend,
-            adapterFallback: adapterFallback,
+            artifactBuildId: artifactBuildId,
             artifactSource: artifactSource,
             artifactContentHash: artifactContentHash
         )
@@ -312,27 +296,16 @@ public class JourneyEvents {
 
     private static func flowArtifactLoadBaseProperties(
         flowId: String,
-        targetCompilerBackend: String,
-        targetBuildId: String?,
-        targetSelectionReason: String,
-        adapterCompilerBackend: String,
-        adapterFallback: Bool,
+        artifactBuildId: String,
         artifactSource: String,
         artifactContentHash: String
     ) -> [String: Any] {
-        var properties: [String: Any] = [
+        return [
             "flow_id": flowId,
-            "target_backend": targetCompilerBackend,
-            "target_reason": targetSelectionReason,
-            "adapter_backend": adapterCompilerBackend,
-            "adapter_fallback": adapterFallback,
+            "artifact_build_id": artifactBuildId,
             "artifact_source": artifactSource,
             "artifact_content_hash": artifactContentHash,
         ]
-        if let targetBuildId {
-            properties["target_build_id"] = targetBuildId
-        }
-        return properties
     }
 
     public static func customerUpdatedProperties(

@@ -133,7 +133,7 @@ struct ResponseBuilders {
     ) -> RemoteFlow {
         return RemoteFlow(
             id: id,
-            bundle: FlowBundleRef(
+            flowArtifact: FlowArtifact(
                 url: url,
                 manifest: manifest ?? buildManifest(files: [])
             ),

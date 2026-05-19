@@ -118,25 +118,6 @@ public class NuxieConfiguration {
     public var maxConcurrentFlowDownloads: Int = 4
     public var flowDownloadTimeout: TimeInterval = 30
     public var flowCacheDirectory: URL?
-
-    /// Runtime capabilities used to select compatible published targets.
-    /// Targets that require unsupported capabilities fall back to the legacy bundle.
-    public var flowRuntimeCapabilities: Set<String> = [
-        "renderer.react.webview.v1",
-    ]
-
-    /// Preferred compiler backend selection order for published targets.
-    /// The runtime picks the first compatible succeeded target in this order.
-    public var flowPreferredCompilerBackends: [String] = [
-        "react",
-        "rive",
-    ]
-
-    /// Compiler backends this SDK can actively render.
-    /// Backends outside this set are treated as non-renderable and will fall back.
-    public var flowRenderableCompilerBackends: Set<String> = [
-        "react",
-    ]
     
     /// Custom URLSession for testing (if nil, a default one will be created)
     public var urlSession: URLSession?

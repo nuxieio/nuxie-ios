@@ -13,38 +13,30 @@ final class ProfileServiceFlowInvalidationTests: QuickSpec {
                 totalFiles: 1,
                 totalSize: 128,
                 contentHash: hash,
-                files: [BuildFile(path: "index.html", size: 128, contentType: "text/html")]
+                files: [BuildFile(path: "flow.riv", size: 128, contentType: "application/octet-stream")]
             )
         }
 
-        func makeBundle(url: String, hash: String) -> FlowBundleRef {
-            FlowBundleRef(
+        func makeArtifact(
+            url: String,
+            buildId: String,
+            hash: String
+        ) -> FlowArtifact {
+            FlowArtifact(
                 url: url,
+                buildId: buildId,
                 manifest: makeManifest(hash: hash)
             )
         }
 
-        func makeTarget(
-            backend: String,
-            buildId: String,
-            status: String = "succeeded",
-            url: String,
-            hash: String
-        ) -> RemoteFlowTarget {
-            RemoteFlowTarget(
-                compilerBackend: backend,
-                buildId: buildId,
-                bundle: makeBundle(url: url, hash: hash),
-                status: status,
-                requiredCapabilities: nil
-            )
-        }
-
-        func makeFlow(targets: [RemoteFlowTarget]? = nil) -> RemoteFlow {
+        func makeFlow(
+            url: String = "https://cdn.example/flow/",
+            buildId: String = "build-v1",
+            hash: String = "hash-v1"
+        ) -> RemoteFlow {
             RemoteFlow(
                 id: "flow-1",
-                bundle: makeBundle(url: "https://cdn.example/legacy/index.html", hash: "legacy-hash"),
-                targets: targets,
+                flowArtifact: makeArtifact(url: url, buildId: buildId, hash: hash),
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
@@ -60,86 +52,38 @@ final class ProfileServiceFlowInvalidationTests: QuickSpec {
         }
 
         describe("ProfileService flow cache invalidation") {
-            it("refreshes when selected bundle hash changes") {
-                let previous = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v1",
-                        url: "https://cdn.example/react-v1/index.html",
-                        hash: "hash-v1"
-                    ),
-                ])
-                let next = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v2",
-                        url: "https://cdn.example/react-v2/index.html",
-                        hash: "hash-v2"
-                    ),
-                ])
+            it("refreshes when artifact hash changes") {
+                let previous = makeFlow(buildId: "build-v1", hash: "hash-v1")
+                let next = makeFlow(buildId: "build-v2", hash: "hash-v2")
 
                 expect(ProfileService.shouldRefreshCachedFlow(previous: previous, next: next)).to(beTrue())
             }
 
-            it("refreshes when selected bundle URL changes but hash stays the same") {
-                let previous = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v1",
-                        url: "https://cdn.example/react-v1/index.html",
-                        hash: "same-hash"
-                    ),
-                ])
-                let next = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v2",
-                        url: "https://cdn.example/react-v2/index.html",
-                        hash: "same-hash"
-                    ),
-                ])
+            it("refreshes when artifact URL changes but hash stays the same") {
+                let previous = makeFlow(
+                    url: "https://cdn.example/build-v1/",
+                    buildId: "build-v1",
+                    hash: "same-hash"
+                )
+                let next = makeFlow(
+                    url: "https://cdn.example/build-v2/",
+                    buildId: "build-v2",
+                    hash: "same-hash"
+                )
 
                 expect(ProfileService.shouldRefreshCachedFlow(previous: previous, next: next)).to(beTrue())
             }
 
-            it("refreshes when selected target changes but URL and hash are unchanged") {
-                let previous = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v1",
-                        url: "https://cdn.example/react/index.html",
-                        hash: "same-hash"
-                    ),
-                ])
-                let next = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v2",
-                        url: "https://cdn.example/react/index.html",
-                        hash: "same-hash"
-                    ),
-                ])
+            it("refreshes when artifact build id changes but URL and hash are unchanged") {
+                let previous = makeFlow(buildId: "build-v1", hash: "same-hash")
+                let next = makeFlow(buildId: "build-v2", hash: "same-hash")
 
                 expect(ProfileService.shouldRefreshCachedFlow(previous: previous, next: next)).to(beTrue())
             }
 
-            it("does not refresh when selected target and bundle are unchanged") {
-                let previous = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v1",
-                        url: "https://cdn.example/react/index.html",
-                        hash: "same-hash"
-                    ),
-                ])
-                let next = makeFlow(targets: [
-                    makeTarget(
-                        backend: "react",
-                        buildId: "react-v1",
-                        url: "https://cdn.example/react/index.html",
-                        hash: "same-hash"
-                    ),
-                ])
+            it("does not refresh when artifact is unchanged") {
+                let previous = makeFlow(buildId: "build-v1", hash: "same-hash")
+                let next = makeFlow(buildId: "build-v1", hash: "same-hash")
 
                 expect(ProfileService.shouldRefreshCachedFlow(previous: previous, next: next)).to(beFalse())
             }

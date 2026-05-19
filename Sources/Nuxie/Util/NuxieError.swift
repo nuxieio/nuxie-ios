@@ -15,7 +15,6 @@ public enum NuxieError: LocalizedError {
     case flowDownloadFailed(String, Error)
     case flowCacheFailed(String, Error)
     case flowNotCached(String)
-    case webArchiveCreationFailed(Error)
     case flowManagerNotInitialized
     case flowError(String)
     case configurationError(String)
@@ -50,8 +49,6 @@ public enum NuxieError: LocalizedError {
             return "Failed to cache flow \(flowId): \(error.localizedDescription)"
         case .flowNotCached(let flowId):
             return "Flow \(flowId) is not cached"
-        case .webArchiveCreationFailed(let error):
-            return "Failed to create WebArchive: \(error.localizedDescription)"
         case .flowManagerNotInitialized:
             return "Flow manager is not initialized"
         case .flowError(let message):
