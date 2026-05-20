@@ -198,8 +198,7 @@ final class FlowArtifactStoreTests: AsyncSpec {
                     ),
                 ],
                 interactions: [:],
-                viewModels: [],
-                viewModelInstances: nil
+                state: nil
             )
             return (
                 baseURL: remoteURL,

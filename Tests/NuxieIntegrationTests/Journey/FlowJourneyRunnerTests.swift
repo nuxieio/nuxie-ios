@@ -74,8 +74,12 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 ),
                 screens: resolvedScreens,
                 interactions: interactions,
-                viewModels: viewModels,
-                viewModelInstances: viewModelInstances
+                state: viewModels.isEmpty && viewModelInstances == nil
+                    ? nil
+                    : RemoteFlowState(
+                        viewModels: viewModels,
+                        viewModelInstances: viewModelInstances
+                    )
             )
         }
 

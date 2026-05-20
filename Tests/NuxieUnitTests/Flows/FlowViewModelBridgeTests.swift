@@ -616,8 +616,9 @@ final class FlowViewModelBridgeTests: XCTestCase {
                 ),
             ],
             interactions: [:],
-            viewModels: [viewModel, nestedViewModel] + extraViewModels,
-            viewModelInstances: nil
+            state: RemoteFlowState(
+                viewModels: [viewModel, nestedViewModel] + extraViewModels
+            )
         )
     }
 }

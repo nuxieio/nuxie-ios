@@ -1,4 +1,4 @@
-.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-flow-runtime-ui test-all build-macos clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-flow-runtime-ui test-all build-macos build-reference-app install-reference-app clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
@@ -8,6 +8,7 @@ SCHEME_MACOS_UNIT := NuxieSDKMacUnitTests
 SCHEME_INTEGRATION := NuxieSDKIntegrationTests
 SCHEME_FLOW_RUNTIME_UI := NuxieFlowRuntimeUITests
 SCHEME_MACOS := NuxieSDKMac
+SCHEME_REFERENCE_APP := NuxieFlowRuntimeReferenceApp
 SCHEME ?= $(SCHEME_UNIT)
 DERIVED_DATA := DerivedData
 DEFAULT_SIMULATOR_OS := $(shell xcrun simctl list devices available 2>/dev/null | sed -n 's/^-- iOS \(.*\) --/\1/p' | sort -V | tail -1)
@@ -42,6 +43,8 @@ help:
 	@echo "  test-flow-runtime-ui - Run native flow runtime UI screenshot tests"
 	@echo "  test-all         - Run unit + integration tests"
 	@echo "  build-macos      - Build macOS framework target"
+	@echo "  build-reference-app - Build the native flow runtime reference app"
+	@echo "  install-reference-app - Install the reference app on the selected simulator"
 	@echo "  coverage         - Run tests with code coverage (Swift Package Manager)"
 	@echo "  coverage-html    - Generate HTML coverage report"
 	@echo "  coverage-json    - Export coverage as JSON (Xcode)"
@@ -120,6 +123,32 @@ build-macos: generate
 		-derivedDataPath "$(DERIVED_DATA)" \
 		-destination 'generic/platform=macOS'
 
+build-reference-app: generate
+	@echo "Building flow runtime reference app..."
+	@xcodebuild build \
+		-project "$(XCODEPROJ)" \
+		-scheme "$(SCHEME_REFERENCE_APP)" \
+		-configuration Debug \
+		-derivedDataPath "$(DERIVED_DATA)" \
+		-destination '$(TEST_DESTINATION)'
+
+install-reference-app: build-reference-app
+	@APP_PATH="$$(find "$(DERIVED_DATA)/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name 'NuxieFlowRuntimeReference.app' -print -quit)"; \
+	if [ -z "$$APP_PATH" ]; then \
+		echo "Reference app bundle was not found."; \
+		exit 1; \
+	fi; \
+	UDID="$$(xcrun simctl list devices available 2>/dev/null | awk -v name="$(TEST_SIMULATOR_NAME)" -v os="$(TEST_SIMULATOR_OS)" '\
+		$$0 == "-- iOS " os " --" { in_os = 1; next } \
+		in_os && /^-- / { exit } \
+		in_os && index($$0, name " (") > 0 { print $$0; exit }' | sed -E 's/.*\(([0-9A-F-]+)\).*/\1/')"; \
+	if [ -z "$$UDID" ]; then \
+		echo "Could not resolve simulator for $(TEST_SIMULATOR_NAME) $(TEST_SIMULATOR_OS)."; \
+		exit 1; \
+	fi; \
+	xcrun simctl boot "$$UDID" >/dev/null 2>&1 || true; \
+	xcrun simctl install "$$UDID" "$$APP_PATH"; \
+	xcrun simctl launch "$$UDID" com.nuxie.sdk.flow-runtime-reference
 
 # Run tests with code coverage (Swift Package Manager)
 coverage:

@@ -183,10 +183,10 @@ actor FlowStore {
     
     private func extractProductIds(from remoteFlow: RemoteFlow) -> [String] {
         var ids = Set<String>()
-        let instances = remoteFlow.viewModelInstances ?? []
+        let instances = remoteFlow.state?.viewModelInstances ?? []
         let instancesByViewModelId = Dictionary(grouping: instances, by: { $0.viewModelId })
 
-        for viewModel in remoteFlow.viewModels {
+        for viewModel in remoteFlow.state?.viewModels ?? [] {
             let defaults = buildDefaultValues(schema: viewModel.properties)
             if let viewModelInstances = instancesByViewModelId[viewModel.id],
                !viewModelInstances.isEmpty {

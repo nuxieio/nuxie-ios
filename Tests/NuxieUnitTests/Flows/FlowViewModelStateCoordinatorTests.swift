@@ -57,8 +57,10 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
                     )
                 ],
                 interactions: [:],
-                viewModels: viewModels,
-                viewModelInstances: viewModelInstances
+                state: RemoteFlowState(
+                    viewModels: viewModels,
+                    viewModelInstances: viewModelInstances
+                )
             )
         }
 

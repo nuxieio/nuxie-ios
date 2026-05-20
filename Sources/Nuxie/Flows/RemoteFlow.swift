@@ -7,21 +7,31 @@ public struct RemoteFlow: Codable {
     public let flowArtifact: FlowArtifact
     public let screens: [RemoteFlowScreen]
     public let interactions: [String: [Interaction]]
-    public let viewModels: [ViewModel]
-    public let viewModelInstances: [ViewModelInstance]?
+    public let state: RemoteFlowState?
 
     public init(
         id: String,
         flowArtifact: FlowArtifact,
         screens: [RemoteFlowScreen],
         interactions: [String: [Interaction]],
-        viewModels: [ViewModel],
-        viewModelInstances: [ViewModelInstance]?
+        state: RemoteFlowState? = nil
     ) {
         self.id = id
         self.flowArtifact = flowArtifact
         self.screens = screens
         self.interactions = interactions
+        self.state = state
+    }
+}
+
+public struct RemoteFlowState: Codable {
+    public let viewModels: [ViewModel]
+    public let viewModelInstances: [ViewModelInstance]?
+
+    public init(
+        viewModels: [ViewModel],
+        viewModelInstances: [ViewModelInstance]? = nil
+    ) {
         self.viewModels = viewModels
         self.viewModelInstances = viewModelInstances
     }

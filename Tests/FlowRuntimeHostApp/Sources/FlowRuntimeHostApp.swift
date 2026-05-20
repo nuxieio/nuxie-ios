@@ -14,17 +14,127 @@ struct NuxieFlowRuntimeHostApp: App {
 
 private struct FlowRuntimeHostView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        do {
-            return try makeFlowViewController()
-        } catch {
-            return FlowRuntimeHostErrorViewController(error: error)
-        }
+        FlowRuntimeHostRootViewController()
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+}
 
-    private func makeFlowViewController() throws -> UIViewController {
-        let fixtureName = launchArgumentValue(named: "--nuxie-fixture") ?? "layout-paint"
+private final class FlowRuntimeHostRootViewController: UIViewController {
+    private var currentViewController: UIViewController?
+    private let fixtureNames: [String]
+    private let currentFixtureLabel = UILabel()
+    private let fixtureSelector = UIStackView()
+
+    init() {
+        let fixtureList = Self.launchArgumentValue(named: "--nuxie-fixtures")
+            .map { value in
+                value
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        let singleFixture = Self.launchArgumentValue(named: "--nuxie-fixture") ?? "layout-paint"
+        let fixtures = fixtureList?.isEmpty == false ? fixtureList! : [singleFixture]
+        self.fixtureNames = fixtures
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+
+        configureFixtureSelector()
+        loadFixture(named: fixtureNames.first ?? "layout-paint")
+    }
+
+    private func configureFixtureSelector() {
+        guard fixtureNames.count > 1 else { return }
+
+        fixtureSelector.translatesAutoresizingMaskIntoConstraints = false
+        fixtureSelector.axis = .horizontal
+        fixtureSelector.spacing = 8
+        fixtureSelector.distribution = .fillEqually
+        fixtureSelector.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.86)
+        fixtureSelector.layer.cornerRadius = 12
+        fixtureSelector.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        fixtureSelector.isLayoutMarginsRelativeArrangement = true
+        fixtureSelector.accessibilityIdentifier = "nuxie-fixture-selector"
+
+        for fixtureName in fixtureNames {
+            let button = UIButton(type: .system)
+            button.setTitle(fixtureName, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
+            button.accessibilityIdentifier = "nuxie-fixture-\(fixtureName)"
+            button.addAction(UIAction { [weak self] _ in
+                self?.loadFixture(named: fixtureName)
+            }, for: .touchUpInside)
+            fixtureSelector.addArrangedSubview(button)
+        }
+
+        currentFixtureLabel.translatesAutoresizingMaskIntoConstraints = false
+        currentFixtureLabel.accessibilityIdentifier = "nuxie-current-fixture"
+        currentFixtureLabel.isAccessibilityElement = true
+        currentFixtureLabel.textColor = .clear
+
+        view.addSubview(fixtureSelector)
+        view.addSubview(currentFixtureLabel)
+        NSLayoutConstraint.activate([
+            fixtureSelector.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            fixtureSelector.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            fixtureSelector.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            fixtureSelector.heightAnchor.constraint(equalToConstant: 44),
+
+            currentFixtureLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            currentFixtureLabel.topAnchor.constraint(equalTo: view.topAnchor),
+            currentFixtureLabel.widthAnchor.constraint(equalToConstant: 1),
+            currentFixtureLabel.heightAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    private func loadFixture(named fixtureName: String) {
+        do {
+            let viewController = try makeFlowViewController(fixtureName: fixtureName)
+            replaceCurrentViewController(with: viewController)
+            currentFixtureLabel.text = fixtureName
+            currentFixtureLabel.accessibilityLabel = fixtureName
+        } catch {
+            replaceCurrentViewController(with: FlowRuntimeHostErrorViewController(error: error))
+            currentFixtureLabel.text = "error:\(fixtureName)"
+            currentFixtureLabel.accessibilityLabel = "error:\(fixtureName)"
+        }
+    }
+
+    private func replaceCurrentViewController(with nextViewController: UIViewController) {
+        if let currentViewController {
+            currentViewController.willMove(toParent: nil)
+            currentViewController.view.removeFromSuperview()
+            currentViewController.removeFromParent()
+        }
+
+        addChild(nextViewController)
+        nextViewController.view.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(nextViewController.view, at: 0)
+        NSLayoutConstraint.activate([
+            nextViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            nextViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            nextViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            nextViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        nextViewController.didMove(toParent: self)
+        currentViewController = nextViewController
+
+        if fixtureSelector.superview != nil {
+            view.bringSubviewToFront(fixtureSelector)
+            view.bringSubviewToFront(currentFixtureLabel)
+        }
+    }
+
+    private func makeFlowViewController(fixtureName: String) throws -> UIViewController {
         guard let resourceURL = Bundle.main.resourceURL else {
             throw FlowRuntimeHostError.missingResourceRoot
         }
@@ -47,7 +157,7 @@ private struct FlowRuntimeHostView: UIViewControllerRepresentable {
         )
     }
 
-    private func launchArgumentValue(named name: String) -> String? {
+    private static func launchArgumentValue(named name: String) -> String? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: name),
               arguments.indices.contains(index + 1) else {

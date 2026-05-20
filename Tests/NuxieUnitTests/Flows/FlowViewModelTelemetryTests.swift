@@ -31,8 +31,7 @@ final class FlowViewModelTelemetryTests: AsyncSpec {
                     ),
                 ],
                 interactions: [:],
-                viewModels: [],
-                viewModelInstances: nil
+                state: nil
             )
             return Flow(remoteFlow: remoteFlow, products: [])
         }
