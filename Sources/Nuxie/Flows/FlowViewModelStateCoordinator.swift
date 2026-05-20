@@ -76,6 +76,7 @@ private struct FlowViewModelScreenDefaults {
 final class FlowViewModelStateCoordinator {
     private var values: [FlowViewModelValueKey: AnyCodable] = [:]
     private let screenDefaults: [String: FlowViewModelScreenDefaults]
+    private let triggerPaths: Set<String>
     private var instanceNames: [String: String] = [:]
     private var instanceViewModelNames: [String: String] = [:]
     private var defaultInstanceByViewModelName: [String: String] = [:]
@@ -93,6 +94,7 @@ final class FlowViewModelStateCoordinator {
                 )
             }
         )
+        self.triggerPaths = Self.collectTriggerPaths(from: remoteFlow)
         hydrate(FlowViewModelSnapshot(values: remoteFlow.viewModelValues ?? []))
     }
 
@@ -148,7 +150,7 @@ final class FlowViewModelStateCoordinator {
     }
 
     func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
-        false
+        triggerPaths.contains(path.normalizedPath)
     }
 
     func setValue(
@@ -268,6 +270,7 @@ final class FlowViewModelStateCoordinator {
         let viewModelName =
             path.viewModelName ??
             instanceId.flatMap { instanceViewModelNames[$0] } ??
+            defaults?.instanceId.flatMap { instanceViewModelNames[$0] } ??
             defaults?.viewModelName ??
             firstViewModelName
         guard let viewModelName, !path.path.isEmpty else { return nil }
@@ -316,5 +319,44 @@ final class FlowViewModelStateCoordinator {
             return anyCodable.value
         }
         return value
+    }
+
+    private static func collectTriggerPaths(from remoteFlow: RemoteFlow) -> Set<String> {
+        var paths = Set<String>()
+        for interactions in remoteFlow.interactions.values {
+            for interaction in interactions {
+                collectTriggerPaths(from: interaction.actions, into: &paths)
+            }
+        }
+        return paths
+    }
+
+    private static func collectTriggerPaths(
+        from actions: [InteractionAction],
+        into paths: inout Set<String>
+    ) {
+        for action in actions {
+            switch action {
+            case .fireTrigger(let action):
+                paths.insert(action.path.normalizedPath)
+            case .condition(let action):
+                for branch in action.branches {
+                    collectTriggerPaths(from: branch.actions, into: &paths)
+                }
+                if let defaultActions = action.defaultActions {
+                    collectTriggerPaths(from: defaultActions, into: &paths)
+                }
+            case .experiment(let action):
+                for variant in action.variants {
+                    collectTriggerPaths(from: variant.actions, into: &paths)
+                }
+            case .timeWindow(let action):
+                if let successActions = action.successActions {
+                    collectTriggerPaths(from: successActions, into: &paths)
+                }
+            default:
+                continue
+            }
+        }
     }
 }

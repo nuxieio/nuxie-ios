@@ -416,7 +416,8 @@ public actor JourneyService: JourneyServiceProtocol {
       value: change.value,
       source: change.source,
       screenId: change.screenId ?? journey.flowState.currentScreenId,
-      instanceId: change.instanceId
+      instanceId: change.instanceId,
+      isTrigger: change.isTrigger
     )
     handleOutcome(outcome, journey: journey)
     persistJourney(journey)

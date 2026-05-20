@@ -482,12 +482,15 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     value: true,
                     source: "rive",
                     screenId: "screen-1",
-                    instanceId: nil
+                    instanceId: nil,
+                    isTrigger: true
                 )
 
                 await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("rive_trigger_seen"))
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 expect(controller.viewModelTriggers).to(beEmpty())
+                let values = journey.flowState.viewModelSnapshot?.viewModelInstances.first?.values
+                expect(values?["pulse"]?.value as? Int).to(equal(0))
             }
 
             it("isolates debounced did_set dispatch per interaction across screen and global scopes") {
@@ -706,6 +709,10 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 let values = snapshot?.viewModelInstances.first?.values
                 let items = values?["items"]?.value as? [Any]
                 expect(items?.first as? String).to(equal("a"))
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                let resetValues = journey.flowState.viewModelSnapshot?.viewModelInstances.first?.values
+                let pulse = resetValues?["pulse"]?.value as? Int
+                expect(pulse).to(equal(0))
 
                 await expect(controller.viewModelListOperations.map(\.operation)).toEventually(contain(.insert))
                 await expect(controller.viewModelTriggers.map(\.path.normalizedPath)).toEventually(

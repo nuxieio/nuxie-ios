@@ -57,7 +57,8 @@ actor FlowJourneyRunnerRuntimeBridge {
             value: change.value,
             source: change.source,
             screenId: change.screenId ?? currentScreenId,
-            instanceId: change.instanceId
+            instanceId: change.instanceId,
+            isTrigger: change.isTrigger
         )
     }
 }
