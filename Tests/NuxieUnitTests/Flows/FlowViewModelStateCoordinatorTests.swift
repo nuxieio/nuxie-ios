@@ -166,6 +166,53 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
                     .to(equal("Nested title"))
             }
 
+            it("does not reuse the screen default instance for explicit refs to another view model") {
+                let coordinator = FlowViewModelStateCoordinator(remoteFlow: makeRemoteFlow(
+                    values: [
+                        value(
+                            viewModelName: "Runtime",
+                            instanceId: "runtime-instance",
+                            instanceName: "Runtime",
+                            path: "title",
+                            "Runtime title"
+                        ),
+                        value(
+                            viewModelName: "Other",
+                            instanceId: "other-instance",
+                            instanceName: "Other",
+                            path: "title",
+                            "Other title"
+                        ),
+                    ],
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "screen-1",
+                            defaultViewModelName: "Runtime",
+                            defaultInstanceId: "runtime-instance"
+                        ),
+                    ]
+                ))
+
+                expect(coordinator.setValue(
+                    path: path("title", viewModelName: "Other"),
+                    value: "Updated other",
+                    screenId: "screen-1"
+                ))
+                    .to(beTrue())
+                expect(coordinator.getValue(
+                    path: path("title", viewModelName: "Other"),
+                    screenId: "screen-1",
+                    instanceId: "other-instance"
+                ) as? String)
+                    .to(equal("Updated other"))
+                expect(coordinator.getValue(
+                    path: path("title", viewModelName: "Runtime"),
+                    screenId: "screen-1",
+                    instanceId: "runtime-instance"
+                ) as? String)
+                    .to(equal("Runtime title"))
+            }
+
             it("tracks fire-trigger action paths as trigger paths") {
                 let pulse = path("pulse")
                 let coordinator = FlowViewModelStateCoordinator(remoteFlow: makeRemoteFlow(

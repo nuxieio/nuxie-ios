@@ -274,9 +274,15 @@ final class FlowViewModelStateCoordinator {
             defaults?.viewModelName ??
             firstViewModelName
         guard let viewModelName, !path.path.isEmpty else { return nil }
+        let screenDefaultInstanceId = defaults?.instanceId
+        let screenDefaultViewModelName =
+            screenDefaultInstanceId.flatMap { instanceViewModelNames[$0] } ??
+            defaults?.viewModelName
+        let screenDefaultInstanceForResolvedViewModel =
+            screenDefaultViewModelName == viewModelName ? screenDefaultInstanceId : nil
         let resolvedInstanceId =
             instanceId ??
-            defaults?.instanceId ??
+            screenDefaultInstanceForResolvedViewModel ??
             defaultInstanceByViewModelName[viewModelName]
         return ResolvedFlowPath(
             viewModelName: viewModelName,
