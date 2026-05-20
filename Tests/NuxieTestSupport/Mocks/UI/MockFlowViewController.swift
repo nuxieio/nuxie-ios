@@ -24,12 +24,12 @@ class MockFlowViewController: FlowViewController {
             screens: [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    defaultViewModelId: nil,
+                    defaultViewModelName: nil,
                     defaultInstanceId: nil
                 )
             ],
             interactions: [:],
-            state: nil
+            viewModelValues: nil
         )
 
         let flow = Flow(remoteFlow: description, products: [])

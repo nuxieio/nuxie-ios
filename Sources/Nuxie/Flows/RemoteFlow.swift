@@ -7,33 +7,42 @@ public struct RemoteFlow: Codable {
     public let flowArtifact: FlowArtifact
     public let screens: [RemoteFlowScreen]
     public let interactions: [String: [Interaction]]
-    public let state: RemoteFlowState?
+    public let viewModelValues: [RemoteFlowViewModelValue]?
 
     public init(
         id: String,
         flowArtifact: FlowArtifact,
         screens: [RemoteFlowScreen],
         interactions: [String: [Interaction]],
-        state: RemoteFlowState? = nil
+        viewModelValues: [RemoteFlowViewModelValue]? = nil
     ) {
         self.id = id
         self.flowArtifact = flowArtifact
         self.screens = screens
         self.interactions = interactions
-        self.state = state
+        self.viewModelValues = viewModelValues
     }
 }
 
-public struct RemoteFlowState: Codable {
-    public let viewModels: [ViewModel]
-    public let viewModelInstances: [ViewModelInstance]?
+public struct RemoteFlowViewModelValue: Codable {
+    public let viewModelName: String
+    public let instanceId: String?
+    public let instanceName: String?
+    public let path: String
+    public let value: AnyCodable
 
     public init(
-        viewModels: [ViewModel],
-        viewModelInstances: [ViewModelInstance]? = nil
+        viewModelName: String,
+        instanceId: String? = nil,
+        instanceName: String? = nil,
+        path: String,
+        value: AnyCodable
     ) {
-        self.viewModels = viewModels
-        self.viewModelInstances = viewModelInstances
+        self.viewModelName = viewModelName
+        self.instanceId = instanceId
+        self.instanceName = instanceName
+        self.path = path
+        self.value = value
     }
 }
 
@@ -70,92 +79,71 @@ public struct FlowArtifact: Codable {
 
 public struct RemoteFlowScreen: Codable {
     public let id: String
-    public let defaultViewModelId: String?
+    public let defaultViewModelName: String?
     public let defaultInstanceId: String?
+
+    public init(
+        id: String,
+        defaultViewModelName: String? = nil,
+        defaultInstanceId: String? = nil
+    ) {
+        self.id = id
+        self.defaultViewModelName = defaultViewModelName
+        self.defaultInstanceId = defaultInstanceId
+    }
 }
 
 public typealias RemoteFlowInteractions = [String: [Interaction]]
 
 // MARK: - View Model Path References
 
-public struct VmPathIds: Codable, Equatable {
-    public let pathIds: [Int]
+public struct VmPathRef: Codable, Equatable {
+    public let viewModelName: String?
+    public let path: String
     public let isRelative: Bool?
-    public let nameBased: Bool?
 
-    public init(pathIds: [Int], isRelative: Bool? = nil, nameBased: Bool? = nil) {
-        self.pathIds = pathIds
+    public init(viewModelName: String? = nil, path: String, isRelative: Bool? = nil) {
+        self.viewModelName = viewModelName
+        self.path = path
         self.isRelative = isRelative
-        self.nameBased = nameBased
     }
-}
-
-public enum VmPathRef: Codable, Equatable {
-    case ids(VmPathIds)
 
     private enum CodingKeys: String, CodingKey {
         case kind
-        case pathIds
         case isRelative
-        case nameBased
+        case viewModelName
+        case path
     }
 
     private enum Kind: String, Codable {
-        case ids
+        case path
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if let kind = try? container.decode(Kind.self, forKey: .kind), kind == .ids {
-            let pathIds = try container.decode([Int].self, forKey: .pathIds)
-            let isRelative = try? container.decode(Bool.self, forKey: .isRelative)
-            let nameBased = try? container.decode(Bool.self, forKey: .nameBased)
-            self = .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
-            return
-        }
-
-        if let pathIds = try? container.decode([Int].self, forKey: .pathIds) {
-            let isRelative = try? container.decode(Bool.self, forKey: .isRelative)
-            let nameBased = try? container.decode(Bool.self, forKey: .nameBased)
-            self = .ids(VmPathIds(pathIds: pathIds, isRelative: isRelative, nameBased: nameBased))
-            return
-        }
-
-        throw DecodingError.dataCorruptedError(
-            forKey: .pathIds,
-            in: container,
-            debugDescription: "VmPathRef requires pathIds"
+        _ = try container.decode(Kind.self, forKey: .kind)
+        self.init(
+            viewModelName: try? container.decode(String.self, forKey: .viewModelName),
+            path: try container.decode(String.self, forKey: .path),
+            isRelative: try? container.decode(Bool.self, forKey: .isRelative)
         )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .ids(let ref):
-            try container.encode(Kind.ids, forKey: .kind)
-            try container.encode(ref.pathIds, forKey: .pathIds)
-            if ref.isRelative == true {
-                try container.encode(true, forKey: .isRelative)
-            }
-            if ref.nameBased == true {
-                try container.encode(true, forKey: .nameBased)
-            }
+        try container.encode(Kind.path, forKey: .kind)
+        try container.encode(path, forKey: .path)
+        if let viewModelName {
+            try container.encode(viewModelName, forKey: .viewModelName)
+        }
+        if isRelative == true {
+            try container.encode(true, forKey: .isRelative)
         }
     }
 
     public var normalizedPath: String {
-        switch self {
-        case .ids(let ref):
-            let prefix: String
-            if ref.isRelative == true {
-                prefix = "ids:rel"
-            } else if ref.nameBased == true {
-                prefix = "ids:name"
-            } else {
-                prefix = "ids"
-            }
-            return "\(prefix):\(ref.pathIds.map(String.init).joined(separator: "."))"
-        }
+        let prefix = isRelative == true ? "path:rel" : "path"
+        return "\(prefix):\(viewModelName ?? ""):\(path)"
     }
 }
 

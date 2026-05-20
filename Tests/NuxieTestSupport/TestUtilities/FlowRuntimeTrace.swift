@@ -58,16 +58,14 @@ final class FlowRuntimeTraceRecorder {
 
     func recordRendererBindingChange(
         screenId: String?,
-        pathIds: Any?,
+        path: String?,
         value: Any,
         source: String?,
         instanceId: String?
     ) {
-        let resolvedPathIds = Self.pathIds(from: pathIds)
-
         var bindingOutput: [String: Any] = ["value": value]
-        if let resolvedPathIds {
-            bindingOutput["path_ids"] = resolvedPathIds
+        if let path {
+            bindingOutput["path"] = path
         }
 
         var metadata: [String: String] = [:]
@@ -192,15 +190,5 @@ final class FlowRuntimeTraceRecorder {
         default:
             return String(describing: value)
         }
-    }
-
-    private static func pathIds(from value: Any?) -> [Int]? {
-        if let ints = value as? [Int] {
-            return ints
-        }
-        if let numbers = value as? [NSNumber] {
-            return numbers.map { $0.intValue }
-        }
-        return nil
     }
 }

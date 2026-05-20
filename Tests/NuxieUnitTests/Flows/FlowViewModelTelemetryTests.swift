@@ -26,12 +26,12 @@ final class FlowViewModelTelemetryTests: AsyncSpec {
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
-                        defaultViewModelId: nil,
+                        defaultViewModelName: nil,
                         defaultInstanceId: nil
                     ),
                 ],
                 interactions: [:],
-                state: nil
+                viewModelValues: nil
             )
             return Flow(remoteFlow: remoteFlow, products: [])
         }

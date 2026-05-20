@@ -1,143 +1,154 @@
 import Foundation
 
 public struct FlowViewModelSnapshot: Codable {
-    public let viewModelInstances: [ViewModelInstance]
-}
+    public let values: [RemoteFlowViewModelValue]
 
-private struct FlowViewModelInstanceState {
-    var viewModelId: String
-    var instanceId: String
-    var name: String?
-    var values: [String: AnyCodable]
-}
-
-private enum PathSegment {
-    case prop(String)
-    case index(String)
-}
-
-private let fnvOffsetBasis: UInt32 = 0x811c9dc5
-private let fnvPrime: UInt32 = 0x01000193
-
-private func hashNameId(_ value: String) -> Int {
-    if value.isEmpty { return Int(fnvOffsetBasis) }
-    var hash = fnvOffsetBasis
-    for byte in value.utf8 {
-        hash ^= UInt32(byte)
-        hash = hash &* fnvPrime
+    public init(values: [RemoteFlowViewModelValue]) {
+        self.values = values
     }
-    return Int(hash)
-}
 
-private func viewModelPathId(_ viewModel: ViewModel) -> Int {
-    if let pathId = viewModel.viewModelPathId { return pathId }
-    return hashNameId(viewModel.id)
-}
-
-private struct ResolvedPathInfo {
-    let instance: FlowViewModelInstanceState?
-    let segments: [PathSegment]
-    let rawPath: String
-    let viewModel: ViewModel?
-}
-
-/// Small SDK-owned state mirror used to evaluate flow-description values,
-/// dispatch did-set behavior, and persist snapshots between renderer updates.
-final class FlowViewModelStateCoordinator {
-    private let remoteFlow: RemoteFlow
-    private var viewModels: [String: ViewModel] = [:]
-    private var viewModelList: [ViewModel] = []
-    private var instances: [String: FlowViewModelInstanceState] = [:]
-    private var instancesByViewModel: [String: [String]] = [:]
-    private var screenDefaults: [String: (defaultViewModelId: String?, defaultInstanceId: String?)] = [:]
-
-    init(remoteFlow: RemoteFlow) {
-        self.remoteFlow = remoteFlow
-        self.viewModelList = remoteFlow.state?.viewModels ?? []
-
-        for model in remoteFlow.state?.viewModels ?? [] {
-            viewModels[model.id] = model
-        }
-
-        for screen in remoteFlow.screens {
-            screenDefaults[screen.id] = (screen.defaultViewModelId, screen.defaultInstanceId)
-        }
-
-        let instances = remoteFlow.state?.viewModelInstances ?? []
-        for instance in instances {
-            let state = FlowViewModelInstanceState(
-                viewModelId: instance.viewModelId,
-                instanceId: instance.instanceId,
-                name: instance.name,
-                values: instance.values
-            )
-            self.instances[state.instanceId] = state
-            var list = instancesByViewModel[state.viewModelId] ?? []
-            list.append(state.instanceId)
-            instancesByViewModel[state.viewModelId] = list
-            applyViewModelDefaults(instanceId: state.instanceId)
-        }
-
-        // Ensure each view model has at least one instance
-        for viewModel in remoteFlow.state?.viewModels ?? [] {
-            if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
-                let blank = createBlankInstance(for: viewModel.id)
-                self.instances[blank.instanceId] = blank
-                instancesByViewModel[viewModel.id] = [blank.instanceId]
+    public init(viewModelInstances: [ViewModelInstance]) {
+        self.values = viewModelInstances.flatMap { instance in
+            instance.values.map { path, value in
+                RemoteFlowViewModelValue(
+                    viewModelName: instance.viewModelId,
+                    instanceId: instance.instanceId,
+                    instanceName: instance.name,
+                    path: path,
+                    value: value
+                )
             }
         }
+    }
+
+    public var viewModelInstances: [ViewModelInstance] {
+        var grouped: [String: (viewModelName: String, instanceId: String, instanceName: String?, values: [String: AnyCodable])] = [:]
+        for value in values {
+            let instanceId = value.instanceId ?? "\(value.viewModelName):default"
+            let key = "\(value.viewModelName)\u{1f}\(instanceId)"
+            var entry = grouped[key] ?? (
+                viewModelName: value.viewModelName,
+                instanceId: instanceId,
+                instanceName: value.instanceName,
+                values: [:]
+            )
+            entry.values[value.path] = value.value
+            grouped[key] = entry
+        }
+        return grouped.values
+            .sorted {
+                $0.viewModelName == $1.viewModelName
+                    ? $0.instanceId < $1.instanceId
+                    : $0.viewModelName < $1.viewModelName
+            }
+            .map {
+                ViewModelInstance(
+                    viewModelId: $0.viewModelName,
+                    instanceId: $0.instanceId,
+                    name: $0.instanceName,
+                    values: $0.values
+                )
+            }
+    }
+}
+
+private struct FlowViewModelValueKey: Hashable {
+    let viewModelName: String
+    let instanceId: String?
+    let path: String
+}
+
+private struct ResolvedFlowPath {
+    let viewModelName: String
+    let instanceId: String?
+    let instanceName: String?
+    let path: String
+    let key: FlowViewModelValueKey
+}
+
+private struct FlowViewModelScreenDefaults {
+    let viewModelName: String?
+    let instanceId: String?
+}
+
+/// Small SDK-owned path/value store used to evaluate flow-description values,
+/// dispatch did-set behavior, and persist snapshots between renderer updates.
+final class FlowViewModelStateCoordinator {
+    private var values: [FlowViewModelValueKey: AnyCodable] = [:]
+    private let screenDefaults: [String: FlowViewModelScreenDefaults]
+    private var instanceNames: [String: String] = [:]
+    private var instanceViewModelNames: [String: String] = [:]
+    private var defaultInstanceByViewModelName: [String: String] = [:]
+    private var firstViewModelName: String?
+
+    init(remoteFlow: RemoteFlow) {
+        self.screenDefaults = Dictionary(
+            uniqueKeysWithValues: remoteFlow.screens.map {
+                (
+                    $0.id,
+                    FlowViewModelScreenDefaults(
+                        viewModelName: $0.defaultViewModelName,
+                        instanceId: $0.defaultInstanceId
+                    )
+                )
+            }
+        )
+        hydrate(FlowViewModelSnapshot(values: remoteFlow.viewModelValues ?? []))
     }
 
     func getSnapshot() -> FlowViewModelSnapshot {
-        let values = instances.values.map { state -> ViewModelInstance in
-            ViewModelInstance(
-                viewModelId: state.viewModelId,
-                instanceId: state.instanceId,
-                name: state.name,
-                values: state.values
+        let entries = values.map { key, value in
+            RemoteFlowViewModelValue(
+                viewModelName: key.viewModelName,
+                instanceId: key.instanceId,
+                instanceName: key.instanceId.flatMap { instanceNames[$0] },
+                path: key.path,
+                value: value
             )
         }
-        return FlowViewModelSnapshot(viewModelInstances: values)
-    }
-
-    func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
-        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: nil)
-        guard let instance = resolved.instance else { return false }
-        if resolved.segments.isEmpty { return false }
-
-        let viewModel = resolved.viewModel ?? viewModels[instance.viewModelId]
-        guard let viewModel else { return false }
-        guard let property = resolveProperty(in: viewModel.properties, segments: resolved.segments) else {
-            return false
-        }
-        return property.type == .trigger
+        return FlowViewModelSnapshot(
+            values: entries.sorted {
+                if $0.viewModelName != $1.viewModelName {
+                    return $0.viewModelName < $1.viewModelName
+                }
+                if ($0.instanceId ?? "") != ($1.instanceId ?? "") {
+                    return ($0.instanceId ?? "") < ($1.instanceId ?? "")
+                }
+                return $0.path < $1.path
+            }
+        )
     }
 
     func hydrate(_ snapshot: FlowViewModelSnapshot) {
-        instances.removeAll()
-        instancesByViewModel.removeAll()
+        values.removeAll()
+        instanceNames.removeAll()
+        instanceViewModelNames.removeAll()
+        defaultInstanceByViewModelName.removeAll()
+        firstViewModelName = nil
 
-        for instance in snapshot.viewModelInstances {
-            let state = FlowViewModelInstanceState(
-                viewModelId: instance.viewModelId,
-                instanceId: instance.instanceId,
-                name: instance.name,
-                values: instance.values
-            )
-            instances[state.instanceId] = state
-            var list = instancesByViewModel[state.viewModelId] ?? []
-            list.append(state.instanceId)
-            instancesByViewModel[state.viewModelId] = list
-            applyViewModelDefaults(instanceId: state.instanceId)
-        }
-
-        for viewModel in remoteFlow.state?.viewModels ?? [] {
-            if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
-                let blank = createBlankInstance(for: viewModel.id)
-                instances[blank.instanceId] = blank
-                instancesByViewModel[viewModel.id] = [blank.instanceId]
+        for defaults in screenDefaults.values {
+            if firstViewModelName == nil, let viewModelName = defaults.viewModelName {
+                firstViewModelName = viewModelName
+            }
+            if let viewModelName = defaults.viewModelName, let instanceId = defaults.instanceId {
+                instanceViewModelNames[instanceId] = viewModelName
+                defaultInstanceByViewModelName[viewModelName] = defaultInstanceByViewModelName[viewModelName] ?? instanceId
             }
         }
+
+        for value in snapshot.values {
+            recordMetadata(value)
+            let key = FlowViewModelValueKey(
+                viewModelName: value.viewModelName,
+                instanceId: value.instanceId,
+                path: value.path
+            )
+            values[key] = value.value
+        }
+    }
+
+    func isTriggerPath(path: VmPathRef, screenId: String?) -> Bool {
+        false
     }
 
     func setValue(
@@ -146,66 +157,39 @@ final class FlowViewModelStateCoordinator {
         screenId: String?,
         instanceId: String? = nil
     ) -> Bool {
-        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
-        guard var instance = resolved.instance else { return false }
-
-        let segments = resolved.segments
-        let resolvedValue = resolveLiteralValue(value)
-
-        if segments.isEmpty {
-            instance.values[resolved.rawPath] = AnyCodable(resolvedValue)
-            instances[instance.instanceId] = instance
-            return true
+        guard let resolved = resolve(path, screenId: screenId, instanceId: instanceId) else { return false }
+        values[resolved.key] = AnyCodable(resolveLiteralValue(value))
+        if let instanceId = resolved.instanceId {
+            instanceViewModelNames[instanceId] = resolved.viewModelName
         }
-
-        let base = instance.values.mapValues { $0.value }
-        let updated = setNestedValue(current: base, segments: segments, value: resolvedValue, screenId: screenId)
-        if let dict = updated as? [String: Any] {
-            instance.values = dict.mapValues { AnyCodable($0) }
-        } else if let dict = updated as? [String: AnyCodable] {
-            instance.values = dict
+        if firstViewModelName == nil {
+            firstViewModelName = resolved.viewModelName
         }
-        instances[instance.instanceId] = instance
-        syncListIndexValues(viewModel: resolved.viewModel, segments: segments, listValue: resolvedValue)
         return true
     }
 
     func getValue(path: VmPathRef, screenId: String?, instanceId: String? = nil) -> Any? {
-        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
-        guard let instance = resolved.instance else { return nil }
-
-        let segments = resolved.segments
-
-        if segments.isEmpty {
-            return instance.values[resolved.rawPath]?.value
+        guard let resolved = resolve(path, screenId: screenId, instanceId: instanceId) else { return nil }
+        if let exact = values[resolved.key] {
+            return exact.value
         }
-
-        var current: Any = instance.values
-        for segment in segments {
-            switch segment {
-            case .prop(let name):
-                if let dict = current as? [String: AnyCodable] {
-                    current = dict[name]?.value as Any
-                } else if let dict = current as? [String: Any] {
-                    current = dict[name] as Any
-                } else {
-                    return nil
-                }
-            case .index(let expr):
-                guard let index = resolveIndex(expr: expr) else {
-                    return nil
-                }
-                if let list = current as? [AnyCodable], index < list.count {
-                    current = list[index].value
-                } else if let list = current as? [Any], index < list.count {
-                    current = list[index]
-                } else {
-                    return nil
-                }
-            }
+        if resolved.instanceId != nil {
+            let defaultKey = FlowViewModelValueKey(
+                viewModelName: resolved.viewModelName,
+                instanceId: nil,
+                path: resolved.path
+            )
+            return values[defaultKey]?.value
         }
-
-        return current
+        if let defaultInstanceId = defaultInstanceByViewModelName[resolved.viewModelName] {
+            let defaultKey = FlowViewModelValueKey(
+                viewModelName: resolved.viewModelName,
+                instanceId: defaultInstanceId,
+                path: resolved.path
+            )
+            return values[defaultKey]?.value
+        }
+        return nil
     }
 
     func setListValue(
@@ -215,553 +199,122 @@ final class FlowViewModelStateCoordinator {
         screenId: String?,
         instanceId: String? = nil
     ) -> Bool {
-        let resolved = resolvePathInfo(path, screenId: screenId, instanceId: instanceId)
-        guard var instance = resolved.instance else { return false }
+        guard let resolved = resolve(path, screenId: screenId, instanceId: instanceId) else { return false }
+        let current = values[resolved.key]?.value
+        var array = arrayValue(current)
 
-        let segments = resolved.segments
-        guard !segments.isEmpty else { return false }
-
-        var current: Any = instance.values
-        for segment in segments.dropLast() {
-            switch segment {
-            case .prop(let name):
-                if let dict = current as? [String: AnyCodable] {
-                    current = dict[name]?.value as Any
-                } else if let dict = current as? [String: Any] {
-                    current = dict[name] as Any
-                } else {
-                    return false
-                }
-            case .index(let expr):
-                guard let index = resolveIndex(expr: expr) else { return false }
-                if let list = current as? [AnyCodable], index < list.count {
-                    current = list[index].value
-                } else if let list = current as? [Any], index < list.count {
-                    current = list[index]
-                } else {
-                    return false
-                }
+        switch operation {
+        case "insert":
+            let value = payload["value"] ?? NSNull()
+            if let index = payload["index"] as? Int {
+                array.insert(value, at: max(0, min(index, array.count)))
+            } else {
+                array.append(value)
             }
-        }
-
-        guard let lastSegment = segments.last else { return false }
-        if case .prop(let name) = lastSegment {
-            let list = (current as? [String: AnyCodable])?[name]?.value ?? (current as? [String: Any])?[name]
-            var array = (list as? [Any]) ?? []
-
-            switch operation {
-            case "insert":
-                if let index = payload["index"] as? Int {
-                    let value = payload["value"] ?? NSNull()
-                    let idx = max(0, min(index, array.count))
-                    array.insert(value, at: idx)
-                } else if let value = payload["value"] {
-                    array.append(value)
-                }
-            case "remove":
-                if let index = payload["index"] as? Int, index >= 0, index < array.count {
-                    array.remove(at: index)
-                }
-            case "swap":
-                if let from = payload["from"] as? Int, let to = payload["to"] as? Int,
-                   from >= 0, to >= 0, from < array.count, to < array.count {
-                    array.swapAt(from, to)
-                }
-            case "move":
-                if let from = payload["from"] as? Int, let to = payload["to"] as? Int,
-                   from >= 0, to >= 0, from < array.count, to <= array.count {
-                    let item = array.remove(at: from)
-                    let target = min(max(to, 0), array.count)
-                    array.insert(item, at: target)
-                }
-            case "set":
-                if let index = payload["index"] as? Int, index >= 0, index < array.count {
-                    array[index] = payload["value"] ?? NSNull()
-                }
-            case "clear":
-                array.removeAll()
-            default:
+        case "remove":
+            guard let index = payload["index"] as? Int, index >= 0, index < array.count else { return false }
+            array.remove(at: index)
+        case "swap":
+            guard let from = payload["from"] as? Int,
+                  let to = payload["to"] as? Int,
+                  from >= 0,
+                  to >= 0,
+                  from < array.count,
+                  to < array.count
+            else {
                 return false
             }
-
-            instance.values[name] = AnyCodable(array)
-            instances[instance.instanceId] = instance
-            syncListIndexValues(viewModel: resolved.viewModel, segments: segments, listValue: array)
-            return true
-        }
-
-        return false
-    }
-
-    private func resolveInstance(
-        screenId: String?,
-        viewModelId: String?,
-        instanceId: String?
-    ) -> FlowViewModelInstanceState? {
-        if let instanceId, let instance = instances[instanceId] {
-            return instance
-        }
-
-        if let screenId, let defaults = screenDefaults[screenId] {
-            if let instanceId = defaults.defaultInstanceId,
-               let instance = instances[instanceId],
-               viewModelId == nil || instance.viewModelId == viewModelId {
-                return instance
+            array.swapAt(from, to)
+        case "move":
+            guard let from = payload["from"] as? Int,
+                  let to = payload["to"] as? Int,
+                  from >= 0,
+                  from < array.count,
+                  to >= 0,
+                  to <= array.count
+            else {
+                return false
             }
-            if let defaultViewModelId = defaults.defaultViewModelId,
-               viewModelId == nil || defaultViewModelId == viewModelId,
-               let instanceId = instancesByViewModel[defaultViewModelId]?.first,
-               let instance = instances[instanceId] {
-                return instance
-            }
-        }
-
-        if let viewModelId,
-           let defaultInstanceId = instancesByViewModel[viewModelId]?.first,
-           let defaultInstance = instances[defaultInstanceId] {
-            return defaultInstance
-        }
-
-        if let first = instances.values.first {
-            return first
-        }
-
-        return nil
-    }
-
-    private func resolvePathInfo(
-        _ path: VmPathRef,
-        screenId: String?,
-        instanceId: String?
-    ) -> ResolvedPathInfo {
-        switch path {
-        case .ids(let ref):
-            let resolved: (viewModelId: String, segments: [PathSegment])?
-            if ref.isRelative == true || ref.nameBased == true {
-                resolved = resolveNamePathIds(ref, screenId: screenId, instanceId: instanceId)
-            } else {
-                resolved = resolvePathIds(ref.pathIds, screenId: screenId, instanceId: instanceId)
-            }
-            if let resolved {
-                let resolvedInstanceId = ref.isRelative == true ? instanceId : nil
-                let instance = resolveInstance(
-                    screenId: screenId,
-                    viewModelId: resolved.viewModelId,
-                    instanceId: resolvedInstanceId
-                )
-                return ResolvedPathInfo(
-                    instance: instance,
-                    segments: resolved.segments,
-                    rawPath: path.normalizedPath,
-                    viewModel: viewModels[resolved.viewModelId]
-                )
-            }
-            return ResolvedPathInfo(
-                instance: nil,
-                segments: [],
-                rawPath: path.normalizedPath,
-                viewModel: nil
-            )
-        }
-    }
-
-    private func resolvePathIds(
-        _ pathIds: [Int],
-        screenId: String?,
-        instanceId: String?
-    ) -> (viewModelId: String, segments: [PathSegment])? {
-        guard let rootPathId = pathIds.first else { return nil }
-        let matches = viewModelList.filter { viewModelPathId($0) == rootPathId }
-        let viewModel: ViewModel?
-        if matches.count <= 1 {
-            viewModel = matches.first
-        } else {
-            let byInstance = instanceId
-                .flatMap { instances[$0] }
-                .flatMap { instance in matches.first { $0.id == instance.viewModelId } }
-            let byScreenDefaultViewModel = screenId
-                .flatMap { screenDefaults[$0]?.defaultViewModelId }
-                .flatMap { defaultViewModelId in matches.first { $0.id == defaultViewModelId } }
-            let byScreenDefaultInstance = screenId
-                .flatMap { screenDefaults[$0]?.defaultInstanceId }
-                .flatMap { instances[$0] }
-                .flatMap { instance in matches.first { $0.id == instance.viewModelId } }
-            viewModel = byInstance ?? byScreenDefaultViewModel ?? byScreenDefaultInstance ?? matches.first
-        }
-        guard let viewModel else {
-            return nil
-        }
-        let propertyIds = Array(pathIds.dropFirst())
-        guard !propertyIds.isEmpty else { return nil }
-
-        var schema = viewModel.properties
-        var segments: [PathSegment] = []
-
-        for (idx, propertyId) in propertyIds.enumerated() {
-            guard let found = findPropertyById(in: schema, propertyId: propertyId) else {
-                return nil
-            }
-            segments.append(.prop(found.name))
-
-            if idx == propertyIds.count - 1 { continue }
-            switch found.property.type {
-            case .object:
-                guard let nested = found.property.schema else { return nil }
-                schema = nested
-            case .viewModel:
-                guard let nestedId = found.property.viewModelId,
-                      let nested = viewModels[nestedId] else { return nil }
-                schema = nested.properties
-            case .list:
-                return nil
-            default:
-                return nil
-            }
-        }
-
-        return (viewModel.id, segments)
-    }
-
-    private func resolveListItemInstanceId(_ value: Any) -> String? {
-        if let dict = value as? [String: Any] {
-            if let id = dict["vmInstanceId"] as? String { return id }
-            if let id = dict["instanceId"] as? String { return id }
-        }
-        if let dict = value as? [String: AnyCodable] {
-            if let id = dict["vmInstanceId"]?.value as? String { return id }
-            if let id = dict["instanceId"]?.value as? String { return id }
-        }
-        return nil
-    }
-
-    private func syncListIndexValues(
-        viewModel: ViewModel?,
-        segments: [PathSegment],
-        listValue: Any
-    ) {
-        guard let viewModel else { return }
-        let list: [Any]
-        if let array = listValue as? [Any] {
-            list = array
-        } else if let array = listValue as? [AnyCodable] {
-            list = array.map { $0.value }
-        } else {
-            return
-        }
-
-        guard let property = resolveProperty(in: viewModel.properties, segments: segments),
-              property.type == .list,
-              let itemType = property.itemType,
-              itemType.type == .viewModel,
-              let itemViewModelId = itemType.viewModelId,
-              let itemViewModel = viewModels[itemViewModelId] else {
-            return
-        }
-
-        let indexKeys = itemViewModel.properties.compactMap { key, property in
-            property.type == .list_index ? key : nil
-        }
-        guard !indexKeys.isEmpty else { return }
-
-        for (index, entry) in list.enumerated() {
-            guard let instanceId = resolveListItemInstanceId(entry),
-                  var instance = instances[instanceId] else {
-                continue
-            }
-            var didChange = false
-            for key in indexKeys {
-                let current = instance.values[key]?.value as? Int
-                if current != index {
-                    instance.values[key] = AnyCodable(index)
-                    didChange = true
-                }
-            }
-            if didChange {
-                instances[instanceId] = instance
-            }
-        }
-    }
-
-    private func resolveNamePathIds(
-        _ ref: VmPathIds,
-        screenId: String?,
-        instanceId: String?
-    ) -> (viewModelId: String, segments: [PathSegment])? {
-        let pathIds = ref.pathIds
-        guard !pathIds.isEmpty else { return nil }
-
-        let viewModel: ViewModel?
-        let propertyIds: [Int]
-
-        if ref.isRelative == true {
-            guard let instance = resolveInstance(screenId: screenId, viewModelId: nil, instanceId: instanceId) else {
-                return nil
-            }
-            viewModel = viewModels[instance.viewModelId]
-            propertyIds = pathIds
-        } else {
-            let viewModelNameId = pathIds[0]
-            viewModel = viewModelList.first { hashNameId($0.name) == viewModelNameId }
-            propertyIds = Array(pathIds.dropFirst())
-        }
-
-        guard let viewModel, !propertyIds.isEmpty else { return nil }
-
-        var schema = viewModel.properties
-        var segments: [PathSegment] = []
-
-        for (idx, nameId) in propertyIds.enumerated() {
-            guard let found = findPropertyByNameId(in: schema, nameId: nameId) else {
-                return nil
-            }
-            segments.append(.prop(found.name))
-
-            if idx == propertyIds.count - 1 { continue }
-            switch found.property.type {
-            case .object:
-                guard let nested = found.property.schema else { return nil }
-                schema = nested
-            case .viewModel:
-                guard let nestedId = found.property.viewModelId,
-                      let nested = viewModels[nestedId] else { return nil }
-                schema = nested.properties
-            case .list:
-                return nil
-            default:
-                return nil
-            }
-        }
-
-        return (viewModel.id, segments)
-    }
-
-    private func findPropertyById(
-        in schema: [String: ViewModelProperty],
-        propertyId: Int
-    ) -> (name: String, property: ViewModelProperty)? {
-        for (name, property) in schema {
-            if property.propertyId == propertyId {
-                return (name, property)
-            }
-        }
-        return nil
-    }
-
-    private func findPropertyByNameId(
-        in schema: [String: ViewModelProperty],
-        nameId: Int
-    ) -> (name: String, property: ViewModelProperty)? {
-        for (name, property) in schema {
-            if hashNameId(name) == nameId {
-                return (name, property)
-            }
-        }
-        return nil
-    }
-
-    private func resolveProperty(
-        in schema: [String: ViewModelProperty],
-        segments: [PathSegment]
-    ) -> ViewModelProperty? {
-        guard let first = segments.first else { return nil }
-        guard case .prop(let name) = first else { return nil }
-        guard let property = schema[name] else { return nil }
-        let remaining = Array(segments.dropFirst())
-        return resolveProperty(property: property, remaining: remaining)
-    }
-
-    private func resolveProperty(
-        property: ViewModelProperty,
-        remaining: [PathSegment]
-    ) -> ViewModelProperty? {
-        if remaining.isEmpty { return property }
-
-        switch property.type {
-        case .object:
-            guard let schema = property.schema else { return nil }
-            return resolveProperty(in: schema, segments: remaining)
-        case .viewModel:
-            guard let viewModelId = property.viewModelId,
-                  let viewModel = viewModels[viewModelId] else { return nil }
-            return resolveProperty(in: viewModel.properties, segments: remaining)
-        case .list:
-            guard let next = remaining.first, case .index = next else { return nil }
-            guard let itemType = property.itemType else { return nil }
-            return resolveProperty(property: itemType, remaining: Array(remaining.dropFirst()))
+            let item = array.remove(at: from)
+            array.insert(item, at: min(max(to, 0), array.count))
+        case "set":
+            guard let index = payload["index"] as? Int, index >= 0, index < array.count else { return false }
+            array[index] = payload["value"] ?? NSNull()
+        case "clear":
+            array.removeAll()
         default:
-            return nil
+            return false
         }
+
+        values[resolved.key] = AnyCodable(array)
+        return true
+    }
+
+    private func recordMetadata(_ value: RemoteFlowViewModelValue) {
+        if firstViewModelName == nil {
+            firstViewModelName = value.viewModelName
+        }
+        if let instanceId = value.instanceId {
+            instanceViewModelNames[instanceId] = value.viewModelName
+            defaultInstanceByViewModelName[value.viewModelName] = defaultInstanceByViewModelName[value.viewModelName] ?? instanceId
+            if let instanceName = value.instanceName {
+                instanceNames[instanceId] = instanceName
+            }
+        }
+    }
+
+    private func resolve(_ path: VmPathRef, screenId: String?, instanceId: String?) -> ResolvedFlowPath? {
+        let defaults = screenId.flatMap { screenDefaults[$0] }
+        let viewModelName =
+            path.viewModelName ??
+            instanceId.flatMap { instanceViewModelNames[$0] } ??
+            defaults?.viewModelName ??
+            firstViewModelName
+        guard let viewModelName, !path.path.isEmpty else { return nil }
+        let resolvedInstanceId =
+            instanceId ??
+            defaults?.instanceId ??
+            defaultInstanceByViewModelName[viewModelName]
+        return ResolvedFlowPath(
+            viewModelName: viewModelName,
+            instanceId: resolvedInstanceId,
+            instanceName: resolvedInstanceId.flatMap { instanceNames[$0] },
+            path: path.path,
+            key: FlowViewModelValueKey(
+                viewModelName: viewModelName,
+                instanceId: resolvedInstanceId,
+                path: path.path
+            )
+        )
     }
 
     private func resolveLiteralValue(_ value: Any) -> Any {
-        if let dict = value as? [String: Any],
-           let literal = dict["literal"] {
+        if let anyCodable = value as? AnyCodable {
+            return resolveLiteralValue(anyCodable.value)
+        }
+        if let dict = value as? [String: Any], dict.count == 1, let literal = dict["literal"] {
             return literal
         }
-        if let dict = value as? [String: AnyCodable],
-           let literal = dict["literal"]?.value {
+        if let dict = value as? [String: AnyCodable], dict.count == 1, let literal = dict["literal"]?.value {
             return literal
         }
         return value
     }
 
-    private func resolveIndex(expr: String) -> Int? {
-        if let value = Int(expr.trimmingCharacters(in: .whitespaces)) {
-            return value
+    private func arrayValue(_ value: Any?) -> [Any] {
+        if let array = value as? [Any] {
+            return array.map { unwrap($0) }
         }
-        return nil
+        if let array = value as? [AnyCodable] {
+            return array.map { unwrap($0.value) }
+        }
+        return []
     }
 
-    private func setNestedValue(
-        current: Any,
-        segments: [PathSegment],
-        value: Any,
-        screenId: String?
-    ) -> Any {
-        guard let segment = segments.first else { return value }
-
-        switch segment {
-        case .prop(let name):
-            var base: [String: Any] = [:]
-            if let dict = current as? [String: Any] {
-                base = dict
-            } else if let dict = current as? [String: AnyCodable] {
-                base = dict.mapValues { $0.value }
-            }
-            let existing = base[name] ?? NSNull()
-            base[name] = setNestedValue(
-                current: existing,
-                segments: Array(segments.dropFirst()),
-                value: value,
-                screenId: screenId
-            )
-            return base
-        case .index(let expr):
-            guard let index = resolveIndex(expr: expr) else { return current }
-            var list: [Any] = []
-            if let array = current as? [Any] {
-                list = array
-            } else if let array = current as? [AnyCodable] {
-                list = array.map { $0.value }
-            }
-            if index < list.count {
-                list[index] = setNestedValue(
-                    current: list[index],
-                    segments: Array(segments.dropFirst()),
-                    value: value,
-                    screenId: screenId
-                )
-            } else {
-                while list.count < index { list.append(NSNull()) }
-                list.append(
-                    setNestedValue(
-                        current: NSNull(),
-                        segments: Array(segments.dropFirst()),
-                        value: value,
-                        screenId: screenId
-                    )
-                )
-            }
-            return list
+    private func unwrap(_ value: Any) -> Any {
+        if let anyCodable = value as? AnyCodable {
+            return anyCodable.value
         }
-    }
-
-    private func applyViewModelDefaults(instanceId: String) {
-        guard var instance = instances[instanceId] else { return }
-        guard let viewModel = viewModels[instance.viewModelId] else { return }
-
-        var values = instance.values
-        applyDefaults(schema: viewModel.properties, target: &values)
-        instance.values = values
-        instances[instanceId] = instance
-    }
-
-    private func applyDefaults(
-        schema: [String: ViewModelProperty],
-        target: inout [String: AnyCodable]
-    ) {
-        for (key, property) in schema {
-            if let defaultValue = property.defaultValue {
-                if target[key] == nil {
-                    target[key] = defaultValue
-                }
-                continue
-            }
-
-            if property.allowUnset == true {
-                if property.type == .object, let schema = property.schema {
-                    let existingAny = target[key]?.value as? [String: Any]
-                    let existingCodable = target[key]?.value as? [String: AnyCodable]
-                    if existingAny != nil || existingCodable != nil {
-                        var nested: [String: AnyCodable] = existingCodable ?? [:]
-                        if let existingAny {
-                            for (nestedKey, nestedValue) in existingAny {
-                                nested[nestedKey] = AnyCodable(nestedValue)
-                            }
-                        }
-                        applyDefaults(schema: schema, target: &nested)
-                        target[key] = AnyCodable(nested.mapValues { $0.value })
-                    }
-                }
-                continue
-            }
-
-            if property.type == .object, let schema = property.schema {
-                let existingAny = target[key]?.value as? [String: Any]
-                let existingCodable = target[key]?.value as? [String: AnyCodable]
-                var nested: [String: AnyCodable] = existingCodable ?? [:]
-                if let existingAny {
-                    for (nestedKey, nestedValue) in existingAny {
-                        nested[nestedKey] = AnyCodable(nestedValue)
-                    }
-                }
-                applyDefaults(schema: schema, target: &nested)
-                target[key] = AnyCodable(nested.mapValues { $0.value })
-                continue
-            }
-
-            if target[key] == nil, let fallback = defaultValue(for: property) {
-                target[key] = fallback
-            }
-        }
-    }
-
-    private func defaultValue(for property: ViewModelProperty) -> AnyCodable? {
-        if let defaultValue = property.defaultValue {
-            return defaultValue
-        }
-        switch property.type {
-        case .list:
-            return AnyCodable([Any]())
-        case .object:
-            return AnyCodable([String: Any]())
-        case .viewModel:
-            return AnyCodable([String: Any]())
-        case .enum:
-            return AnyCodable(property.enumValues?.first ?? "")
-        case .string, .color, .image:
-            return AnyCodable("")
-        case .number:
-            return AnyCodable(0)
-        case .list_index, .trigger:
-            return AnyCodable(0)
-        case .boolean:
-            return AnyCodable(false)
-        }
-    }
-
-    private func createBlankInstance(for viewModelId: String) -> FlowViewModelInstanceState {
-        let instanceId = "\(viewModelId)_default"
-        var values: [String: AnyCodable] = [:]
-        if let viewModel = viewModels[viewModelId] {
-            applyDefaults(schema: viewModel.properties, target: &values)
-        }
-        let state = FlowViewModelInstanceState(
-            viewModelId: viewModelId,
-            instanceId: instanceId,
-            name: "default",
-            values: values
-        )
-        return state
+        return value
     }
 }

@@ -145,7 +145,7 @@ final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
     ) {
         traceRecorder?.recordRendererBindingChange(
             screenId: change.screenId,
-            pathIds: tracePathIds(from: change.path),
+            path: change.path.normalizedPath,
             value: change.value,
             source: change.source,
             instanceId: change.instanceId
@@ -168,10 +168,4 @@ final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
         // Not used in these E2E tests.
     }
 
-    private func tracePathIds(from path: VmPathRef) -> [Int]? {
-        switch path {
-        case .ids(let ref):
-            return ref.pathIds
-        }
-    }
 }

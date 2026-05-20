@@ -193,12 +193,12 @@ final class FlowArtifactStoreTests: AsyncSpec {
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
-                        defaultViewModelId: nil,
+                        defaultViewModelName: nil,
                         defaultInstanceId: nil
                     ),
                 ],
                 interactions: [:],
-                state: nil
+                viewModelValues: nil
             )
             return (
                 baseURL: remoteURL,

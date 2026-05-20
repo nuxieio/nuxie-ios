@@ -44,7 +44,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
         let handled = bridge.applySnapshot(
             makeSnapshot([
                 makeInstance(
-                    viewModelId: "vm-test",
+                    viewModelId: "Test",
                     instanceId: "instance-test",
                     name: "Default",
                     values: [
@@ -67,33 +67,33 @@ final class FlowViewModelBridgeTests: XCTestCase {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow())
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
-        XCTAssertTrue(bridge.applyValue(path: path([100, 1]), value: "patched", screenId: "screen-1", instanceId: nil))
-        XCTAssertTrue(bridge.applyValue(path: path([100, 2]), value: 12, screenId: "screen-1", instanceId: nil))
-        XCTAssertTrue(bridge.applyValue(path: path([100, 3]), value: true, screenId: "screen-1", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("String"), value: "patched", screenId: "screen-1", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("Number"), value: 12, screenId: "screen-1", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("Boolean"), value: true, screenId: "screen-1", instanceId: nil))
 
         XCTAssertEqual(try bridge.stringValue(path: "String"), "patched")
         XCTAssertEqual(try bridge.numberValue(path: "Number"), 12)
         XCTAssertEqual(try bridge.booleanValue(path: "Boolean"), true)
-        XCTAssertTrue(bridge.fireTrigger(path: path([100, 4]), screenId: "screen-1", instanceId: nil))
+        XCTAssertTrue(bridge.fireTrigger(path: path("Trigger Red"), screenId: "screen-1", instanceId: nil))
     }
 
     func testKeepsSeparateFlowInstancesForTheSameRiveViewModel() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-a"),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-test", defaultInstanceId: "instance-b"),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-a"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Test", defaultInstanceId: "instance-b"),
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-a", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-b", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-a", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-b", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
 
         XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-a")
-        XCTAssertTrue(bridge.applyValue(path: path([100, 1]), value: "patched-b", screenId: "screen-2", instanceId: "instance-b"))
+        XCTAssertTrue(bridge.applyValue(path: path("String"), value: "patched-b", screenId: "screen-2", instanceId: "instance-b"))
         XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-a")
 
         XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
@@ -102,15 +102,15 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
     func testNavigatingAcrossViewModelsRoutesScreenPatchesToVisibleInstance() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-nested", defaultInstanceId: "instance-nested"),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Nested", defaultInstanceId: "instance-nested"),
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "Nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
@@ -118,26 +118,26 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
         XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-b")
 
-        XCTAssertTrue(bridge.applyValue(path: path([200, 1]), value: "visible-patch", screenId: "screen-2", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("String", viewModelName: "Nested"), value: "visible-patch", screenId: "screen-2", instanceId: nil))
         XCTAssertEqual(try bridge.stringValue(path: "String"), "visible-patch")
     }
 
     func testOffscreenPatchWithoutInstanceIdUsesCachedDefaultInstance() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-nested", defaultInstanceId: "instance-nested"),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Nested", defaultInstanceId: "instance-nested"),
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "Nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
 
-        XCTAssertTrue(bridge.applyValue(path: path([200, 1]), value: "preloaded-offscreen", screenId: "screen-2", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("String", viewModelName: "Nested"), value: "preloaded-offscreen", screenId: "screen-2", instanceId: nil))
         XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-a")
 
         XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
@@ -146,21 +146,21 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
     func testRelativeScreenPatchUsesDefaultInstanceWhenDefaultViewModelIsOmitted() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: "instance-nested"),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: "instance-nested"),
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "Nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
 
         XCTAssertTrue(bridge.applyValue(
-            path: relativePath([1]),
+            path: path("String", viewModelName: nil, isRelative: true),
             value: "patched-by-instance-default",
             screenId: "screen-2",
             instanceId: nil
@@ -182,10 +182,10 @@ final class FlowViewModelBridgeTests: XCTestCase {
         )
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(
             screens: [
-                RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
+                RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
                 RemoteFlowScreen(
                     id: "screen-2",
-                    defaultViewModelId: duplicateRoot.id,
+                    defaultViewModelName: duplicateRoot.name,
                     defaultInstanceId: "instance-nested"
                 ),
             ],
@@ -195,28 +195,28 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: duplicateRoot.id, instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: duplicateRoot.name, instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
         XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
 
-        XCTAssertTrue(bridge.applyValue(path: path([100, 1]), value: "patched-visible-duplicate", screenId: "screen-2", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("String", viewModelName: "Nested"), value: "patched-visible-duplicate", screenId: "screen-2", instanceId: nil))
         XCTAssertEqual(try bridge.stringValue(path: "String"), "patched-visible-duplicate")
     }
 
     func testNavigatesByDefaultViewModelWhenDefaultInstanceIsOmitted() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-nested", defaultInstanceId: nil),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Nested", defaultInstanceId: nil),
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "Nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
@@ -225,25 +225,25 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-b")
     }
 
-    func testListOperationsRecomputeItemIndexesAndEmptyListPatchApplies() throws {
+    func testListOperationsApplyValuesAndEmptyListPatchApplies() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow())
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
                 makeInstance(
-                    viewModelId: "vm-test",
+                    viewModelId: "Test",
                     instanceId: "instance-test",
                     values: [
                         "List": [
                             [
                                 "vmInstanceId": "item-a",
-                                "viewModelId": "vm-test",
+                                "viewModelId": "Test",
                                 "values": ["String": "a", "Number": 99],
                             ],
                             [
                                 "vmInstanceId": "item-b",
-                                "viewModelId": "vm-test",
+                                "viewModelId": "Test",
                                 "values": ["String": "b", "Number": 99],
                             ],
                         ],
@@ -253,35 +253,36 @@ final class FlowViewModelBridgeTests: XCTestCase {
             screenId: "screen-1"
         ))
         XCTAssertEqual(try bridge.listCount(path: "List"), 2)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-a"), 0)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-b"), 1)
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-a"), "a")
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-b"), "b")
 
         XCTAssertTrue(bridge.applyListOperation(
             .insert,
-            path: path([100, 5]),
+            path: path("List"),
             payload: [
                 "index": 0,
                 "value": [
                     "vmInstanceId": "item-c",
-                    "viewModelId": "vm-test",
+                    "viewModelId": "Test",
                     "values": ["String": "c", "Number": 99],
                 ],
             ],
             screenId: "screen-1",
             instanceId: nil
         ))
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-c"), 0)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-a"), 1)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-b"), 2)
+        XCTAssertEqual(try bridge.listCount(path: "List"), 3)
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-c"), "c")
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-a"), "a")
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-b"), "b")
 
         XCTAssertTrue(bridge.applyListOperation(
             .set,
-            path: path([100, 5]),
+            path: path("List"),
             payload: [
                 "index": 1,
                 "value": [
                     "vmInstanceId": "item-a",
-                    "viewModelId": "vm-test",
+                    "viewModelId": "Test",
                     "values": ["String": "updated-a", "Number": 99],
                 ],
             ],
@@ -289,9 +290,9 @@ final class FlowViewModelBridgeTests: XCTestCase {
             instanceId: nil
         ))
         XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-a"), "updated-a")
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-a"), 1)
+        XCTAssertEqual(try bridge.listCount(path: "List"), 3)
 
-        XCTAssertTrue(bridge.applyValue(path: path([100, 5]), value: [], screenId: "screen-1", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("List"), value: [], screenId: "screen-1", instanceId: nil))
         XCTAssertEqual(try bridge.listCount(path: "List"), 0)
     }
 
@@ -300,11 +301,11 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applyValue(
-            path: path([100, 5]),
+            path: path("List"),
             value: [
                     [
                         "vmInstanceId": "item-a",
-                        "viewModelId": "vm-test",
+                        "viewModelId": "Test",
                         "values": ["String": "a", "Number": 99],
                     ],
             ],
@@ -314,49 +315,51 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
         XCTAssertTrue(bridge.applyListOperation(
             .insert,
-            path: path([100, 5]),
+            path: path("List"),
             payload: [
                 "index": 99,
                 "value": [
                     "vmInstanceId": "item-b",
-                    "viewModelId": "vm-test",
+                    "viewModelId": "Test",
                     "values": ["String": "b", "Number": 99],
                 ],
             ],
             screenId: "screen-1",
             instanceId: nil
         ))
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-a"), 0)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-b"), 1)
+        XCTAssertEqual(try bridge.listCount(path: "List"), 2)
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-a"), "a")
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-b"), "b")
 
         XCTAssertTrue(bridge.applyListOperation(
             .insert,
-            path: path([100, 5]),
+            path: path("List"),
             payload: [
                 "index": -5,
                 "value": [
                     "vmInstanceId": "item-c",
-                    "viewModelId": "vm-test",
+                    "viewModelId": "Test",
                     "values": ["String": "c", "Number": 99],
                 ],
             ],
             screenId: "screen-1",
             instanceId: nil
         ))
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-c"), 0)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-a"), 1)
-        XCTAssertEqual(try bridge.numberValue(path: "Number", instanceId: "item-b"), 2)
+        XCTAssertEqual(try bridge.listCount(path: "List"), 3)
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-c"), "c")
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-a"), "a")
+        XCTAssertEqual(try bridge.stringValue(path: "String", instanceId: "item-b"), "b")
     }
 
     func testCanBindScreenInstanceAfterInitWithoutInitialArtboardBinding() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-nested", defaultInstanceId: "instance-nested"),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Nested", defaultInstanceId: "instance-nested"),
         ]))
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-2"
         ))
@@ -366,16 +369,16 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
     func testCanRetryScreenBindingAfterPreInitNavigate() throws {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
-            RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-test", defaultInstanceId: "instance-test"),
-            RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-nested", defaultInstanceId: "instance-nested"),
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Nested", defaultInstanceId: "instance-nested"),
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertFalse(bridge.bindDefaultInstance(forScreenId: "screen-2"))
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "screen-a"]),
-                makeInstance(viewModelId: "vm-nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
+                makeInstance(viewModelId: "Nested", instanceId: "instance-nested", values: ["String": "screen-b"]),
             ]),
             screenId: "screen-1"
         ))
@@ -397,14 +400,14 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
-                makeInstance(viewModelId: "vm-test", instanceId: "instance-test", values: ["String": "bound"]),
+                makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "bound"]),
                 makeInstance(viewModelId: "vm-other", instanceId: "instance-other", values: ["OtherString": "other"]),
             ]),
             screenId: "screen-1"
         ))
 
         XCTAssertFalse(bridge.applyValue(
-            path: path([100, 1]),
+            path: path("OtherString", viewModelName: "Other"),
             value: "should-not-hit-bound",
             screenId: "screen-1",
             instanceId: "instance-other"
@@ -417,7 +420,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
         let bridge = try makeBridge(remoteFlow: makeRemoteFlow())
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
-        XCTAssertTrue(bridge.applyValue(path: path([100, 6]), value: image, screenId: "screen-1", instanceId: nil))
+        XCTAssertTrue(bridge.applyValue(path: path("Image"), value: image, screenId: "screen-1", instanceId: nil))
     }
 
     func testEmitsBoundValueChangesFromRiveListeners() throws {
@@ -435,7 +438,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
         bridge.boundInstance?.updateListeners()
 
         XCTAssertEqual(changes.count, 1)
-        XCTAssertEqual(changes.first?.path, path([100, 1]))
+        XCTAssertEqual(changes.first?.path, path("String"))
         XCTAssertEqual(changes.first?.value as? String, "from-rive")
         XCTAssertEqual(changes.first?.source, "rive")
     }
@@ -458,7 +461,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
 
         let emittedPath = try XCTUnwrap(changes.first?.path)
         XCTAssertEqual(changes.count, 1)
-        XCTAssertEqual(emittedPath, nameBasedPath(["Test", "String"]))
+        XCTAssertEqual(emittedPath, path("String"))
         XCTAssertEqual(changes.first?.value as? String, "name-based")
         XCTAssertEqual(changes.first?.source, "rive")
 
@@ -482,7 +485,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
         XCTAssertTrue(bridge.applyValue(
-            path: path([100, 1]),
+            path: path("String"),
             value: "from-host",
             screenId: "screen-1",
             instanceId: nil
@@ -500,26 +503,12 @@ final class FlowViewModelBridgeTests: XCTestCase {
         }
     }
 
-    private func path(_ pathIds: [Int]) -> VmPathRef {
-        .ids(VmPathIds(pathIds: pathIds))
-    }
-
-    private func relativePath(_ pathIds: [Int]) -> VmPathRef {
-        .ids(VmPathIds(pathIds: pathIds, isRelative: true))
-    }
-
-    private func nameBasedPath(_ names: [String]) -> VmPathRef {
-        .ids(VmPathIds(pathIds: names.map(hashNameId), nameBased: true))
-    }
-
-    private func hashNameId(_ value: String) -> Int {
-        if value.isEmpty { return Int(0x811c9dc5 as UInt32) }
-        var hash: UInt32 = 0x811c9dc5
-        for byte in value.utf8 {
-            hash ^= UInt32(byte)
-            hash = hash &* 0x01000193
-        }
-        return Int(hash)
+    private func path(
+        _ propertyPath: String,
+        viewModelName: String? = "Test",
+        isRelative: Bool? = nil
+    ) -> VmPathRef {
+        VmPathRef(viewModelName: viewModelName, path: propertyPath, isRelative: isRelative)
     }
 
     private func makeSnapshot(_ instances: [Nuxie.ViewModelInstance]) -> FlowViewModelSnapshot {
@@ -591,7 +580,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
                 "List": ViewModelProperty(
                     type: .list,
                     propertyId: 5,
-                    itemType: ViewModelProperty(type: .viewModel, viewModelId: "vm-test")
+                    itemType: ViewModelProperty(type: .viewModel, viewModelId: "Test")
                 ),
                 "Image": ViewModelProperty(type: .image, propertyId: 6),
             ]
@@ -611,14 +600,12 @@ final class FlowViewModelBridgeTests: XCTestCase {
             screens: screens ?? [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    defaultViewModelId: viewModel.id,
+                    defaultViewModelName: viewModel.name,
                     defaultInstanceId: "instance-test"
                 ),
             ],
             interactions: [:],
-            state: RemoteFlowState(
-                viewModels: [viewModel, nestedViewModel] + extraViewModels
-            )
+            viewModelValues: nil
         )
     }
 }
