@@ -63,7 +63,7 @@ install-deps:
 
 # Generate Xcode project
 generate: check-xcodegen
-	@CURRENT_HASH=$$( (cat project.yml; find Sources Tests -type f -print | sort) | shasum -a 256 | awk '{print $$1}' ); \
+	@CURRENT_HASH=$$( (cat project.yml; find Sources Tests Examples -type f -print | sort) | shasum -a 256 | awk '{print $$1}' ); \
 	STORED_HASH=$$(cat "$(XCODEGEN_INPUTS)" 2>/dev/null || true); \
 	if [ -d "$(XCODEPROJ)" ] && [ "$$CURRENT_HASH" = "$$STORED_HASH" ]; then \
 		echo "Xcode project is up to date."; \
