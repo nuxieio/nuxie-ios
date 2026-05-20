@@ -5,7 +5,7 @@ import FactoryKit
 import UIKit
 #endif
 
-#if DEBUG && canImport(UIKit)
+#if canImport(UIKit)
 public enum FlowRuntimeFixtureHost {
     private static let fixtureBaseURLToken = "__NUXIE_FIXTURE_BASE_URL__"
 
