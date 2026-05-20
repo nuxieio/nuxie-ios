@@ -93,7 +93,6 @@ def safe_name(raw):
     return name or "screenshot"
 
 root = xcresult_json()
-seen = set()
 
 for tests_ref in references(root, "ActionTestPlanRunSummaries"):
     tests = xcresult_json(tests_ref)
@@ -106,9 +105,8 @@ for tests_ref in references(root, "ActionTestPlanRunSummaries"):
                 continue
 
             payload_id = value(attachment.get("payloadRef", {}).get("id"))
-            if not payload_id or payload_id in seen:
+            if not payload_id:
                 continue
-            seen.add(payload_id)
 
             name = value(attachment.get("name")) or value(attachment.get("filename")) or payload_id
             output = screenshots_dir / f"{safe_name(name)}.png"
