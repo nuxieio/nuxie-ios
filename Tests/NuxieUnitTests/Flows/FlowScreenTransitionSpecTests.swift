@@ -20,7 +20,7 @@ final class FlowScreenTransitionSpecTests: XCTestCase {
         XCTAssertEqual(spec.easing, .easeOut)
     }
 
-    func testNormalizesReactEraTransitionTokens() {
+    func testNormalizesPublishedTransitionTokens() {
         let smartAnimate = FlowScreenTransitionSpec(raw: [
             "type": "smart-animate",
             "direction": "top",

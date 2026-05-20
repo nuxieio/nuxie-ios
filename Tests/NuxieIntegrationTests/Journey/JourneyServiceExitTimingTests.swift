@@ -240,8 +240,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 ],
                 interactions: interactions,
                 viewModels: [],
-                viewModelInstances: nil,
-                converters: nil,
+                viewModelInstances: nil
             )
             return Flow(remoteFlow: remoteFlow, products: [])
         }

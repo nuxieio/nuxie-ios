@@ -58,8 +58,7 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
                 ],
                 interactions: [:],
                 viewModels: viewModels,
-                viewModelInstances: viewModelInstances,
-                converters: nil,
+                viewModelInstances: viewModelInstances
             )
         }
 

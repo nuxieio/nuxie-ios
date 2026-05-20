@@ -617,8 +617,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
             ],
             interactions: [:],
             viewModels: [viewModel, nestedViewModel] + extraViewModels,
-            viewModelInstances: nil,
-            converters: nil
+            viewModelInstances: nil
         )
     }
 }

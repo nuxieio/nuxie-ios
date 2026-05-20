@@ -9,7 +9,6 @@ public struct RemoteFlow: Codable {
     public let interactions: [String: [Interaction]]
     public let viewModels: [ViewModel]
     public let viewModelInstances: [ViewModelInstance]?
-    public let converters: [String: [String: AnyCodable]]?
 
     public init(
         id: String,
@@ -17,8 +16,7 @@ public struct RemoteFlow: Codable {
         screens: [RemoteFlowScreen],
         interactions: [String: [Interaction]],
         viewModels: [ViewModel],
-        viewModelInstances: [ViewModelInstance]?,
-        converters: [String: [String: AnyCodable]]?
+        viewModelInstances: [ViewModelInstance]?
     ) {
         self.id = id
         self.flowArtifact = flowArtifact
@@ -26,7 +24,6 @@ public struct RemoteFlow: Codable {
         self.interactions = interactions
         self.viewModels = viewModels
         self.viewModelInstances = viewModelInstances
-        self.converters = converters
     }
 }
 
@@ -68,15 +65,6 @@ public struct RemoteFlowScreen: Codable {
 }
 
 public typealias RemoteFlowInteractions = [String: [Interaction]]
-
-@available(*, deprecated, renamed: "RemoteFlow")
-public typealias FlowDescription = RemoteFlow
-
-@available(*, deprecated, renamed: "RemoteFlowScreen")
-public typealias FlowDescriptionScreen = RemoteFlowScreen
-
-@available(*, deprecated, renamed: "RemoteFlowInteractions")
-public typealias FlowDescriptionInteractions = RemoteFlowInteractions
 
 // MARK: - View Model Path References
 

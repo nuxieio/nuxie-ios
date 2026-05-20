@@ -7,17 +7,17 @@ struct FlowRuntimeTrace: Codable, Equatable {
 
     let schemaVersion: Int
     let fixtureId: String
-    let rendererBackend: String
+    let runtime: String
     let entries: [FlowRuntimeTraceEntry]
 
     init(
         fixtureId: String,
-        rendererBackend: String,
+        runtime: String,
         entries: [FlowRuntimeTraceEntry]
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.fixtureId = fixtureId
-        self.rendererBackend = rendererBackend
+        self.runtime = runtime
         self.entries = entries
     }
 }
@@ -105,14 +105,14 @@ final class FlowRuntimeTraceRecorder {
 
     func trace(
         fixtureId: String,
-        rendererBackend: String
+        runtime: String
     ) -> FlowRuntimeTrace {
         lock.lock()
         let snapshot = entries
         lock.unlock()
         return FlowRuntimeTrace(
             fixtureId: fixtureId,
-            rendererBackend: rendererBackend,
+            runtime: runtime,
             entries: snapshot
         )
     }

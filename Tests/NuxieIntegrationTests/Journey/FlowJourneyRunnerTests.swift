@@ -75,8 +75,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 screens: resolvedScreens,
                 interactions: interactions,
                 viewModels: viewModels,
-                viewModelInstances: viewModelInstances,
-                converters: nil,
+                viewModelInstances: viewModelInstances
             )
         }
 
