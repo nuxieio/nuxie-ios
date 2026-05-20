@@ -1071,9 +1071,10 @@ final class FlowJourneyRunner {
     }
 
     private func responsePath(_ segments: [String]) -> VmPathRef {
-        let pathIds = ([Self.responseRootViewModelName] + segments)
-            .map(responseNameHash)
-        return .ids(VmPathIds(pathIds: pathIds, nameBased: true))
+        VmPathRef(
+            viewModelName: Self.responseRootViewModelName,
+            path: segments.joined(separator: "/")
+        )
     }
 
     private func responseValueAsInt(_ value: Any?) -> Int? {
@@ -2187,25 +2188,11 @@ final class FlowJourneyRunner {
     }
 
     private func matchesViewModelPath(triggerPath: VmPathRef, inputPath: VmPathRef) -> Bool {
-        if let triggerIds = pathIdsKey(for: triggerPath), let inputIds = pathIdsKey(for: inputPath) {
-            return triggerIds == inputIds
-        }
-        return false
+        pathKey(for: triggerPath) == pathKey(for: inputPath)
     }
 
-    private func pathIdsKey(for ref: VmPathRef) -> String? {
-        switch ref {
-        case .ids(let ref):
-            let prefix: String
-            if ref.isRelative == true {
-                prefix = "ids:rel"
-            } else if ref.nameBased == true {
-                prefix = "ids:name"
-            } else {
-                prefix = "ids"
-            }
-            return "\(prefix):\(ref.pathIds.map(String.init).joined(separator: "."))"
-        }
+    private func pathKey(for ref: VmPathRef) -> String {
+        ref.normalizedPath
     }
 
     private func resolveValueRefs(_ value: Any, context: TriggerContext) -> Any {
@@ -2255,23 +2242,21 @@ final class FlowJourneyRunner {
     private func parseRefPath(_ value: Any) -> VmPathRef? {
         if let ref = value as? VmPathRef { return ref }
         if let dict = value as? [String: Any] {
-            let isRelative = dict["isRelative"] as? Bool
-            let nameBased = dict["nameBased"] as? Bool
-            if let ids = dict["pathIds"] as? [Int] {
-                return .ids(VmPathIds(pathIds: ids, isRelative: isRelative, nameBased: nameBased))
-            }
-            if let ids = dict["pathIds"] as? [NSNumber] {
-                return .ids(VmPathIds(pathIds: ids.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+            if dict["kind"] as? String == "path", let path = dict["path"] as? String {
+                return VmPathRef(
+                    viewModelName: dict["viewModelName"] as? String,
+                    path: path,
+                    isRelative: dict["isRelative"] as? Bool
+                )
             }
         }
         if let dict = value as? [String: AnyCodable] {
-            let isRelative = dict["isRelative"]?.value as? Bool
-            let nameBased = dict["nameBased"]?.value as? Bool
-            if let ids = dict["pathIds"]?.value as? [Int] {
-                return .ids(VmPathIds(pathIds: ids, isRelative: isRelative, nameBased: nameBased))
-            }
-            if let ids = dict["pathIds"]?.value as? [NSNumber] {
-                return .ids(VmPathIds(pathIds: ids.map { $0.intValue }, isRelative: isRelative, nameBased: nameBased))
+            if dict["kind"]?.value as? String == "path", let path = dict["path"]?.value as? String {
+                return VmPathRef(
+                    viewModelName: dict["viewModelName"]?.value as? String,
+                    path: path,
+                    isRelative: dict["isRelative"]?.value as? Bool
+                )
             }
         }
         return nil

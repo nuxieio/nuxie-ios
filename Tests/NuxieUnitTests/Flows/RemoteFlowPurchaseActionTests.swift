@@ -9,14 +9,16 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
               "type": "purchase",
               "placementIndex": {
                 "ref": {
-                  "kind": "ids",
-                  "pathIds": [3893745128, 10, 8]
+                  "kind": "path",
+                  "viewModelName": "VM",
+                  "path": "selectedIndex"
                 }
               },
               "productId": {
                 "ref": {
-                  "kind": "ids",
-                  "pathIds": [3893745128, 10, 9]
+                  "kind": "path",
+                  "viewModelName": "VM",
+                  "path": "selectedProductId"
                 }
               }
             }
@@ -32,8 +34,9 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
                 purchase.placementIndex,
                 AnyCodable([
                     "ref": [
-                        "kind": "ids",
-                        "pathIds": [3893745128, 10, 8],
+                        "kind": "path",
+                        "viewModelName": "VM",
+                        "path": "selectedIndex",
                     ],
                 ])
             )
@@ -41,8 +44,9 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
                 purchase.productId,
                 AnyCodable([
                     "ref": [
-                        "kind": "ids",
-                        "pathIds": [3893745128, 10, 9],
+                        "kind": "path",
+                        "viewModelName": "VM",
+                        "path": "selectedProductId",
                     ],
                 ])
             )
@@ -58,8 +62,9 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
               "type": "purchase",
               "placementIndex": {
                 "ref": {
-                  "kind": "ids",
-                  "pathIds": [3893745128, 10, 8]
+                  "kind": "path",
+                  "viewModelName": "VM",
+                  "path": "selectedIndex"
                 }
               }
             }
@@ -76,8 +81,9 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
               "type": "purchase",
               "productId": {
                 "ref": {
-                  "kind": "ids",
-                  "pathIds": [3893745128, 10, 9]
+                  "kind": "path",
+                  "viewModelName": "VM",
+                  "path": "selectedProductId"
                 }
               }
             }

@@ -47,12 +47,12 @@ public enum FlowRuntimeFixtureHost {
             screens: fixtureFlow.screens ?? manifest.screens.map {
                 RemoteFlowScreen(
                     id: $0.screenId,
-                    defaultViewModelId: nil,
+                    defaultViewModelName: nil,
                     defaultInstanceId: nil
                 )
             },
             interactions: fixtureFlow.interactions ?? [:],
-            state: nil
+            viewModelValues: nil
         )
 
         let runtimeAssetStore = RuntimeAssetStore(

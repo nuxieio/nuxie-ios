@@ -81,19 +81,19 @@ final class FlowViewModelBridge {
         self.imageResolver = imageResolver
         self.onValueChange = onValueChange
 
-        if let remoteFlow {
-            for viewModel in remoteFlow.state?.viewModels ?? [] {
-                flowViewModelsById[viewModel.id] = viewModel
-                flowViewModelsByName[viewModel.name] = viewModel
-            }
-            for instance in remoteFlow.state?.viewModelInstances ?? [] {
-                recordFlowInstance(instance.instanceId, viewModelId: instance.viewModelId)
-            }
-        }
-
         for index in 0..<model.riveFile.viewModelCount {
             guard let viewModel = model.riveFile.viewModel(at: index) else { continue }
             riveViewModelsByName[viewModel.name] = viewModel
+            let flowViewModel = Self.flowViewModel(from: viewModel, hashNameId: hashNameId)
+            flowViewModelsById[flowViewModel.id] = flowViewModel
+            flowViewModelsByName[flowViewModel.name] = flowViewModel
+        }
+
+        if let remoteFlow {
+            for value in remoteFlow.viewModelValues ?? [] {
+                guard let instanceId = value.instanceId else { continue }
+                recordFlowInstance(instanceId, viewModelId: value.viewModelName)
+            }
         }
     }
 
@@ -384,10 +384,8 @@ final class FlowViewModelBridge {
         installValueListeners(
             in: instance,
             schema: viewModel.properties,
+            viewModelName: viewModel.name,
             pathPrefix: "",
-            pathIds: [viewModelPathId(viewModel)],
-            namePathIds: [hashNameId(viewModel.name)],
-            usesNameBasedPath: false,
             onValueChange: onValueChange
         )
     }
@@ -402,25 +400,19 @@ final class FlowViewModelBridge {
     private func installValueListeners(
         in instance: RiveDataBindingViewModel.Instance,
         schema: [String: ViewModelProperty],
+        viewModelName: String,
         pathPrefix: String,
-        pathIds: [Int],
-        namePathIds: [Int],
-        usesNameBasedPath: Bool,
         onValueChange: @escaping ValueChangeHandler
     ) {
         for (name, property) in schema {
             let path = pathPrefix.isEmpty ? name : "\(pathPrefix)/\(name)"
-            let namePathId = hashNameId(name)
-            let nextPathIds = pathIds + [property.propertyId ?? namePathId]
-            let nextNamePathIds = namePathIds + [namePathId]
-            let nextUsesNameBasedPath = usesNameBasedPath || property.propertyId == nil
             switch property.type {
             case .string:
                 guard let riveProperty = instance.stringProperty(fromPath: path) else { continue }
                 let listenerId = riveProperty.addListener { [weak self] value in
                     self?.emitValueChange(
-                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
-                        nameBased: nextUsesNameBasedPath,
+                        viewModelName: viewModelName,
+                        path: path,
                         value: value,
                         onValueChange: onValueChange
                     )
@@ -430,8 +422,8 @@ final class FlowViewModelBridge {
                 guard let riveProperty = instance.numberProperty(fromPath: path) else { continue }
                 let listenerId = riveProperty.addListener { [weak self] value in
                     self?.emitValueChange(
-                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
-                        nameBased: nextUsesNameBasedPath,
+                        viewModelName: viewModelName,
+                        path: path,
                         value: value,
                         onValueChange: onValueChange
                     )
@@ -441,8 +433,8 @@ final class FlowViewModelBridge {
                 guard let riveProperty = instance.booleanProperty(fromPath: path) else { continue }
                 let listenerId = riveProperty.addListener { [weak self] value in
                     self?.emitValueChange(
-                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
-                        nameBased: nextUsesNameBasedPath,
+                        viewModelName: viewModelName,
+                        path: path,
                         value: value,
                         onValueChange: onValueChange
                     )
@@ -452,8 +444,8 @@ final class FlowViewModelBridge {
                 guard let riveProperty = instance.enumProperty(fromPath: path) else { continue }
                 let listenerId = riveProperty.addListener { [weak self] value in
                     self?.emitValueChange(
-                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
-                        nameBased: nextUsesNameBasedPath,
+                        viewModelName: viewModelName,
+                        path: path,
                         value: value,
                         onValueChange: onValueChange
                     )
@@ -463,8 +455,8 @@ final class FlowViewModelBridge {
                 guard let riveProperty = instance.triggerProperty(fromPath: path) else { continue }
                 let listenerId = riveProperty.addListener { [weak self] in
                     self?.emitValueChange(
-                        pathIds: nextUsesNameBasedPath ? nextNamePathIds : nextPathIds,
-                        nameBased: nextUsesNameBasedPath,
+                        viewModelName: viewModelName,
+                        path: path,
                         value: true,
                         onValueChange: onValueChange
                     )
@@ -475,10 +467,8 @@ final class FlowViewModelBridge {
                 installValueListeners(
                     in: instance,
                     schema: nestedSchema,
+                    viewModelName: viewModelName,
                     pathPrefix: path,
-                    pathIds: nextPathIds,
-                    namePathIds: nextNamePathIds,
-                    usesNameBasedPath: nextUsesNameBasedPath,
                     onValueChange: onValueChange
                 )
             case .viewModel:
@@ -489,10 +479,8 @@ final class FlowViewModelBridge {
                 installValueListeners(
                     in: instance,
                     schema: nestedViewModel.properties,
+                    viewModelName: viewModelName,
                     pathPrefix: path,
-                    pathIds: nextPathIds,
-                    namePathIds: nextNamePathIds,
-                    usesNameBasedPath: nextUsesNameBasedPath,
                     onValueChange: onValueChange
                 )
             case .color, .image, .list:
@@ -502,14 +490,14 @@ final class FlowViewModelBridge {
     }
 
     private func emitValueChange(
-        pathIds: [Int],
-        nameBased: Bool,
+        viewModelName: String,
+        path: String,
         value: Any,
         onValueChange: ValueChangeHandler
     ) {
         guard !suppressingValueChangeNotifications else { return }
         onValueChange(
-            .ids(VmPathIds(pathIds: pathIds, nameBased: nameBased ? true : nil)),
+            VmPathRef(viewModelName: viewModelName, path: path),
             value,
             "rive"
         )
@@ -747,12 +735,12 @@ final class FlowViewModelBridge {
            let instance = riveInstancesByFlowInstanceId[instanceId] {
             return (
                 instanceId,
-                flowInstanceViewModelIds[instanceId] ?? screen.defaultViewModelId,
+                flowInstanceViewModelIds[instanceId] ?? screen.defaultViewModelName,
                 instance
             )
         }
 
-        if let viewModelId = screen.defaultViewModelId {
+        if let viewModelId = screen.defaultViewModelName {
             if let instanceId = flowInstanceIdsByViewModelId[viewModelId]?.first(where: {
                 riveInstancesByFlowInstanceId[$0] != nil
             }),
@@ -789,8 +777,8 @@ final class FlowViewModelBridge {
             if let defaultInstanceId = screen.defaultInstanceId {
                 return defaultInstanceId
             }
-            if let defaultViewModelId = screen.defaultViewModelId,
-               let instanceId = firstInstanceId(for: defaultViewModelId, in: instances) {
+            if let defaultViewModelName = screen.defaultViewModelName,
+               let instanceId = firstInstanceId(for: defaultViewModelName, in: instances) {
                 return instanceId
             }
         }
@@ -808,16 +796,23 @@ final class FlowViewModelBridge {
         property: ViewModelProperty?,
         list: RiveDataBindingViewModel.Instance.ListProperty
     ) -> Bool {
-        guard property?.type == .list,
-              let itemType = property?.itemType,
-              itemType.type == .viewModel,
-              let itemViewModelId = itemType.viewModelId,
-              let itemViewModel = flowViewModelsById[itemViewModelId] else {
-            return false
-        }
-
-        let indexKeys = itemViewModel.properties.compactMap { key, property in
-            property.type == .list_index ? key : nil
+        let indexKeys: [String]
+        if property?.type == .list,
+           let itemType = property?.itemType,
+           itemType.type == .viewModel,
+           let itemViewModelId = itemType.viewModelId,
+           let itemViewModel = flowViewModelsById[itemViewModelId] {
+            indexKeys = itemViewModel.properties.compactMap { key, property in
+                property.type == .list_index ? key : nil
+            }
+        } else {
+            indexKeys = Array(Set(
+                flowViewModelsById.values.flatMap { viewModel in
+                    viewModel.properties.compactMap { key, property in
+                        property.type == .list_index ? key : nil
+                    }
+                }
+            )).sorted()
         }
         guard !indexKeys.isEmpty else { return false }
 
@@ -852,22 +847,22 @@ final class FlowViewModelBridge {
         if let screenId,
            let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
            let defaultInstanceId = screen.defaultInstanceId,
-           let defaultViewModelId = flowInstanceViewModelIds[defaultInstanceId],
-           defaultViewModelId == viewModelId,
+           let defaultViewModelName = flowInstanceViewModelIds[defaultInstanceId],
+           defaultViewModelName == viewModelId,
            let instance = riveInstancesByFlowInstanceId[defaultInstanceId] {
             return instance
         }
         if let screenId,
            let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
            screen.defaultInstanceId != nil,
-           screen.defaultViewModelId == viewModelId,
+           screen.defaultViewModelName == viewModelId,
            viewModelId == boundFlowViewModelId,
            selectedFlowInstanceId == nil || selectedFlowInstanceId == screen.defaultInstanceId {
             return boundInstance
         }
         if let screenId,
            let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
-           screen.defaultViewModelId == viewModelId,
+           screen.defaultViewModelName == viewModelId,
            viewModelId == boundFlowViewModelId {
             return boundInstance
         }
@@ -876,7 +871,7 @@ final class FlowViewModelBridge {
         }
         if let screenId,
            let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
-           screen.defaultViewModelId == viewModelId,
+           screen.defaultViewModelName == viewModelId,
            let cachedInstanceId = flowInstanceIdsByViewModelId[viewModelId]?.first(where: {
                riveInstancesByFlowInstanceId[$0] != nil
            }) {
@@ -898,46 +893,22 @@ final class FlowViewModelBridge {
     private func resolvePath(_ path: VmPathRef, screenId: String?, instanceId: String?) -> ResolvedPath? {
         guard remoteFlow != nil else { return nil }
 
-        switch path {
-        case .ids(let ref):
-            let viewModel: ViewModel?
-            let propertyIds: [Int]
-            if ref.isRelative == true {
-                viewModel = resolveRelativeViewModel(screenId: screenId, instanceId: instanceId)
-                propertyIds = ref.pathIds
-            } else {
-                guard let root = ref.pathIds.first else { return nil }
-                if ref.nameBased == true {
-                    viewModel = resolveRootViewModel(
-                        instanceId: instanceId,
-                        screenId: screenId,
-                        root: root,
-                        matches: { hashNameId($0.name) == root }
-                    )
-                } else {
-                    viewModel = resolveRootViewModel(
-                        instanceId: instanceId,
-                        screenId: screenId,
-                        root: root,
-                        matches: { viewModelPathId($0) == root }
-                    )
-                }
-                propertyIds = Array(ref.pathIds.dropFirst())
-            }
-            guard let viewModel, !propertyIds.isEmpty else { return nil }
-            guard let resolved = resolveProperties(
-                propertyIds,
-                schema: viewModel.properties,
-                nameBased: ref.nameBased == true
-            ) else {
-                return nil
-            }
-            return ResolvedPath(
-                viewModelId: viewModel.id,
-                path: resolved.segments.joined(separator: "/"),
-                property: resolved.property
-            )
-        }
+        let viewModel =
+            path.viewModelName.flatMap { flowViewModelsByName[$0] } ??
+            resolveRelativeViewModel(screenId: screenId, instanceId: instanceId) ??
+            boundFlowViewModelId.flatMap { flowViewModelsById[$0] }
+        guard let viewModel, !path.path.isEmpty else { return nil }
+        return ResolvedPath(
+            viewModelId: viewModel.id,
+            path: path.path,
+            property: resolveTopLevelProperty(path.path, in: viewModel)
+        )
+    }
+
+    private func resolveTopLevelProperty(_ path: String, in viewModel: ViewModel) -> ViewModelProperty? {
+        let first = path.split(separator: "/", maxSplits: 1).first.map(String.init)
+        guard let first else { return nil }
+        return viewModel.properties[first]
     }
 
     private func resolveRelativeViewModel(screenId: String?, instanceId: String?) -> ViewModel? {
@@ -954,8 +925,8 @@ final class FlowViewModelBridge {
                let viewModel = flowViewModelsById[viewModelId] {
                 return viewModel
             }
-            if let defaultViewModelId = screen.defaultViewModelId,
-               let viewModel = flowViewModelsById[defaultViewModelId] {
+            if let defaultViewModelName = screen.defaultViewModelName,
+               let viewModel = flowViewModelsById[defaultViewModelName] {
                 return viewModel
             }
         }
@@ -965,84 +936,6 @@ final class FlowViewModelBridge {
         }
 
         return nil
-    }
-
-    private func resolveRootViewModel(
-        instanceId: String?,
-        screenId: String?,
-        root: Int,
-        matches: (ViewModel) -> Bool
-    ) -> ViewModel? {
-        if let instanceId,
-           let viewModelId = flowInstanceViewModelIds[instanceId],
-           let viewModel = flowViewModelsById[viewModelId],
-           matches(viewModel) {
-            return viewModel
-        }
-        if let screenId,
-           let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
-           let defaultViewModelId = screen.defaultViewModelId,
-           let viewModel = flowViewModelsById[defaultViewModelId],
-           matches(viewModel) {
-            return viewModel
-        }
-        if let screenId,
-           let screen = remoteFlow?.screens.first(where: { $0.id == screenId }),
-           let defaultInstanceId = screen.defaultInstanceId,
-           let viewModelId = flowInstanceViewModelIds[defaultInstanceId],
-           let viewModel = flowViewModelsById[viewModelId],
-           matches(viewModel) {
-            return viewModel
-        }
-        if let boundFlowViewModelId,
-           let viewModel = flowViewModelsById[boundFlowViewModelId],
-           matches(viewModel) {
-            return viewModel
-        }
-        return (remoteFlow?.state?.viewModels ?? []).first(where: matches)
-    }
-
-    private func resolveProperties(
-        _ propertyIds: [Int],
-        schema: [String: ViewModelProperty],
-        nameBased: Bool
-    ) -> (segments: [String], property: ViewModelProperty)? {
-        var currentSchema = schema
-        var segments: [String] = []
-        var resolvedProperty: ViewModelProperty?
-
-        for (index, propertyId) in propertyIds.enumerated() {
-            let found: (name: String, property: ViewModelProperty)?
-            if nameBased {
-                found = currentSchema.first { hashNameId($0.key) == propertyId }.map { ($0.key, $0.value) }
-            } else {
-                found = currentSchema.first { $0.value.propertyId == propertyId }.map { ($0.key, $0.value) }
-            }
-            guard let found else { return nil }
-            segments.append(found.name)
-            resolvedProperty = found.property
-
-            if index == propertyIds.count - 1 {
-                break
-            }
-
-            switch found.property.type {
-            case .object:
-                guard let schema = found.property.schema else { return nil }
-                currentSchema = schema
-            case .viewModel:
-                guard let viewModelId = found.property.viewModelId,
-                      let viewModel = flowViewModelsById[viewModelId] else {
-                    return nil
-                }
-                currentSchema = viewModel.properties
-            default:
-                return nil
-            }
-        }
-
-        guard let resolvedProperty else { return nil }
-        return (segments, resolvedProperty)
     }
 
     private func boundInstanceOrThrow() throws -> RiveDataBindingViewModel.Instance {
@@ -1060,10 +953,6 @@ final class FlowViewModelBridge {
             hash = hash &* fnvPrime
         }
         return Int(hash)
-    }
-
-    private func viewModelPathId(_ viewModel: ViewModel) -> Int {
-        viewModel.viewModelPathId ?? hashNameId(viewModel.id)
     }
 
     private func unwrap(_ value: Any) -> Any {
@@ -1168,6 +1057,59 @@ final class FlowViewModelBridge {
             )
         }
         return nil
+    }
+
+    private static func flowViewModel(
+        from viewModel: RiveDataBindingViewModel,
+        hashNameId: (String) -> Int
+    ) -> ViewModel {
+        let properties = Dictionary(
+            uniqueKeysWithValues: viewModel.properties.map { property in
+                (
+                    property.name,
+                    ViewModelProperty(
+                        type: flowPropertyType(property.type)
+                    )
+                )
+            }
+        )
+        return ViewModel(
+            id: viewModel.name,
+            name: viewModel.name,
+            viewModelPathId: hashNameId(viewModel.name),
+            properties: properties
+        )
+    }
+
+    private static func flowPropertyType(
+        _ type: RiveDataBindingViewModel.Instance.Property.Data.DataType
+    ) -> ViewModelPropertyType {
+        switch type {
+        case .string:
+            return .string
+        case .number, .integer:
+            return .number
+        case .boolean:
+            return .boolean
+        case .color:
+            return .color
+        case .list:
+            return .list
+        case .enum:
+            return .enum
+        case .trigger, .input:
+            return .trigger
+        case .viewModel:
+            return .viewModel
+        case .symbolListIndex:
+            return .list_index
+        case .assetImage:
+            return .image
+        case .artboard, .any, .none:
+            return .object
+        @unknown default:
+            return .object
+        }
     }
 
     private static func propertyTypeName(_ type: RiveDataBindingViewModel.Instance.Property.Data.DataType) -> String {

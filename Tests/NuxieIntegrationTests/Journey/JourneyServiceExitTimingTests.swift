@@ -234,12 +234,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
-                        defaultViewModelId: nil,
+                        defaultViewModelName: nil,
                         defaultInstanceId: nil
                     )
                 ],
                 interactions: interactions,
-                state: nil
+                viewModelValues: nil
             )
             return Flow(remoteFlow: remoteFlow, products: [])
         }

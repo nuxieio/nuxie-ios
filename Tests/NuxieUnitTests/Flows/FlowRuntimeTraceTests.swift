@@ -15,7 +15,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
                 recorder.recordNavigation(screenId: "screen-2")
                 recorder.recordRendererBindingChange(
                     screenId: "screen-2",
-                    pathIds: [1, 2, 3],
+                    path: "path:VM:title",
                     value: ["title": "Hello", "count": 2],
                     source: "input",
                     instanceId: nil
@@ -39,7 +39,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
                 expect(trace.entries[1].kind).to(equal(.binding))
                 expect(trace.entries[1].name).to(equal("did_set"))
                 expect(trace.entries[1].screenId).to(equal("screen-2"))
-                expect(trace.entries[1].output).to(contain("\"path_ids\":[1,2,3]"))
+                expect(trace.entries[1].output).to(contain("\"path\":\"path:VM:title\""))
                 expect(trace.entries[1].output).to(contain("\"title\":\"Hello\""))
                 expect(trace.entries[1].metadata?["source"]).to(equal("input"))
 

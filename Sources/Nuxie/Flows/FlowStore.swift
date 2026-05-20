@@ -183,155 +183,18 @@ actor FlowStore {
     
     private func extractProductIds(from remoteFlow: RemoteFlow) -> [String] {
         var ids = Set<String>()
-        let instances = remoteFlow.state?.viewModelInstances ?? []
-        let instancesByViewModelId = Dictionary(grouping: instances, by: { $0.viewModelId })
-
-        for viewModel in remoteFlow.state?.viewModels ?? [] {
-            let defaults = buildDefaultValues(schema: viewModel.properties)
-            if let viewModelInstances = instancesByViewModelId[viewModel.id],
-               !viewModelInstances.isEmpty {
-                for instance in viewModelInstances {
-                    let mergedValues = mergeValues(defaults: defaults, overrides: instance.values)
-                    collectProductIds(
-                        schema: viewModel.properties,
-                        values: mergedValues,
-                        into: &ids
-                    )
-                }
-            } else if !defaults.isEmpty {
-                collectProductIds(
-                    schema: viewModel.properties,
-                    values: defaults,
-                    into: &ids
-                )
+        for value in remoteFlow.viewModelValues ?? [] {
+            if value.path.split(separator: "/").last == "productId",
+               let productId = extractProductId(from: value.value.value) {
+                ids.insert(productId)
+                continue
+            }
+            if let productId = extractProductId(from: value.value.value) {
+                ids.insert(productId)
             }
         }
 
         return Array(ids)
-    }
-
-    private func buildDefaultValues(schema: [String: ViewModelProperty]) -> [String: AnyCodable] {
-        var values: [String: AnyCodable] = [:]
-
-        for (key, property) in schema {
-            if let defaultValue = property.defaultValue {
-                values[key] = defaultValue
-                continue
-            }
-            if property.type == .object, let schema = property.schema {
-                let nestedDefaults = buildDefaultValues(schema: schema)
-                let raw = nestedDefaults.mapValues { $0.value }
-                values[key] = AnyCodable(raw)
-                continue
-            }
-            if let fallback = defaultValue(for: property) {
-                values[key] = fallback
-            }
-        }
-
-        return values
-    }
-
-    private func defaultValue(for property: ViewModelProperty) -> AnyCodable? {
-        if let defaultValue = property.defaultValue {
-            return defaultValue
-        }
-        switch property.type {
-        case .list:
-            return AnyCodable([Any]())
-        case .object:
-            return AnyCodable([String: Any]())
-        case .viewModel:
-            return AnyCodable([String: Any]())
-        case .enum:
-            return AnyCodable(property.enumValues?.first ?? "")
-        case .string, .color, .image:
-            return AnyCodable("")
-        case .number:
-            return AnyCodable(0)
-        case .list_index, .trigger:
-            return AnyCodable(0)
-        case .boolean:
-            return AnyCodable(false)
-        }
-    }
-
-    private func mergeValues(
-        defaults: [String: AnyCodable],
-        overrides: [String: AnyCodable]
-    ) -> [String: AnyCodable] {
-        let defaultRaw = defaults.mapValues { unwrapAnyCodable($0.value) }
-        let overrideRaw = overrides.mapValues { unwrapAnyCodable($0.value) }
-        let merged = mergeRaw(defaultRaw, overrideRaw)
-        return merged.mapValues { AnyCodable($0) }
-    }
-
-    private func mergeRaw(_ base: [String: Any], _ overrides: [String: Any]) -> [String: Any] {
-        var result = base
-        for (key, value) in overrides {
-            if let baseDict = result[key] as? [String: Any],
-               let overrideDict = value as? [String: Any] {
-                result[key] = mergeRaw(baseDict, overrideDict)
-            } else {
-                result[key] = value
-            }
-        }
-        return result
-    }
-
-    private func unwrapAnyCodable(_ value: Any) -> Any {
-        if let dict = value as? [String: AnyCodable] {
-            return dict.mapValues { unwrapAnyCodable($0.value) }
-        }
-        if let dict = value as? [String: Any] {
-            return dict.mapValues { unwrapAnyCodable($0) }
-        }
-        if let list = value as? [AnyCodable] {
-            return list.map { unwrapAnyCodable($0.value) }
-        }
-        if let list = value as? [Any] {
-            return list.map { unwrapAnyCodable($0) }
-        }
-        return value
-    }
-    
-    private func collectProductIds(
-        schema: [String: ViewModelProperty],
-        values: [String: AnyCodable],
-        into ids: inout Set<String>
-    ) {
-        for (key, property) in schema {
-            let value = values[key]?.value
-            if key == "productId", let productId = extractProductId(from: value) {
-                ids.insert(productId)
-            }
-            switch property.type {
-            case .list:
-                if let itemType = property.itemType, itemType.type == .object,
-                          let list = value as? [Any],
-                          let schema = itemType.schema {
-                    for entry in list {
-                        if let dict = entry as? [String: AnyCodable] {
-                            collectProductIds(schema: schema, values: dict, into: &ids)
-                        } else if let dict = entry as? [String: Any] {
-                            let wrapped = dict.mapValues { AnyCodable($0) }
-                            collectProductIds(schema: schema, values: wrapped, into: &ids)
-                        }
-                    }
-                }
-            case .object:
-                if let schema = property.schema {
-                    if let dict = value as? [String: AnyCodable] {
-                        collectProductIds(schema: schema, values: dict, into: &ids)
-                    } else if let dict = value as? [String: Any] {
-                        let wrapped = dict.mapValues { AnyCodable($0) }
-                        collectProductIds(schema: schema, values: wrapped, into: &ids)
-                    }
-                }
-            default:
-                continue
-            }
-        }
     }
     
     private func extractProductId(from value: Any?) -> String? {

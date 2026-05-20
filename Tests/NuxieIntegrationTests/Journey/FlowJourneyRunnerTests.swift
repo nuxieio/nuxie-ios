@@ -34,6 +34,168 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             )
         }
 
+        func vmPath(_ propertyPath: String, viewModelName: String = "VM") -> VmPathRef {
+            VmPathRef(viewModelName: viewModelName, path: propertyPath)
+        }
+
+        func normalizeAnyCodable(_ value: AnyCodable) -> AnyCodable {
+            AnyCodable(normalizeAny(value.value))
+        }
+
+        func normalizeAny(_ value: Any) -> Any {
+            if let dict = value as? [String: Any] {
+                return dict.mapValues { normalizeAny($0) }
+            }
+            if let dict = value as? [String: AnyCodable] {
+                return dict.mapValues { normalizeAnyCodable($0) }
+            }
+            if let array = value as? [Any] {
+                return array.map { normalizeAny($0) }
+            }
+            if let array = value as? [AnyCodable] {
+                return array.map { normalizeAnyCodable($0) }
+            }
+            return value
+        }
+
+        func normalizeAction(_ action: InteractionAction, viewModels: [ViewModel]) -> InteractionAction {
+            switch action {
+            case .setViewModel(let action):
+                return .setViewModel(SetViewModelAction(
+                    type: action.type,
+                    path: action.path,
+                    value: normalizeAnyCodable(action.value)
+                ))
+            case .fireTrigger(let action):
+                return .fireTrigger(FireTriggerAction(
+                    type: action.type,
+                    path: action.path
+                ))
+            case .listInsert(let action):
+                return .listInsert(ListInsertAction(
+                    type: action.type,
+                    path: action.path,
+                    index: action.index,
+                    value: normalizeAnyCodable(action.value)
+                ))
+            case .listRemove(let action):
+                return .listRemove(ListRemoveAction(
+                    type: action.type,
+                    path: action.path,
+                    index: action.index
+                ))
+            case .listSwap(let action):
+                return .listSwap(ListSwapAction(
+                    type: action.type,
+                    path: action.path,
+                    indexA: action.indexA,
+                    indexB: action.indexB
+                ))
+            case .listMove(let action):
+                return .listMove(ListMoveAction(
+                    type: action.type,
+                    path: action.path,
+                    from: action.from,
+                    to: action.to
+                ))
+            case .listSet(let action):
+                return .listSet(ListSetAction(
+                    type: action.type,
+                    path: action.path,
+                    index: action.index,
+                    value: normalizeAnyCodable(action.value)
+                ))
+            case .listClear(let action):
+                return .listClear(ListClearAction(
+                    type: action.type,
+                    path: action.path
+                ))
+            case .condition(let action):
+                return .condition(ConditionAction(
+                    type: action.type,
+                    branches: action.branches.map { branch in
+                        ConditionBranch(
+                            id: branch.id,
+                            label: branch.label,
+                            condition: branch.condition,
+                            actions: branch.actions.map { normalizeAction($0, viewModels: viewModels) }
+                        )
+                    },
+                    defaultActions: action.defaultActions?.map { normalizeAction($0, viewModels: viewModels) }
+                ))
+            case .experiment(let action):
+                return .experiment(ExperimentAction(
+                    type: action.type,
+                    experimentId: action.experimentId,
+                    variants: action.variants.map { variant in
+                        ExperimentVariant(
+                            id: variant.id,
+                            name: variant.name,
+                            percentage: variant.percentage,
+                            actions: variant.actions.map { normalizeAction($0, viewModels: viewModels) }
+                        )
+                    }
+                ))
+            case .timeWindow(let action):
+                return .timeWindow(TimeWindowAction(
+                    type: action.type,
+                    startTime: action.startTime,
+                    endTime: action.endTime,
+                    timezone: action.timezone,
+                    daysOfWeek: action.daysOfWeek,
+                    successActions: action.successActions?.map { normalizeAction($0, viewModels: viewModels) }
+                ))
+            case .purchase(let action):
+                return .purchase(PurchaseAction(
+                    type: action.type,
+                    placementIndex: normalizeAnyCodable(action.placementIndex),
+                    productId: normalizeAnyCodable(action.productId)
+                ))
+            default:
+                return action
+            }
+        }
+
+        func normalizeTrigger(_ trigger: InteractionTrigger, viewModels: [ViewModel]) -> InteractionTrigger {
+            if case .didSet(let path, let debounceMs) = trigger {
+                return .didSet(path: path, debounceMs: debounceMs)
+            }
+            return trigger
+        }
+
+        func defaultValues(for viewModel: ViewModel) -> [String: AnyCodable] {
+            viewModel.properties.compactMapValues { $0.defaultValue }
+        }
+
+        func viewModelValues(
+            viewModels: [ViewModel],
+            instances: [ViewModelInstance]?
+        ) -> [RemoteFlowViewModelValue] {
+            let nameById = Dictionary(uniqueKeysWithValues: viewModels.map { ($0.id, $0.name) })
+            let sourceInstances = instances ?? viewModels.compactMap { viewModel -> ViewModelInstance? in
+                let values = defaultValues(for: viewModel)
+                guard !values.isEmpty else { return nil }
+                return ViewModelInstance(
+                    viewModelId: viewModel.id,
+                    instanceId: "\(viewModel.name):default",
+                    name: "Default",
+                    values: values
+                )
+            }
+            return sourceInstances.flatMap { instance in
+                guard let viewModelName = nameById[instance.viewModelId] else { return [RemoteFlowViewModelValue]() }
+                return instance.values.map { key, value in
+                    RemoteFlowViewModelValue(
+                        viewModelName: viewModelName,
+                        instanceId: instance.instanceId,
+                        instanceName: instance.name,
+                        path: key,
+                        value: value
+                    )
+                }
+            }
+        }
+
         func makeRemoteFlow(
             flowId: String,
             entryActions: [InteractionAction]? = nil,
@@ -48,18 +210,37 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     Interaction(
                         id: "start",
                         trigger: .start(config: nil),
-                        actions: entryActions,
+                        actions: entryActions.map { normalizeAction($0, viewModels: viewModels) },
                         enabled: true
                     )
                 ]
             }
-            let resolvedScreens = screens ?? [
+            let resolvedScreens = (screens ?? [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    defaultViewModelId: viewModels.first?.id,
+                    defaultViewModelName: viewModels.first?.name,
                     defaultInstanceId: nil
                 )
-            ]
+            ]).map { screen in
+                RemoteFlowScreen(
+                    id: screen.id,
+                    defaultViewModelName: screen.defaultViewModelName.map { defaultName in
+                        viewModels.first(where: { $0.id == defaultName })?.name ?? defaultName
+                    },
+                    defaultInstanceId: screen.defaultInstanceId
+                )
+            }
+            let normalizedInteractions = interactions.mapValues { interactions in
+                interactions.map { interaction in
+                    Interaction(
+                        id: interaction.id,
+                        trigger: normalizeTrigger(interaction.trigger, viewModels: viewModels),
+                        actions: interaction.actions.map { normalizeAction($0, viewModels: viewModels) },
+                        enabled: interaction.enabled
+                    )
+                }
+            }
+            let values = viewModelValues(viewModels: viewModels, instances: viewModelInstances)
 
             return RemoteFlow(
                 id: flowId,
@@ -73,26 +254,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     )
                 ),
                 screens: resolvedScreens,
-                interactions: interactions,
-                state: viewModels.isEmpty && viewModelInstances == nil
-                    ? nil
-                    : RemoteFlowState(
-                        viewModels: viewModels,
-                        viewModelInstances: viewModelInstances
-                    )
+                interactions: normalizedInteractions,
+                viewModelValues: values.isEmpty ? nil : values
             )
-        }
-
-        func nameId(_ value: String) -> Int {
-            let fnvOffsetBasis: UInt32 = 0x811c9dc5
-            let fnvPrime: UInt32 = 0x01000193
-            if value.isEmpty { return Int(fnvOffsetBasis) }
-            var hash = fnvOffsetBasis
-            for byte in value.utf8 {
-                hash ^= UInt32(byte)
-                hash = hash &* fnvPrime
-            }
-            return Int(hash)
         }
 
         describe("FlowJourneyRunner") {
@@ -144,7 +308,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     flowId: flowId,
                     viewModels: [viewModel],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil),
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -162,7 +326,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.viewModelSnapshots.count).toEventually(equal(1))
                 let snapshot = controller.viewModelSnapshots.first
                 expect(snapshot?.screenId).to(beNil())
-                expect(snapshot?.snapshot.viewModelInstances.first?.viewModelId).to(equal("vm-1"))
+                expect(snapshot?.snapshot.viewModelInstances.first?.viewModelId).to(equal("VM"))
             }
 
             it("dispatches global event interactions") {
@@ -177,8 +341,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     flowId: flowId,
                     interactionsByScreen: ["__global__": [interaction]],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
-                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -225,7 +389,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 )
                 let interaction = Interaction(
                     id: "int-global-did-set",
-                    trigger: .didSet(path: .ids(VmPathIds(pathIds: [0, 1])), debounceMs: nil),
+                    trigger: .didSet(path: vmPath("pulse"), debounceMs: nil),
                     actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
                     enabled: true
                 )
@@ -234,8 +398,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     interactionsByScreen: ["__global__": [interaction]],
                     viewModels: [viewModel],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil),
-                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: "vm-1", defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: "vm-1", defaultInstanceId: nil),
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -250,7 +414,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 runner.attach(viewController: controller)
 
                 _ = await runner.handleDidSet(
-                    path: .ids(VmPathIds(pathIds: [0, 1])),
+                    path: vmPath("pulse"),
                     value: 1,
                     source: "runtime",
                     screenId: "screen-1",
@@ -262,7 +426,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             it("does not echo Rive-origin trigger did_set changes back into the renderer") {
                 let flowId = "flow-rive-trigger-no-echo"
-                let path = VmPathRef.ids(VmPathIds(pathIds: [0, 1]))
+                let path = vmPath("pulse")
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
@@ -299,7 +463,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     interactionsByScreen: ["screen-1": [interaction]],
                     viewModels: [viewModel],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil)
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil)
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -328,7 +492,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             it("isolates debounced did_set dispatch per interaction across screen and global scopes") {
                 let flowId = "flow-did-set-debounce-scope"
-                let path = VmPathRef.ids(VmPathIds(pathIds: [0, 1]))
+                let path = vmPath("pulse")
                 let viewModel = ViewModel(
                     id: "vm-1",
                     name: "VM",
@@ -384,7 +548,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     ],
                     viewModels: [viewModel],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: "vm-1", defaultInstanceId: nil)
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil)
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -430,7 +594,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("flag"),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -460,7 +624,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(flag).to(equal(true))
 
                 await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
-                    contain(VmPathRef.ids(VmPathIds(pathIds: [0, 1])).normalizedPath)
+                    contain(vmPath("flag").normalizedPath)
                 )
             }
 
@@ -512,11 +676,11 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         .listInsert(ListInsertAction(
-                            path: .ids(VmPathIds(pathIds: [0, 2])),
+                            path: vmPath("items"),
                             index: 0,
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         )),
-                        .fireTrigger(FireTriggerAction(path: .ids(VmPathIds(pathIds: [0, 4]))))
+                        .fireTrigger(FireTriggerAction(path: vmPath("pulse")))
                     ],
                     enabled: true
                 )
@@ -545,7 +709,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
                 await expect(controller.viewModelListOperations.map(\.operation)).toEventually(contain(.insert))
                 await expect(controller.viewModelTriggers.map(\.path.normalizedPath)).toEventually(
-                    contain(VmPathRef.ids(VmPathIds(pathIds: [0, 4])).normalizedPath)
+                    contain(vmPath("pulse").normalizedPath)
                 )
             }
 
@@ -585,16 +749,16 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
                     actions: [
                         .listMove(ListMoveAction(
-                            path: .ids(VmPathIds(pathIds: [0, 2])),
+                            path: vmPath("items"),
                             from: 0,
                             to: 2
                         )),
                         .listSet(ListSetAction(
-                            path: .ids(VmPathIds(pathIds: [0, 2])),
+                            path: vmPath("items"),
                             index: 1,
                             value: AnyCodable(["literal": "z"] as [String: Any])
                         )),
-                        .listClear(ListClearAction(path: .ids(VmPathIds(pathIds: [0, 2]))))
+                        .listClear(ListClearAction(path: vmPath("items")))
                     ],
                     enabled: true
                 )
@@ -666,21 +830,20 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         "selectedIndex": AnyCodable(2)
                     ]
                 )
-                let viewModelNameId = nameId(viewModel.name)
-                let productNameId = nameId("selectedProductId")
-                let indexNameId = nameId("selectedIndex")
                 let purchaseAction = InteractionAction.purchase(
                     PurchaseAction(
                         placementIndex: AnyCodable([
                             "ref": [
-                                "pathIds": [viewModelNameId, indexNameId],
-                                "nameBased": true
+                                "kind": "path",
+                                "viewModelName": "VM",
+                                "path": "selectedIndex"
                             ]
                         ]),
                         productId: AnyCodable([
                             "ref": [
-                                "pathIds": [viewModelNameId, productNameId],
-                                "nameBased": true
+                                "kind": "path",
+                                "viewModelName": "VM",
+                                "path": "selectedProductId"
                             ]
                         ])
                     )
@@ -761,7 +924,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     entryActions: [
                         .delay(DelayAction(durationMs: 500)),
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("flag"),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -863,8 +1026,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     flowId: flowId,
                     entryActions: [.timeWindow(action)],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
-                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -903,8 +1066,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     flowId: flowId,
                     entryActions: [.timeWindow(action)],
                     screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
-                        RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
                     ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -1013,7 +1176,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     entryActions: [
                         .waitUntil(waitAction),
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("flag"),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -1070,7 +1233,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     entryActions: [
                         .waitUntil(waitAction),
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("flag"),
                             value: AnyCodable(["literal": true] as [String: Any])
                         ))
                     ],
@@ -1130,7 +1293,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     condition: TestIRBuilder.alwaysFalse(),
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("variant"),
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         ))
                     ]
@@ -1141,7 +1304,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     condition: TestIRBuilder.alwaysTrue(),
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("variant"),
                             value: AnyCodable(["literal": "b"] as [String: Any])
                         ))
                     ]
@@ -1193,7 +1356,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     percentage: 50,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("variant"),
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         ))
                     ]
@@ -1204,7 +1367,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     percentage: 50,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("variant"),
                             value: AnyCodable(["literal": "b"] as [String: Any])
                         ))
                     ]
@@ -1371,7 +1534,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     percentage: 50,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("variant"),
                             value: AnyCodable(["literal": "a"] as [String: Any])
                         ))
                     ]
@@ -1382,7 +1545,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     percentage: 50,
                     actions: [
                         .setViewModel(SetViewModelAction(
-                            path: .ids(VmPathIds(pathIds: [0, 1])),
+                            path: vmPath("variant"),
                             value: AnyCodable(["literal": "b"] as [String: Any])
                         ))
                     ]
@@ -1619,8 +1782,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     enabled: true
                 )
                 let screens = [
-                    RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
-                    RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil)
+                    RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                    RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil)
                 ]
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
@@ -1655,8 +1818,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     enabled: true
                 )
                 let screens = [
-                    RemoteFlowScreen(id: "screen-1", defaultViewModelId: nil, defaultInstanceId: nil),
-                    RemoteFlowScreen(id: "screen-2", defaultViewModelId: nil, defaultInstanceId: nil)
+                    RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                    RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil)
                 ]
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,

@@ -40,12 +40,12 @@ final class ProfileServiceFlowInvalidationTests: QuickSpec {
                 screens: [
                     RemoteFlowScreen(
                         id: "screen-1",
-                        defaultViewModelId: nil,
+                        defaultViewModelName: nil,
                         defaultInstanceId: nil
                     ),
                 ],
                 interactions: [:],
-                state: nil
+                viewModelValues: nil
             )
         }
 

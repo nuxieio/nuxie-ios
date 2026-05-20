@@ -226,12 +226,12 @@ public actor MockNuxieApi: NuxieApiProtocol {
             screens: [
                 RemoteFlowScreen(
                     id: "screen-1",
-                    defaultViewModelId: nil,
+                    defaultViewModelName: nil,
                     defaultInstanceId: nil
                 )
             ],
             interactions: [:],
-            state: nil
+            viewModelValues: nil
         )
     }
     
