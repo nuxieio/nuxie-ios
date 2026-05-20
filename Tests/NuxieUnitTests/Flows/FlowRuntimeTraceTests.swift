@@ -26,7 +26,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
 
                 let trace = recorder.trace(
                     fixtureId: "fixture-nav-binding",
-                    rendererBackend: "react"
+                    runtime: "native"
                 )
 
                 expect(trace.schemaVersion).to(equal(FlowRuntimeTrace.currentSchemaVersion))
@@ -61,7 +61,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
 
                 let trace = recorder.trace(
                     fixtureId: "fixture-events",
-                    rendererBackend: "react"
+                    runtime: "native"
                 )
                 let entry = trace.entries.first
 
@@ -80,7 +80,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
 
                 let trace = recorder.trace(
                     fixtureId: "fixture-round-trip",
-                    rendererBackend: "rive"
+                    runtime: "native"
                 )
 
                 let data = try! JSONEncoder().encode(trace)
@@ -99,7 +99,7 @@ final class FlowRuntimeTraceTests: QuickSpec {
 
                 let trace = recorder.trace(
                     fixtureId: "fixture-screen-changed",
-                    rendererBackend: "app"
+                    runtime: "native"
                 )
                 guard let entry = trace.entries.first else {
                     fail("Expected at least one trace entry")

@@ -46,8 +46,7 @@ final class ProfileServiceFlowInvalidationTests: QuickSpec {
                 ],
                 interactions: [:],
                 viewModels: [],
-                viewModelInstances: nil,
-                converters: nil,
+                viewModelInstances: nil
             )
         }
 

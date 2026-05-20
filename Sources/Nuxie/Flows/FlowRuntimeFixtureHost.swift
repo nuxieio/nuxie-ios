@@ -24,7 +24,7 @@ public enum FlowRuntimeFixtureHost {
         let manifestURL = fixtureBaseURL.appendingPathComponent(FlowArtifactStore.manifestPath)
         let manifestData = try Data(contentsOf: manifestURL)
         let manifest = try JSONDecoder().decode(FlowArtifactManifest.self, from: manifestData)
-        let fixtureFlowDescription = try loadFixtureFlowDescription(fixtureBaseURL: fixtureBaseURL)
+        let fixtureFlow = try loadFixtureFlowDefinition(fixtureBaseURL: fixtureBaseURL)
 
         let buildFiles = try buildFiles(
             for: manifest,
@@ -44,17 +44,16 @@ public enum FlowRuntimeFixtureHost {
                 buildId: manifest.buildId,
                 manifest: buildManifest
             ),
-            screens: fixtureFlowDescription.screens ?? manifest.screens.map {
+            screens: fixtureFlow.screens ?? manifest.screens.map {
                 RemoteFlowScreen(
                     id: $0.screenId,
                     defaultViewModelId: nil,
                     defaultInstanceId: nil
                 )
             },
-            interactions: fixtureFlowDescription.interactions ?? [:],
+            interactions: fixtureFlow.interactions ?? [:],
             viewModels: [],
-            viewModelInstances: nil,
-            converters: nil
+            viewModelInstances: nil
         )
 
         let runtimeAssetStore = RuntimeAssetStore(
@@ -71,7 +70,7 @@ public enum FlowRuntimeFixtureHost {
             artifactStore: artifactStore
         )
 
-        if fixtureFlowDescription.interactions?.isEmpty == false {
+        if fixtureFlow.interactions?.isEmpty == false {
             return FlowRuntimeFixtureContainerViewController(
                 flowViewController: flowViewController,
                 flow: flow
@@ -81,18 +80,18 @@ public enum FlowRuntimeFixtureHost {
         return flowViewController
     }
 
-    private static func loadFixtureFlowDescription(
+    private static func loadFixtureFlowDefinition(
         fixtureBaseURL: URL
-    ) throws -> FixtureFlowDescription {
+    ) throws -> FixtureFlowDefinition {
         let url = fixtureBaseURL.appendingPathComponent("flow-description.json")
         guard FileManager.default.fileExists(atPath: url.path) else {
-            return FixtureFlowDescription()
+            return FixtureFlowDefinition()
         }
         let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(FixtureFlowDescription.self, from: data)
+        return try JSONDecoder().decode(FixtureFlowDefinition.self, from: data)
     }
 
-    private struct FixtureFlowDescription: Decodable {
+    private struct FixtureFlowDefinition: Decodable {
         var screens: [RemoteFlowScreen]? = nil
         var interactions: [String: [Interaction]]? = nil
     }

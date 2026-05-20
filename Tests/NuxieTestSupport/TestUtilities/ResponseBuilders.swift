@@ -146,8 +146,7 @@ struct ResponseBuilders {
             ],
             interactions: [:],
             viewModels: [],
-            viewModelInstances: nil,
-            converters: nil,
+            viewModelInstances: nil
         )
     }
     

@@ -115,8 +115,6 @@ final class FlowJourneyRunner {
     private var didAttemptResponseDraftWrite = false
     private var didFailSetResponseField = false
     private var didFailSubmitResponse = false
-    private var didWarnConverters = false
-
     init(
         journey: Journey,
         campaign: Campaign,
@@ -2092,29 +2090,12 @@ final class FlowJourneyRunner {
 
     private func applyInitialViewModelState() {
         guard let controller = viewController else { return }
-        warnConvertersIfNeeded()
         let snapshot = viewModelState.getSnapshot()
         let screenId = journey.flowState.currentScreenId
 
         Task { @MainActor in
             controller.applyViewModelSnapshot(snapshot, screenId: screenId)
         }
-    }
-
-    private func warnConvertersIfNeeded() {
-        if didWarnConverters { return }
-        guard let converters = remoteFlow.converters, !converters.isEmpty else { return }
-        didWarnConverters = true
-        let hasViewModelTriggers = remoteFlow.interactions.values.contains { interactions in
-            interactions.contains { interaction in
-                if case .didSet = interaction.trigger {
-                    return true
-                }
-                return false
-            }
-        }
-        let triggerNote = hasViewModelTriggers ? " View-model triggers evaluate raw values on native." : ""
-        LogWarning("Flow \(remoteFlow.id) includes converters. Native runtime does not execute converters.\(triggerNote)")
     }
 
     private func applyViewModelValue(
