@@ -11,6 +11,7 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         override func placeholderRect(forBounds bounds: CGRect) -> CGRect { bounds }
     }
 
+    @MainActor
     private enum Control {
         case field(TextField)
         case textView(UITextView)
@@ -53,6 +54,8 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
     private weak var riveViewModel: RiveViewModel?
     private var activeScreen: FlowArtifactScreen?
     private var bindingsByInputId: [String: Binding] = [:]
+    private var textValuesByInputId: [String: String] = [:]
+    private var activeBuildId: String?
     private var hidden = false
 
     func bind(
@@ -61,6 +64,10 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         riveView: RiveView,
         riveViewModel: RiveViewModel
     ) {
+        if activeBuildId != artifact.manifest.buildId {
+            textValuesByInputId.removeAll()
+            activeBuildId = artifact.manifest.buildId
+        }
         clear()
 
         self.riveView = riveView
@@ -76,11 +83,8 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
             control.view.accessibilityIdentifier = "nuxie-text-input-\(input.inputId)"
             control.view.isAccessibilityElement = true
             control.view.isHidden = hidden
-            control.text = riveViewModel.getTextRunValue(input.riveTextRunName) ?? input.value
-
-            if input.secureTextEntry == true {
-                try? riveViewModel.setTextRunValue(input.riveTextRunName, textValue: "")
-            }
+            control.text = textValuesByInputId[input.inputId] ?? input.value
+            setRiveTextRunValue(control.text, for: input, using: riveViewModel)
 
             riveView.addSubview(control.view)
             bindingsByInputId[input.inputId] = Binding(input: input, control: control)
@@ -123,7 +127,15 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
                 for: binding.input.overlay,
                 metrics: metrics
             )
-            applyStyle(binding.input.style, to: binding.control, scale: metrics.scale, secure: binding.input.secureTextEntry == true)
+            let styleScaleX = metrics.scale * max(0, CGFloat(binding.input.overlay.scaleX))
+            let styleScaleY = metrics.scale * max(0, CGFloat(binding.input.overlay.scaleY))
+            applyStyle(
+                binding.input.style,
+                to: binding.control,
+                fontScale: styleScaleY,
+                horizontalScale: styleScaleX,
+                secure: binding.input.secureTextEntry == true
+            )
 
             UIView.performWithoutAnimation {
                 binding.control.view.transform = .identity
@@ -178,7 +190,7 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
     }
 
     private func makeControl(for input: FlowArtifactTextInput) -> Control {
-        if input.multiline == true {
+        if input.multiline == true && input.secureTextEntry != true {
             let textView = UITextView(frame: .zero)
             textView.delegate = self
             textView.backgroundColor = .clear
@@ -208,10 +220,11 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
     private func applyStyle(
         _ style: FlowArtifactTextInputStyle,
         to control: Control,
-        scale: CGFloat,
+        fontScale: CGFloat,
+        horizontalScale: CGFloat,
         secure: Bool
     ) {
-        let fontSize = max(1, CGFloat(style.fontSize) * scale)
+        let fontSize = max(1, CGFloat(style.fontSize) * fontScale)
         let font = Self.font(for: style, size: fontSize)
         let color = UIColor(nuxieARGB: style.color)
         let textColor: UIColor = secure ? color : .clear
@@ -229,14 +242,14 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
             attributes[.font] = font
             attributes[.foregroundColor] = textColor
             if style.letterSpacing != 0 {
-                attributes[.kern] = CGFloat(style.letterSpacing) * scale
+                attributes[.kern] = CGFloat(style.letterSpacing) * horizontalScale
             } else {
                 attributes.removeValue(forKey: .kern)
             }
             if style.lineHeight > 0 {
                 let paragraph = NSMutableParagraphStyle()
-                paragraph.minimumLineHeight = CGFloat(style.lineHeight) * scale
-                paragraph.maximumLineHeight = CGFloat(style.lineHeight) * scale
+                paragraph.minimumLineHeight = CGFloat(style.lineHeight) * fontScale
+                paragraph.maximumLineHeight = CGFloat(style.lineHeight) * fontScale
                 paragraph.alignment = alignment
                 attributes[.paragraphStyle] = paragraph
             } else {
@@ -264,14 +277,14 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
             attributes[.font] = font
             attributes[.foregroundColor] = textColor
             if style.letterSpacing != 0 {
-                attributes[.kern] = CGFloat(style.letterSpacing) * scale
+                attributes[.kern] = CGFloat(style.letterSpacing) * horizontalScale
             } else {
                 attributes.removeValue(forKey: .kern)
             }
             if style.lineHeight > 0 {
                 let paragraph = NSMutableParagraphStyle()
-                paragraph.minimumLineHeight = CGFloat(style.lineHeight) * scale
-                paragraph.maximumLineHeight = CGFloat(style.lineHeight) * scale
+                paragraph.minimumLineHeight = CGFloat(style.lineHeight) * fontScale
+                paragraph.maximumLineHeight = CGFloat(style.lineHeight) * fontScale
                 paragraph.alignment = alignment
                 attributes[.paragraphStyle] = paragraph
             } else {
@@ -334,12 +347,21 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         }
 
         let nextText = binding.control.text
-        let renderedText = binding.input.secureTextEntry == true ? "" : nextText
+        textValuesByInputId[binding.input.inputId] = nextText
+        setRiveTextRunValue(nextText, for: binding.input, using: riveViewModel)
+    }
+
+    private func setRiveTextRunValue(
+        _ text: String,
+        for input: FlowArtifactTextInput,
+        using riveViewModel: RiveViewModel
+    ) {
+        let renderedText = input.secureTextEntry == true ? "" : text
 
         do {
-            try riveViewModel.setTextRunValue(binding.input.riveTextRunName, textValue: renderedText)
+            try riveViewModel.setTextRunValue(input.riveTextRunName, textValue: renderedText)
         } catch {
-            LogWarning("FlowTextInputOverlayBridge: failed to update text run \(binding.input.riveTextRunName): \(error)")
+            LogWarning("FlowTextInputOverlayBridge: failed to update text run \(input.riveTextRunName): \(error)")
         }
     }
 
