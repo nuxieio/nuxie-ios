@@ -476,10 +476,18 @@ final class FlowViewModelBridge {
                     onValueChange: onValueChange
                 )
             case .viewModel:
-                guard let nestedViewModelId = property.viewModelId,
-                      let nestedViewModel = flowViewModelsById[nestedViewModelId] else {
+                if let nestedSchema = property.schema {
+                    installValueListeners(
+                        in: instance,
+                        schema: nestedSchema,
+                        viewModelName: viewModelName,
+                        pathPrefix: path,
+                        onValueChange: onValueChange
+                    )
                     continue
                 }
+                guard let nestedViewModelId = property.viewModelId,
+                      let nestedViewModel = flowViewModelsById[nestedViewModelId] else { continue }
                 installValueListeners(
                     in: instance,
                     schema: nestedViewModel.properties,
@@ -1100,21 +1108,49 @@ final class FlowViewModelBridge {
         from viewModel: RiveDataBindingViewModel,
         hashNameId: (String) -> Int
     ) -> ViewModel {
-        let properties = Dictionary(
-            uniqueKeysWithValues: viewModel.properties.map { property in
-                (
-                    property.name,
-                    ViewModelProperty(
-                        type: flowPropertyType(property.type)
-                    )
-                )
-            }
+        let defaultInstance = viewModel.createDefaultInstance() ?? viewModel.createInstance()
+        let properties = flowProperties(
+            from: viewModel.properties,
+            instance: defaultInstance
         )
         return ViewModel(
             id: viewModel.name,
             name: viewModel.name,
             viewModelPathId: hashNameId(viewModel.name),
             properties: properties
+        )
+    }
+
+    private static func flowProperties(
+        from properties: [RiveDataBindingViewModel.Instance.Property.Data],
+        instance: RiveDataBindingViewModel.Instance?
+    ) -> [String: ViewModelProperty] {
+        Dictionary(
+            uniqueKeysWithValues: properties.map { property in
+                (
+                    property.name,
+                    flowProperty(from: property, instance: instance)
+                )
+            }
+        )
+    }
+
+    private static func flowProperty(
+        from property: RiveDataBindingViewModel.Instance.Property.Data,
+        instance: RiveDataBindingViewModel.Instance?
+    ) -> ViewModelProperty {
+        let type = flowPropertyType(property.type)
+        let nestedSchema: [String: ViewModelProperty]?
+        if type == .viewModel,
+           let nestedInstance = instance?.viewModelInstanceProperty(fromPath: property.name) {
+            nestedSchema = flowProperties(from: nestedInstance.properties, instance: nestedInstance)
+        } else {
+            nestedSchema = nil
+        }
+
+        return ViewModelProperty(
+            type: type,
+            schema: nestedSchema
         )
     }
 
