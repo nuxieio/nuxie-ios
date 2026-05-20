@@ -231,8 +231,7 @@ public actor MockNuxieApi: NuxieApiProtocol {
                 )
             ],
             interactions: [:],
-            viewModels: [],
-            viewModelInstances: nil
+            state: nil
         )
     }
     

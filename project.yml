@@ -214,6 +214,31 @@ targets:
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
 
+  NuxieFlowRuntimeReferenceApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Examples/FlowRuntimeReferenceApp/Sources
+        name: FlowRuntimeReferenceApp
+      - path: Tests/FlowRuntimeHostApp/Fixtures
+        type: folder
+    dependencies:
+      - target: NuxieSDK
+      - package: RiveRuntime
+        product: RiveRuntime
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.nuxie.sdk.flow-runtime-reference
+      PRODUCT_NAME: NuxieFlowRuntimeReference
+      MARKETING_VERSION: 0.1.0
+      CURRENT_PROJECT_VERSION: 1
+      SWIFT_VERSION: 5.9
+      INFOPLIST_FILE: Examples/FlowRuntimeReferenceApp/Sources/Info.plist
+      SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+      SUPPORTS_MACCATALYST: NO
+      TARGETED_DEVICE_FAMILY: "1"
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+
   NuxieFlowRuntimeUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -253,6 +278,15 @@ schemes:
     build:
       targets:
         NuxieSDKMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+
+  NuxieFlowRuntimeReferenceApp:
+    build:
+      targets:
+        NuxieFlowRuntimeReferenceApp: all
     run:
       config: Debug
     archive:

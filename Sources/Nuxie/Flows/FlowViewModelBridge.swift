@@ -82,11 +82,11 @@ final class FlowViewModelBridge {
         self.onValueChange = onValueChange
 
         if let remoteFlow {
-            for viewModel in remoteFlow.viewModels {
+            for viewModel in remoteFlow.state?.viewModels ?? [] {
                 flowViewModelsById[viewModel.id] = viewModel
                 flowViewModelsByName[viewModel.name] = viewModel
             }
-            for instance in remoteFlow.viewModelInstances ?? [] {
+            for instance in remoteFlow.state?.viewModelInstances ?? [] {
                 recordFlowInstance(instance.instanceId, viewModelId: instance.viewModelId)
             }
         }
@@ -999,7 +999,7 @@ final class FlowViewModelBridge {
            matches(viewModel) {
             return viewModel
         }
-        return remoteFlow?.viewModels.first(where: matches)
+        return (remoteFlow?.state?.viewModels ?? []).first(where: matches)
     }
 
     private func resolveProperties(

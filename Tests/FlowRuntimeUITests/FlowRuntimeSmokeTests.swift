@@ -2,6 +2,11 @@ import XCTest
 
 final class FlowRuntimeSmokeTests: XCTestCase {
     private var app: XCUIApplication!
+    private let fixtureNames = [
+        "layout-paint",
+        "published-font",
+        "pressable-interaction",
+    ]
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -13,26 +18,22 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         app = nil
     }
 
-    func testLayoutFixtureRendersAndCanReceiveATap() throws {
+    func testPublishedFixturesRenderAndHandleNativeInput() throws {
         app.launchArguments = [
-            "--nuxie-fixture",
-            "layout-paint",
-        ]
-        try launchAndCapture(fixtureName: "layout-paint")
-    }
-
-    func testPublishedFontFixtureRendersWithExternalAssets() throws {
-        app.launchArguments = [
-            "--nuxie-fixture",
-            "published-font",
+            "--nuxie-fixtures",
+            fixtureNames.joined(separator: ","),
         ]
         app.launch()
 
-        let surface = app.otherElements["nuxie-flow-surface"]
-        XCTAssertTrue(
-            surface.waitForExistence(timeout: 20),
-            "Expected the native Rive flow surface to mount"
-        )
+        try selectFixture(named: "layout-paint")
+        try waitForSurface()
+        app.otherElements["nuxie-flow-surface"]
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .tap()
+        try captureScreenshot(named: "layout-paint")
+
+        try selectFixture(named: "published-font")
+        try waitForSurface()
 
         let emailField = app.textFields["nuxie-text-input-text-input/screen_1/email_input"]
         XCTAssertTrue(
@@ -49,22 +50,13 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         )
 
         try captureScreenshot(named: "published-font")
-    }
 
-    func testPublishedPressableFixtureRunsNativeInteractionAction() throws {
-        app.launchArguments = [
-            "--nuxie-fixture",
-            "pressable-interaction",
-        ]
-        app.launch()
+        try selectFixture(named: "pressable-interaction")
+        try waitForSurface()
 
-        let surface = app.otherElements["nuxie-flow-surface"]
-        XCTAssertTrue(
-            surface.waitForExistence(timeout: 20),
-            "Expected the native Rive flow surface to mount"
-        )
-
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        app.otherElements["nuxie-flow-surface"]
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .tap()
 
         let eventLog = app.staticTexts["nuxie-flow-event-log"]
         XCTAssertTrue(
@@ -79,16 +71,27 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         try captureScreenshot(named: "pressable-interaction")
     }
 
-    private func launchAndCapture(fixtureName: String) throws {
-        app.launch()
+    private func selectFixture(named fixtureName: String) throws {
+        if app.staticTexts["nuxie-current-fixture"].label != fixtureName {
+            let button = app.buttons["nuxie-fixture-\(fixtureName)"]
+            XCTAssertTrue(
+                button.waitForExistence(timeout: 10),
+                "Expected fixture selector button for \(fixtureName)"
+            )
+            button.tap()
+        }
+        XCTAssertTrue(
+            app.staticTexts["nuxie-current-fixture"].waitForLabel(containing: fixtureName, timeout: 10),
+            "Expected host app to switch to fixture \(fixtureName)"
+        )
+    }
+
+    private func waitForSurface() throws {
         let surface = app.otherElements["nuxie-flow-surface"]
         XCTAssertTrue(
             surface.waitForExistence(timeout: 20),
             "Expected the native Rive flow surface to mount"
         )
-
-        surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        try captureScreenshot(named: fixtureName)
     }
 
     private func captureScreenshot(named name: String) throws {

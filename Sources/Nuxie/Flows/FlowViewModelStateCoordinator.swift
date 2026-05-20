@@ -53,9 +53,9 @@ final class FlowViewModelStateCoordinator {
 
     init(remoteFlow: RemoteFlow) {
         self.remoteFlow = remoteFlow
-        self.viewModelList = remoteFlow.viewModels
+        self.viewModelList = remoteFlow.state?.viewModels ?? []
 
-        for model in remoteFlow.viewModels {
+        for model in remoteFlow.state?.viewModels ?? [] {
             viewModels[model.id] = model
         }
 
@@ -63,7 +63,7 @@ final class FlowViewModelStateCoordinator {
             screenDefaults[screen.id] = (screen.defaultViewModelId, screen.defaultInstanceId)
         }
 
-        let instances = remoteFlow.viewModelInstances ?? []
+        let instances = remoteFlow.state?.viewModelInstances ?? []
         for instance in instances {
             let state = FlowViewModelInstanceState(
                 viewModelId: instance.viewModelId,
@@ -79,7 +79,7 @@ final class FlowViewModelStateCoordinator {
         }
 
         // Ensure each view model has at least one instance
-        for viewModel in remoteFlow.viewModels {
+        for viewModel in remoteFlow.state?.viewModels ?? [] {
             if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
                 let blank = createBlankInstance(for: viewModel.id)
                 self.instances[blank.instanceId] = blank
@@ -131,7 +131,7 @@ final class FlowViewModelStateCoordinator {
             applyViewModelDefaults(instanceId: state.instanceId)
         }
 
-        for viewModel in remoteFlow.viewModels {
+        for viewModel in remoteFlow.state?.viewModels ?? [] {
             if (instancesByViewModel[viewModel.id] ?? []).isEmpty {
                 let blank = createBlankInstance(for: viewModel.id)
                 instances[blank.instanceId] = blank

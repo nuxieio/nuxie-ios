@@ -52,8 +52,7 @@ public enum FlowRuntimeFixtureHost {
                 )
             },
             interactions: fixtureFlow.interactions ?? [:],
-            viewModels: [],
-            viewModelInstances: nil
+            state: nil
         )
 
         let runtimeAssetStore = RuntimeAssetStore(
