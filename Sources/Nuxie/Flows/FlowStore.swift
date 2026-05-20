@@ -187,10 +187,6 @@ actor FlowStore {
             if value.path.split(separator: "/").last == "productId",
                let productId = extractProductId(from: value.value.value) {
                 ids.insert(productId)
-                continue
-            }
-            if let productId = extractProductId(from: value.value.value) {
-                ids.insert(productId)
             }
         }
 

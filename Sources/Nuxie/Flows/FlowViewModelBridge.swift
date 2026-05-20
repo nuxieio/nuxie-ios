@@ -223,22 +223,26 @@ final class FlowViewModelBridge {
 
         let didApply = withHostMutation {
             var didApply = false
-            for instancePayload in instances {
-                let viewModelId = instancePayload.viewModelId
+            for value in snapshot.values {
+                let viewModelId = value.viewModelName
                 guard let flowViewModel = flowViewModelsById[viewModelId] else { continue }
-                let instanceId = instancePayload.instanceId
-                let values = instancePayload.values.mapValues(\.value)
-
-                recordFlowInstance(instanceId, viewModelId: viewModelId)
+                if let instanceId = value.instanceId {
+                    recordFlowInstance(instanceId, viewModelId: viewModelId)
+                }
 
                 guard let riveInstance = riveInstance(
-                    forFlowInstanceId: instanceId,
+                    forFlowInstanceId: value.instanceId,
                     flowViewModel: flowViewModel
                 ) else {
                     continue
                 }
 
-                didApply = applyValues(values, schema: flowViewModel.properties, rootPath: "", to: riveInstance) || didApply
+                didApply = applyValue(
+                    value.value.value,
+                    property: resolveProperty(value.path, in: flowViewModel),
+                    path: value.path,
+                    to: riveInstance
+                ) || didApply
             }
             boundInstance?.updateListeners()
             return didApply
@@ -750,6 +754,15 @@ final class FlowViewModelBridge {
             if viewModelId == boundFlowViewModelId, let boundInstance {
                 return (selectedFlowInstanceId, viewModelId, boundInstance)
             }
+            if let flowViewModel = flowViewModelsById[viewModelId],
+               let instance = createRiveInstance(for: flowViewModel) {
+                if let instanceId = screen.defaultInstanceId {
+                    recordFlowInstance(instanceId, viewModelId: viewModelId)
+                    riveInstancesByFlowInstanceId[instanceId] = instance
+                    return (instanceId, viewModelId, instance)
+                }
+                return (nil, viewModelId, instance)
+            }
         }
 
         return nil
@@ -901,14 +914,38 @@ final class FlowViewModelBridge {
         return ResolvedPath(
             viewModelId: viewModel.id,
             path: path.path,
-            property: resolveTopLevelProperty(path.path, in: viewModel)
+            property: resolveProperty(path.path, in: viewModel)
         )
     }
 
-    private func resolveTopLevelProperty(_ path: String, in viewModel: ViewModel) -> ViewModelProperty? {
-        let first = path.split(separator: "/", maxSplits: 1).first.map(String.init)
-        guard let first else { return nil }
-        return viewModel.properties[first]
+    private func resolveProperty(_ path: String, in viewModel: ViewModel) -> ViewModelProperty? {
+        let segments = path.split(separator: "/").map(String.init)
+        guard !segments.isEmpty else { return nil }
+        var schema = viewModel.properties
+        var property: ViewModelProperty?
+
+        for (index, segment) in segments.enumerated() {
+            guard let next = schema[segment] else { return nil }
+            property = next
+            if index == segments.count - 1 {
+                return next
+            }
+            switch next.type {
+            case .object:
+                guard let nestedSchema = next.schema else { return nil }
+                schema = nestedSchema
+            case .viewModel:
+                guard let nestedViewModelId = next.viewModelId,
+                      let nestedViewModel = flowViewModelsById[nestedViewModelId] else {
+                    return nil
+                }
+                schema = nestedViewModel.properties
+            default:
+                return nil
+            }
+        }
+
+        return property
     }
 
     private func resolveRelativeViewModel(screenId: String?, instanceId: String?) -> ViewModel? {

@@ -374,7 +374,7 @@ final class FlowViewModelBridgeTests: XCTestCase {
         ]))
         XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
 
-        XCTAssertFalse(bridge.bindDefaultInstance(forScreenId: "screen-2"))
+        XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
         XCTAssertTrue(bridge.applySnapshot(
             makeSnapshot([
                 makeInstance(viewModelId: "Test", instanceId: "instance-test", values: ["String": "screen-a"]),
@@ -384,6 +384,17 @@ final class FlowViewModelBridgeTests: XCTestCase {
         ))
         XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
         XCTAssertEqual(try bridge.stringValue(path: "String"), "screen-b")
+    }
+
+    func testBindsDefaultScreenViewModelWithoutSeedValues() throws {
+        let bridge = try makeBridge(remoteFlow: makeRemoteFlow(screens: [
+            RemoteFlowScreen(id: "screen-1", defaultViewModelName: "Test", defaultInstanceId: "instance-test"),
+            RemoteFlowScreen(id: "screen-2", defaultViewModelName: "Nested", defaultInstanceId: "instance-nested"),
+        ]))
+        XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
+
+        XCTAssertTrue(bridge.bindDefaultInstance(forScreenId: "screen-2"))
+        XCTAssertEqual(bridge.boundViewModelName, "Nested")
     }
 
     func testUsesInstanceIdToDisambiguateDuplicatePathRoots() throws {

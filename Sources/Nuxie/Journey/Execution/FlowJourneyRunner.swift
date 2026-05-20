@@ -183,7 +183,8 @@ final class FlowJourneyRunner {
         value: Any,
         source: String?,
         screenId: String?,
-        instanceId: String?
+        instanceId: String?,
+        isTrigger: Bool = false
     ) async -> RunOutcome? {
         let resolvedScreenId = screenId ?? journey.flowState.currentScreenId
         _ = viewModelState.setValue(
@@ -204,7 +205,8 @@ final class FlowJourneyRunner {
             path: path,
             screenId: resolvedScreenId,
             instanceId: instanceId,
-            notifyRenderer: source != "rive"
+            notifyRenderer: source != "rive",
+            force: isTrigger
         )
         return outcome
     }
@@ -1988,9 +1990,10 @@ final class FlowJourneyRunner {
         path: VmPathRef,
         screenId: String?,
         instanceId: String?,
-        notifyRenderer: Bool = true
+        notifyRenderer: Bool = true,
+        force: Bool = false
     ) {
-        guard viewModelState.isTriggerPath(path: path, screenId: screenId) else { return }
+        guard force || viewModelState.isTriggerPath(path: path, screenId: screenId) else { return }
         let key = path.normalizedPath
         triggerResetTasks[key]?.cancel()
         triggerResetTasks[key] = Task { [weak self] in

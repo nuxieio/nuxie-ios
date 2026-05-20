@@ -7,7 +7,8 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
     override class func spec() {
         func makeRemoteFlow(
             values: [RemoteFlowViewModelValue] = [],
-            screens: [RemoteFlowScreen]? = nil
+            screens: [RemoteFlowScreen]? = nil,
+            interactions: [String: [Interaction]] = [:]
         ) -> RemoteFlow {
             RemoteFlow(
                 id: "flow-runtime",
@@ -27,7 +28,7 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
                         defaultInstanceId: "runtime-instance"
                     )
                 ],
-                interactions: [:],
+                interactions: interactions,
                 viewModelValues: values
             )
         }
@@ -136,6 +137,54 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
                     instanceId: "reason-0"
                 ) as? String)
                     .to(equal("Too expensive"))
+            }
+
+            it("resolves omitted default view model names from the screen default instance") {
+                let coordinator = FlowViewModelStateCoordinator(remoteFlow: makeRemoteFlow(
+                    values: [
+                        value(
+                            viewModelName: "Nested",
+                            instanceId: "nested-instance",
+                            instanceName: nil,
+                            path: "title",
+                            "Nested title"
+                        ),
+                    ],
+                    screens: [
+                        RemoteFlowScreen(
+                            id: "screen-1",
+                            defaultViewModelName: nil,
+                            defaultInstanceId: "nested-instance"
+                        ),
+                    ]
+                ))
+
+                expect(coordinator.getValue(
+                    path: path("title", viewModelName: nil, isRelative: true),
+                    screenId: "screen-1"
+                ) as? String)
+                    .to(equal("Nested title"))
+            }
+
+            it("tracks fire-trigger action paths as trigger paths") {
+                let pulse = path("pulse")
+                let coordinator = FlowViewModelStateCoordinator(remoteFlow: makeRemoteFlow(
+                    interactions: [
+                        "screen-1": [
+                            Interaction(
+                                id: "int-trigger",
+                                trigger: .event(eventName: "screen_shown", filter: nil),
+                                actions: [
+                                    .fireTrigger(FireTriggerAction(path: pulse)),
+                                ],
+                                enabled: true
+                            ),
+                        ],
+                    ]
+                ))
+
+                expect(coordinator.isTriggerPath(path: pulse, screenId: "screen-1")).to(beTrue())
+                expect(coordinator.isTriggerPath(path: path("title"), screenId: "screen-1")).to(beFalse())
             }
 
             it("supports list operations on path refs") {

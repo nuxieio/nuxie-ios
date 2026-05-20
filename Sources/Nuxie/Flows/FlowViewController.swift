@@ -338,6 +338,7 @@ struct FlowRendererViewModelChange {
     let source: String?
     let screenId: String?
     let instanceId: String?
+    let isTrigger: Bool
 }
 
 struct FlowRendererOpenLinkRequest {
@@ -908,7 +909,12 @@ public class FlowViewController: NuxiePlatformViewController {
                             value: value,
                             source: source,
                             screenId: self.activeNativeScreenId,
-                            instanceId: nil
+                            instanceId: nil,
+                            isTrigger: self.flowViewModelBridge?.isTriggerPath(
+                                path: path,
+                                screenId: self.activeNativeScreenId,
+                                instanceId: nil
+                            ) == true
                         )
                     )
                 }
