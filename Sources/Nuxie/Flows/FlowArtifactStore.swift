@@ -170,6 +170,10 @@ struct FlowArtifactTextInput: Codable, Equatable {
     let renderedNodeId: String
     let riveTextObjectKey: String
     let riveTextRunObjectKey: String
+    let riveTextName: String
+    let riveTextRunName: String
+    let overlay: FlowArtifactTextInputOverlay
+    let style: FlowArtifactTextInputStyle
     let value: String
     let placeholder: String?
     let editable: Bool
@@ -177,6 +181,28 @@ struct FlowArtifactTextInput: Codable, Equatable {
     let secureTextEntry: Bool?
     let multiline: Bool?
     let maxLength: Int?
+}
+
+struct FlowArtifactTextInputOverlay: Codable, Equatable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+    let rotation: Double
+    let scaleX: Double
+    let scaleY: Double
+}
+
+struct FlowArtifactTextInputStyle: Codable, Equatable {
+    let fontFamily: String
+    let fontWeight: String
+    let fontStyle: String
+    let fontSize: Double
+    let lineHeight: Double
+    let letterSpacing: Double
+    let color: UInt32
+    let fontAssetRiveUniqueName: String
+    let textAlign: String?
 }
 
 struct FlowArtifactAssets: Codable, Equatable {

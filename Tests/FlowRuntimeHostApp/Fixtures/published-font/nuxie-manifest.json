@@ -71,6 +71,28 @@
       "renderedNodeId": "email_input",
       "riveTextObjectKey": "artboard/screen_1/email_input/text",
       "riveTextRunObjectKey": "artboard/screen_1/email_input/text-run",
+      "riveTextName": "TextInput",
+      "riveTextRunName": "TextInput Run",
+      "overlay": {
+        "x": 32,
+        "y": 316,
+        "width": 326,
+        "height": 24,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "style": {
+        "fontFamily": "Inter",
+        "fontWeight": "400",
+        "fontStyle": "normal",
+        "fontSize": 17,
+        "lineHeight": 24,
+        "letterSpacing": 0,
+        "color": 4279179050,
+        "fontAssetRiveUniqueName": "font-inter-400-normal-f5eccb28-0",
+        "textAlign": "left"
+      },
       "value": "levi@nuxie.dev",
       "placeholder": "you@example.com",
       "editable": true,

@@ -26,7 +26,29 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             "--nuxie-fixture",
             "published-font",
         ]
-        try launchAndCapture(fixtureName: "published-font")
+        app.launch()
+
+        let surface = app.otherElements["nuxie-flow-surface"]
+        XCTAssertTrue(
+            surface.waitForExistence(timeout: 20),
+            "Expected the native Rive flow surface to mount"
+        )
+
+        let emailField = app.textFields["nuxie-text-input-text-input/screen_1/email_input"]
+        XCTAssertTrue(
+            emailField.waitForExistence(timeout: 10),
+            "Expected the published editable text input overlay to mount"
+        )
+
+        emailField.tap()
+        emailField.typeText("+native")
+
+        XCTAssertTrue(
+            emailField.waitForValue(containing: "+native", timeout: 5),
+            "Expected typing in the native overlay to update the UIKit text input"
+        )
+
+        try captureScreenshot(named: "published-font")
     }
 
     func testPublishedPressableFixtureRunsNativeInteractionAction() throws {
@@ -100,6 +122,12 @@ final class FlowRuntimeSmokeTests: XCTestCase {
 private extension XCUIElement {
     func waitForLabel(containing expectedValue: String, timeout: TimeInterval) -> Bool {
         let predicate = NSPredicate(format: "label CONTAINS %@", expectedValue)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    func waitForValue(containing expectedValue: String, timeout: TimeInterval) -> Bool {
+        let predicate = NSPredicate(format: "value CONTAINS %@", expectedValue)
         let expectation = XCTNSPredicateExpectation(predicate: predicate, object: self)
         return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
     }

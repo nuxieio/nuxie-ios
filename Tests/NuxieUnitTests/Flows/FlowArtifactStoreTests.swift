@@ -253,6 +253,85 @@ final class FlowArtifactStoreTests: AsyncSpec {
                 expect(cached.rivURL.path).to(equal(downloaded.rivURL.path))
             }
 
+            it("decodes editable text input overlay metadata") {
+                let manifest = try JSONDecoder().decode(FlowArtifactManifest.self, from: """
+                {
+                  "version": 1,
+                  "flowId": "flow-1",
+                  "buildId": "build-1",
+                  "renderer": "rive",
+                  "riv": {
+                    "path": "flow.riv",
+                    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+                    "sizeBytes": 1
+                  },
+                  "entry": {
+                    "screenId": "screen-1",
+                    "artboardId": "screen-1",
+                    "artboardName": "Screen 1",
+                    "width": 390,
+                    "height": 844
+                  },
+                  "screens": [
+                    {
+                      "screenId": "screen-1",
+                      "artboardId": "screen-1",
+                      "artboardName": "Screen 1",
+                      "width": 390,
+                      "height": 844
+                    }
+                  ],
+                  "assets": { "images": [], "fonts": [] },
+                  "textInputs": [
+                    {
+                      "inputId": "text-input/screen-1/email-input",
+                      "screenId": "screen-1",
+                      "artboardId": "screen-1",
+                      "viewNodeId": "email-input",
+                      "renderedNodeId": "email-input",
+                      "riveTextObjectKey": "artboard/screen-1/email-input/text",
+                      "riveTextRunObjectKey": "artboard/screen-1/email-input/text-run",
+                      "riveTextName": "email-input",
+                      "riveTextRunName": "email-input Run",
+                      "overlay": {
+                        "x": 32,
+                        "y": 96,
+                        "width": 326,
+                        "height": 52,
+                        "rotation": 0,
+                        "scaleX": 1,
+                        "scaleY": 1
+                      },
+                      "style": {
+                        "fontFamily": "Inter",
+                        "fontWeight": "500",
+                        "fontStyle": "normal",
+                        "fontSize": 17,
+                        "lineHeight": 24,
+                        "letterSpacing": 0,
+                        "color": 4279179050,
+                        "fontAssetRiveUniqueName": "font-inter-500-normal-e57198b3-0",
+                        "textAlign": "left"
+                      },
+                      "value": "levi@nuxie.dev",
+                      "placeholder": "you@example.com",
+                      "editable": true,
+                      "keyboardType": "email-address",
+                      "secureTextEntry": false,
+                      "multiline": false,
+                      "maxLength": 72
+                    }
+                  ]
+                }
+                """.data(using: .utf8)!)
+
+                expect(manifest.textInputs).to(haveCount(1))
+                expect(manifest.textInputs[0].riveTextRunName).to(equal("email-input Run"))
+                expect(manifest.textInputs[0].overlay.x).to(equal(32))
+                expect(manifest.textInputs[0].style.color).to(equal(0xff0f172a))
+                expect(manifest.textInputs[0].style.fontAssetRiveUniqueName).to(equal("font-inter-500-normal-e57198b3-0"))
+            }
+
             it("reuses a shared runtime image cache when the artifact copy is missing") {
                 let fixture = try writeFixtureArtifact(includeImageAsset: true)
                 let runtimeAssetStore = RuntimeAssetStore(cacheDirectory: fixture.runtimeCacheURL)
