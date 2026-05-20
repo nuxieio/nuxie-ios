@@ -515,6 +515,7 @@ public class FlowViewController: NuxiePlatformViewController {
     private var flowRiveViewModel: RiveViewModel?
     private var flowRiveView: RiveView?
     private var flowViewModelBridge: FlowViewModelBridge?
+    private var textInputOverlayBridge: FlowTextInputOverlayBridge?
     private var flowArtifact: LoadedFlowArtifact?
     private var activeNativeScreenId: String?
     private var pendingNativeScreenBindingId: String?
@@ -585,6 +586,13 @@ public class FlowViewController: NuxiePlatformViewController {
 
     public override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
+    }
+
+    public override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        #if canImport(RiveRuntime)
+        textInputOverlayBridge?.layout()
+        #endif
     }
     #endif
 
@@ -856,6 +864,8 @@ public class FlowViewController: NuxiePlatformViewController {
             flowRiveView = nil
             flowRiveViewModel = nil
             flowViewModelBridge = nil
+            textInputOverlayBridge?.clear()
+            textInputOverlayBridge = nil
             flowArtifact = nil
             activeNativeScreenId = nil
             pendingNativeScreenBindingId = nil
@@ -931,12 +941,22 @@ public class FlowViewController: NuxiePlatformViewController {
             flowRiveView = riveView
             flowArtifact = artifact
             activeNativeScreenId = artifact.manifest.entry.screenId
+            let textInputBridge = FlowTextInputOverlayBridge()
+            textInputBridge.bind(
+                screenId: artifact.manifest.entry.screenId,
+                artifact: artifact,
+                riveView: riveView,
+                riveViewModel: riveViewModel
+            )
+            textInputOverlayBridge = textInputBridge
             handleNativeRuntimeReady()
             LogDebug("Mounted native flow artifact for flow \(flow.id)")
         } catch {
             flowArtifact = nil
             activeNativeScreenId = nil
             pendingNativeScreenBindingId = nil
+            textInputOverlayBridge?.clear()
+            textInputOverlayBridge = nil
             viewModel.handleLoadingFailed(error)
         }
         #else
@@ -979,6 +999,7 @@ public class FlowViewController: NuxiePlatformViewController {
         }
 
         if let fontAsset = asset as? RiveFontAsset {
+            _ = FlowRuntimeFontRegistry.registerFont(riveUniqueName: assetName, data: data)
             fontAsset.font(factory.decodeFont(data))
             LogDebug("Loaded Rive font asset \(assetName) from \(assetURL.path)")
             return true
@@ -1005,6 +1026,7 @@ public class FlowViewController: NuxiePlatformViewController {
     private func setFlowContentHidden(_ hidden: Bool) {
         #if canImport(RiveRuntime) && canImport(UIKit)
         flowRiveView?.isHidden = hidden
+        textInputOverlayBridge?.setHidden(hidden)
         #endif
     }
 
@@ -1354,6 +1376,15 @@ private extension FlowViewController {
                 pendingNativeScreenBindingId = screenId
             }
             activeNativeScreenId = screenId
+            if let riveView = flowRiveView,
+               let artifact = flowArtifact {
+                textInputOverlayBridge?.bind(
+                    screenId: screenId,
+                    artifact: artifact,
+                    riveView: riveView,
+                    riveViewModel: riveViewModel
+                )
+            }
             flowRiveView?.advance(delta: 0)
             animateNativeScreenTransition(transitionSpec, previousSnapshot: previousSnapshot)
             runtimeDelegate?.flowViewController(self, didChangeScreen: screenId)
