@@ -454,6 +454,26 @@ final class FlowViewModelBridgeTests: XCTestCase {
         XCTAssertEqual(changes.first?.source, "rive")
     }
 
+    func testEmitsNestedBoundValueChangesFromDiscoveredRiveSchema() throws {
+        var changes: [(path: VmPathRef, value: Any, source: String?)] = []
+        let bridge = try makeBridge(
+            onValueChange: { path, value, source in
+                changes.append((path, value, source))
+            }
+        )
+        XCTAssertTrue(try bridge.bindDefaultInstanceForActiveArtboard())
+
+        let property = try XCTUnwrap(bridge.boundInstance?.stringProperty(fromPath: "Nested/String"))
+        property.value = "nested-from-rive"
+        bridge.boundInstance?.updateListeners()
+
+        XCTAssertTrue(changes.contains { change in
+            change.path == path("Nested/String")
+                && change.value as? String == "nested-from-rive"
+                && change.source == "rive"
+        })
+    }
+
     func testEmitsNameBasedBoundValueChangesWhenPropertyIdsAreAbsent() throws {
         var changes: [(path: VmPathRef, value: Any, source: String?)] = []
         let bridge = try makeBridge(
