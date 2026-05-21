@@ -1379,11 +1379,7 @@ private extension FlowViewController {
                 stateMachineName: nil,
                 animationName: nil
             )
-            if flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true {
-                pendingNativeScreenBindingId = nil
-            } else {
-                pendingNativeScreenBindingId = screenId
-            }
+            _ = try bindNativeViewModelForScreen(screenId)
             activeNativeScreenId = screenId
             if let riveView = flowRiveView,
                let artifact = flowArtifact,
@@ -1405,6 +1401,34 @@ private extension FlowViewController {
             LogWarning("FlowViewController: failed to navigate native artifact to screen \(screenId): \(error)")
             return false
         }
+    }
+
+    @discardableResult
+    private func bindNativeViewModelForScreen(_ screenId: String) throws -> Bool {
+        guard let viewModelBridge = flowViewModelBridge else {
+            pendingNativeScreenBindingId = screenId
+            return false
+        }
+
+        if viewModelBridge.bindDefaultInstance(forScreenId: screenId) {
+            pendingNativeScreenBindingId = nil
+            return true
+        }
+
+        if try viewModelBridge.bindDefaultInstanceForActiveArtboard() {
+            pendingNativeScreenBindingId = shouldKeepPendingNativeScreenBinding(for: screenId) ? screenId : nil
+            return true
+        }
+
+        pendingNativeScreenBindingId = screenId
+        return false
+    }
+
+    private func shouldKeepPendingNativeScreenBinding(for screenId: String) -> Bool {
+        guard let screen = flow.remoteFlow.screens.first(where: { $0.id == screenId }) else {
+            return false
+        }
+        return screen.defaultViewModelName != nil || screen.defaultInstanceId != nil
     }
 
     private func makeNativeScreenTransitionSnapshot(for spec: FlowScreenTransitionSpec) -> UIView? {
@@ -1547,12 +1571,17 @@ private extension FlowViewController {
     }
 
     private func bindPendingNativeScreenIfNeeded() {
-        guard let screenId = pendingNativeScreenBindingId,
-              flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true else {
+        guard let screenId = pendingNativeScreenBindingId else {
             return
         }
-        pendingNativeScreenBindingId = nil
-        flowRiveView?.advance(delta: 0)
+        do {
+            guard try bindNativeViewModelForScreen(screenId) else {
+                return
+            }
+            flowRiveView?.advance(delta: 0)
+        } catch {
+            LogWarning("FlowViewController: failed to bind native ViewModel for screen \(screenId): \(error)")
+        }
     }
     #endif
 
