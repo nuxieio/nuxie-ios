@@ -922,6 +922,7 @@ public class FlowViewController: NuxiePlatformViewController {
             let didBindViewModel = try viewModelBridge.bindDefaultInstanceForActiveArtboard()
 
             let riveView = riveViewModel.createRiveView()
+            riveView.playerDelegate = self
             riveView.stateMachineDelegate = self
             riveView.translatesAutoresizingMaskIntoConstraints = false
             riveView.accessibilityIdentifier = "nuxie-flow-surface"
@@ -952,9 +953,11 @@ public class FlowViewController: NuxiePlatformViewController {
                 screenId: artifact.manifest.entry.screenId,
                 artifact: artifact,
                 riveView: riveView,
-                riveViewModel: riveViewModel
+                riveViewModel: riveViewModel,
+                viewModelBridge: viewModelBridge
             )
             textInputOverlayBridge = textInputBridge
+            riveView.advance(delta: 0)
             handleNativeRuntimeReady()
             LogDebug("Mounted native flow artifact for flow \(flow.id)")
         } catch {
@@ -1383,12 +1386,14 @@ private extension FlowViewController {
             }
             activeNativeScreenId = screenId
             if let riveView = flowRiveView,
-               let artifact = flowArtifact {
+               let artifact = flowArtifact,
+               let viewModelBridge = flowViewModelBridge {
                 textInputOverlayBridge?.bind(
                     screenId: screenId,
                     artifact: artifact,
                     riveView: riveView,
-                    riveViewModel: riveViewModel
+                    riveViewModel: riveViewModel,
+                    viewModelBridge: viewModelBridge
                 )
             }
             flowRiveView?.advance(delta: 0)
@@ -1554,6 +1559,21 @@ private extension FlowViewController {
 }
 
 #if canImport(RiveRuntime) && canImport(UIKit)
+extension FlowViewController: RivePlayerDelegate {
+    public func player(playedWithModel riveModel: RiveModel?) {}
+
+    public func player(pausedWithModel riveModel: RiveModel?) {}
+
+    public func player(loopedWithModel riveModel: RiveModel?, type: Int) {}
+
+    public func player(stoppedWithModel riveModel: RiveModel?) {}
+
+    public func player(didAdvanceby seconds: Double, riveModel: RiveModel?) {
+        flowViewModelBridge?.updateBoundListeners()
+        textInputOverlayBridge?.layout()
+    }
+}
+
 extension FlowViewController: RiveStateMachineDelegate {
     public func onRiveEventReceived(onRiveEvent riveEvent: RiveEvent) {
         let properties = rendererEventProperties(from: riveEvent)

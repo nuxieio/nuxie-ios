@@ -251,7 +251,7 @@ final class FlowArtifactStoreTests: AsyncSpec {
                 expect(cached.rivURL.path).to(equal(downloaded.rivURL.path))
             }
 
-            it("decodes editable text input overlay metadata") {
+            it("decodes editable text input runtime metadata") {
                 let manifest = try JSONDecoder().decode(FlowArtifactManifest.self, from: """
                 {
                   "version": 1,
@@ -291,14 +291,14 @@ final class FlowArtifactStoreTests: AsyncSpec {
                       "riveTextRunObjectKey": "artboard/screen-1/email-input/text-run",
                       "riveTextName": "email-input",
                       "riveTextRunName": "email-input Run",
-                      "overlay": {
-                        "x": 32,
-                        "y": 96,
-                        "width": 326,
-                        "height": 52,
-                        "rotation": 0,
-                        "scaleX": 1,
-                        "scaleY": 1
+                      "geometry": {
+                        "xPath": "nuxieTextInputs/input_email/x",
+                        "yPath": "nuxieTextInputs/input_email/y",
+                        "widthPath": "nuxieTextInputs/input_email/width",
+                        "heightPath": "nuxieTextInputs/input_email/height",
+                        "rotationPath": "nuxieTextInputs/input_email/rotation",
+                        "scaleXPath": "nuxieTextInputs/input_email/scaleX",
+                        "scaleYPath": "nuxieTextInputs/input_email/scaleY"
                       },
                       "style": {
                         "fontFamily": "Inter",
@@ -325,7 +325,7 @@ final class FlowArtifactStoreTests: AsyncSpec {
 
                 expect(manifest.textInputs).to(haveCount(1))
                 expect(manifest.textInputs[0].riveTextRunName).to(equal("email-input Run"))
-                expect(manifest.textInputs[0].overlay.x).to(equal(32))
+                expect(manifest.textInputs[0].geometry.xPath).to(equal("nuxieTextInputs/input_email/x"))
                 expect(manifest.textInputs[0].style.color).to(equal(0xff0f172a))
                 expect(manifest.textInputs[0].style.fontAssetRiveUniqueName).to(equal("font-inter-500-normal-e57198b3-0"))
             }

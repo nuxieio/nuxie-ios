@@ -172,7 +172,7 @@ struct FlowArtifactTextInput: Codable, Equatable {
     let riveTextRunObjectKey: String
     let riveTextName: String
     let riveTextRunName: String
-    let overlay: FlowArtifactTextInputOverlay
+    let geometry: FlowArtifactTextInputGeometry
     let style: FlowArtifactTextInputStyle
     let value: String
     let placeholder: String?
@@ -183,14 +183,14 @@ struct FlowArtifactTextInput: Codable, Equatable {
     let maxLength: Int?
 }
 
-struct FlowArtifactTextInputOverlay: Codable, Equatable {
-    let x: Double
-    let y: Double
-    let width: Double
-    let height: Double
-    let rotation: Double
-    let scaleX: Double
-    let scaleY: Double
+struct FlowArtifactTextInputGeometry: Codable, Equatable {
+    let xPath: String
+    let yPath: String
+    let widthPath: String
+    let heightPath: String
+    let rotationPath: String
+    let scaleXPath: String
+    let scaleYPath: String
 }
 
 struct FlowArtifactTextInputStyle: Codable, Equatable {

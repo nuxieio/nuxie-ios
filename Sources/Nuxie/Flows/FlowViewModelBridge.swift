@@ -175,6 +175,10 @@ final class FlowViewModelBridge {
         return property.value
     }
 
+    func updateBoundListeners() {
+        boundInstance?.updateListeners()
+    }
+
     func numberValue(path: String, instanceId: String) throws -> Float {
         guard let instance = riveInstancesByFlowInstanceId[instanceId] else {
             throw FlowViewModelBridgeError.instanceNotBound
@@ -409,6 +413,9 @@ final class FlowViewModelBridge {
         onValueChange: @escaping ValueChangeHandler
     ) {
         for (name, property) in schema {
+            if name == "nuxieTextInputs" {
+                continue
+            }
             let path = pathPrefix.isEmpty ? name : "\(pathPrefix)/\(name)"
             switch property.type {
             case .string:
