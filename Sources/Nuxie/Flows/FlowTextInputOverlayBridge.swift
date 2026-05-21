@@ -50,8 +50,19 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         let control: Control
     }
 
+    private struct RuntimeGeometry {
+        let x: CGFloat
+        let y: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+        let rotation: CGFloat
+        let scaleX: CGFloat
+        let scaleY: CGFloat
+    }
+
     private weak var riveView: RiveView?
     private weak var riveViewModel: RiveViewModel?
+    private weak var viewModelBridge: FlowViewModelBridge?
     private var activeScreen: FlowArtifactScreen?
     private var bindingsByInputId: [String: Binding] = [:]
     private var textValuesByInputId: [String: String] = [:]
@@ -62,7 +73,8 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         screenId: String,
         artifact: LoadedFlowArtifact,
         riveView: RiveView,
-        riveViewModel: RiveViewModel
+        riveViewModel: RiveViewModel,
+        viewModelBridge: FlowViewModelBridge
     ) {
         if activeBuildId != artifact.manifest.buildId {
             textValuesByInputId.removeAll()
@@ -72,6 +84,7 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
 
         self.riveView = riveView
         self.riveViewModel = riveViewModel
+        self.viewModelBridge = viewModelBridge
         activeScreen = artifact.manifest.screens.first { $0.screenId == screenId }
 
         guard activeScreen != nil else {
@@ -101,6 +114,7 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         activeScreen = nil
         riveView = nil
         riveViewModel = nil
+        viewModelBridge = nil
     }
 
     func setHidden(_ isHidden: Bool) {
@@ -123,12 +137,17 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         )
 
         for binding in bindingsByInputId.values {
+            guard let geometry = runtimeGeometry(for: binding.input) else {
+                binding.control.view.isHidden = true
+                continue
+            }
+            binding.control.view.isHidden = hidden
             let frame = Self.frame(
-                for: binding.input.overlay,
+                for: geometry,
                 metrics: metrics
             )
-            let styleScaleX = metrics.scale * max(0, CGFloat(binding.input.overlay.scaleX))
-            let styleScaleY = metrics.scale * max(0, CGFloat(binding.input.overlay.scaleY))
+            let styleScaleX = metrics.scale * max(0, geometry.scaleX)
+            let styleScaleY = metrics.scale * max(0, geometry.scaleY)
             applyStyle(
                 binding.input.style,
                 to: binding.control,
@@ -141,8 +160,8 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
                 binding.control.view.transform = .identity
                 binding.control.view.bounds = CGRect(origin: .zero, size: frame.size)
                 binding.control.view.center = CGPoint(x: frame.midX, y: frame.midY)
-                if binding.input.overlay.rotation != 0 {
-                    binding.control.view.transform = CGAffineTransform(rotationAngle: CGFloat(binding.input.overlay.rotation))
+                if geometry.rotation != 0 {
+                    binding.control.view.transform = CGAffineTransform(rotationAngle: geometry.rotation)
                 }
             }
         }
@@ -175,17 +194,42 @@ final class FlowTextInputOverlayBridge: NSObject, UITextFieldDelegate, UITextVie
         )
     }
 
-    static func frame(
-        for overlay: FlowArtifactTextInputOverlay,
+    private static func frame(
+        for geometry: RuntimeGeometry,
         metrics: (origin: CGPoint, scale: CGFloat)
     ) -> CGRect {
-        let scaleX = max(0, CGFloat(overlay.scaleX))
-        let scaleY = max(0, CGFloat(overlay.scaleY))
+        let scaleX = max(0, geometry.scaleX)
+        let scaleY = max(0, geometry.scaleY)
         return CGRect(
-            x: metrics.origin.x + CGFloat(overlay.x) * metrics.scale,
-            y: metrics.origin.y + CGFloat(overlay.y) * metrics.scale,
-            width: CGFloat(overlay.width) * metrics.scale * scaleX,
-            height: CGFloat(overlay.height) * metrics.scale * scaleY
+            x: metrics.origin.x + geometry.x * metrics.scale,
+            y: metrics.origin.y + geometry.y * metrics.scale,
+            width: geometry.width * metrics.scale * scaleX,
+            height: geometry.height * metrics.scale * scaleY
+        )
+    }
+
+    private func runtimeGeometry(for input: FlowArtifactTextInput) -> RuntimeGeometry? {
+        guard let viewModelBridge,
+              let x = try? viewModelBridge.numberValue(path: input.geometry.xPath),
+              let y = try? viewModelBridge.numberValue(path: input.geometry.yPath),
+              let width = try? viewModelBridge.numberValue(path: input.geometry.widthPath),
+              let height = try? viewModelBridge.numberValue(path: input.geometry.heightPath),
+              let rotation = try? viewModelBridge.numberValue(path: input.geometry.rotationPath),
+              let scaleX = try? viewModelBridge.numberValue(path: input.geometry.scaleXPath),
+              let scaleY = try? viewModelBridge.numberValue(path: input.geometry.scaleYPath),
+              width > 0,
+              height > 0 else {
+            return nil
+        }
+
+        return RuntimeGeometry(
+            x: CGFloat(x),
+            y: CGFloat(y),
+            width: CGFloat(width),
+            height: CGFloat(height),
+            rotation: CGFloat(rotation),
+            scaleX: CGFloat(scaleX),
+            scaleY: CGFloat(scaleY)
         )
     }
 

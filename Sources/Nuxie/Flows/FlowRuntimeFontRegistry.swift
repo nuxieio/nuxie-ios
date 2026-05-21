@@ -32,7 +32,7 @@ enum FlowRuntimeFontRegistry {
         }
 
         if let error = registerError?.takeRetainedValue() {
-            if CFErrorGetCode(error) == 105 {
+            if isDuplicateFontRegistrationError(error) {
                 lock.lock()
                 postScriptNamesByRiveUniqueName[riveUniqueName] = postScriptName
                 lock.unlock()
@@ -52,4 +52,9 @@ enum FlowRuntimeFontRegistry {
         return postScriptNamesByRiveUniqueName[riveUniqueName]
     }
 
+    #if canImport(CoreText)
+    private static func isDuplicateFontRegistrationError(_ error: CFError) -> Bool {
+        [105, 305].contains(CFErrorGetCode(error))
+    }
+    #endif
 }

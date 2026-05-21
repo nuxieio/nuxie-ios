@@ -270,7 +270,7 @@ actor RuntimeAssetStore {
         }
 
         if let error = registerError?.takeRetainedValue() {
-            if CFErrorGetCode(error) == 105 {
+            if Self.isDuplicateFontRegistrationError(error) {
                 return
             }
             throw RuntimeAssetStoreError.invalidFontData(
@@ -289,6 +289,12 @@ actor RuntimeAssetStore {
     private func cachePathDescription(_ url: URL) -> String {
         url.path.replacingOccurrences(of: cacheDirectory.path + "/", with: "")
     }
+
+    #if canImport(CoreText)
+    private static func isDuplicateFontRegistrationError(_ error: CFError) -> Bool {
+        [105, 305].contains(CFErrorGetCode(error))
+    }
+    #endif
 
     private static func normalizedSHA256(_ value: String) throws -> String {
         let lowercased = value.lowercased()

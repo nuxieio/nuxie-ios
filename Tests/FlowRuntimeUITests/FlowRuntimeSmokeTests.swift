@@ -7,6 +7,7 @@ final class FlowRuntimeSmokeTests: XCTestCase {
     private let fixtureNames = [
         "layout-paint",
         "published-font",
+        "text-input-motion",
         "pressable-interaction",
     ]
 
@@ -52,6 +53,25 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         )
 
         try captureScreenshot(named: "published-font")
+
+        try selectFixture(named: "text-input-motion")
+        try waitForSurface()
+
+        let movingFieldIdentifier = "nuxie-text-input-text-input/screen_1/email_input"
+        XCTAssertTrue(
+            app.textFields[movingFieldIdentifier].waitForExistence(timeout: 10),
+            "Expected the moving editable text input overlay to mount"
+        )
+        let initialMovingFieldFrame = app.textFields[movingFieldIdentifier].frame
+        Thread.sleep(forTimeInterval: 1.4)
+        let movedFieldFrame = app.textFields[movingFieldIdentifier].frame
+        XCTAssertGreaterThan(
+            movedFieldFrame.midX,
+            initialMovingFieldFrame.midX + 16,
+            "Expected the UIKit text input overlay to follow animated Rive text geometry"
+        )
+
+        try captureScreenshot(named: "text-input-motion")
 
         try selectFixture(named: "pressable-interaction")
         try waitForSurface()
