@@ -342,12 +342,24 @@ final class FlowScreenTransitionCoordinator: NSObject, UIAdaptivePresentationCon
             return
         }
 
-        activePresentedController = nil
+        activePresentedController = activePresenterAfterDismissing(presentationController)
         dismissedController.presentationController?.delegate = nil
 
         let revealingScreenId = (presentationController.presentingViewController as? FlowScreenViewController)?.screenId
             ?? (navigationController?.topViewController as? FlowScreenViewController)?.screenId
         onPresentedScreenDismissed(dismissedController.screenId, revealingScreenId)
+    }
+
+    private func activePresenterAfterDismissing(
+        _ presentationController: UIPresentationController
+    ) -> FlowScreenViewController? {
+        guard let presenter = presentationController.presentingViewController as? FlowScreenViewController else {
+            return nil
+        }
+        let presenterIsNavigationScreen = navigationController?.viewControllers.contains {
+            $0 === presenter
+        } ?? false
+        return presenterIsNavigationScreen ? nil : presenter
     }
 
     private func runLiveReplacementTransition(

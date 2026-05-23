@@ -367,6 +367,44 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
             }
 
+            it("reconciles visible screen state before returning a paused dismiss hook") {
+                let flowId = "flow-dismiss-pauses"
+                let dismissInteraction = Interaction(
+                    id: "screen-dismiss-delay",
+                    trigger: .event(eventName: SystemEventNames.screenDismissed, filter: nil),
+                    actions: [.delay(DelayAction(durationMs: 5000))],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-2": [dismissInteraction]],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.currentScreenId = "screen-2"
+                journey.flowState.navigationStack = ["screen-1"]
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let outcome = await runner.handleScreenDismissed(
+                    "screen-2",
+                    revealingScreenId: "screen-1",
+                    method: "native_sheet"
+                )
+
+                if case .paused(let pending) = outcome {
+                    expect(pending.kind).to(equal(.delay))
+                } else {
+                    fail("Expected the screen_dismissed interaction to pause")
+                }
+                expect(journey.flowState.currentScreenId).to(equal("screen-1"))
+                expect(journey.flowState.navigationStack).to(beEmpty())
+            }
+
             it("dispatches global did_set interactions") {
                 let flowId = "flow-global-did-set"
                 let viewModel = ViewModel(
