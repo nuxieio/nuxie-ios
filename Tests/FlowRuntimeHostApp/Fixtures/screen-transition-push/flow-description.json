@@ -1,0 +1,37 @@
+{
+  "screens": [
+    {
+      "id": "screen_1",
+      "defaultViewModelId": null,
+      "defaultInstanceId": null
+    },
+    {
+      "id": "screen_2",
+      "defaultViewModelId": null,
+      "defaultInstanceId": null
+    }
+  ],
+  "interactions": {
+    "__global__": [
+      {
+        "id": "interaction_auto_push",
+        "enabled": true,
+        "trigger": {
+          "type": "start"
+        },
+        "actions": [
+          {
+            "type": "navigate",
+            "screenId": "screen_2",
+            "transition": {
+              "type": "push",
+              "direction": "right",
+              "durationMs": 450,
+              "easing": "ease_in_out"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

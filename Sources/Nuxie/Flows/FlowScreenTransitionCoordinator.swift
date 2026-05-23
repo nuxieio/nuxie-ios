@@ -1,0 +1,491 @@
+#if canImport(RiveRuntime) && canImport(UIKit)
+import UIKit
+
+@MainActor
+final class FlowScreenTransitionCoordinator {
+    typealias Completion = (_ didNavigate: Bool, _ screenId: String) -> Void
+
+    private weak var hostViewController: FlowViewController?
+    private let flow: Flow
+    private let artifact: LoadedFlowArtifact
+    private weak var screenDelegate: FlowScreenViewControllerDelegate?
+
+    private var navigationController: UINavigationController?
+    private var activePresentedController: FlowScreenViewController?
+    private var cachedControllersByScreenId: [String: FlowScreenViewController] = [:]
+    private var latestSnapshot: FlowViewModelSnapshot?
+    private var contentHidden = true
+    private var activeTransitionCompletion: Completion?
+
+    var activeScreenId: String? {
+        activePresentedController?.screenId
+            ?? (navigationController?.topViewController as? FlowScreenViewController)?.screenId
+    }
+
+    init(
+        flow: Flow,
+        artifact: LoadedFlowArtifact,
+        hostViewController: FlowViewController,
+        screenDelegate: FlowScreenViewControllerDelegate
+    ) {
+        self.flow = flow
+        self.artifact = artifact
+        self.hostViewController = hostViewController
+        self.screenDelegate = screenDelegate
+    }
+
+    func install() throws {
+        guard let hostViewController else { return }
+        let entryController = try screenController(for: artifact.manifest.entry.screenId)
+        let navigationController = UINavigationController(rootViewController: entryController)
+        navigationController.setNavigationBarHidden(true, animated: false)
+        navigationController.view.translatesAutoresizingMaskIntoConstraints = false
+        navigationController.view.backgroundColor = .clear
+        navigationController.view.isHidden = contentHidden
+
+        hostViewController.addChild(navigationController)
+        hostViewController.view.insertSubview(navigationController.view, at: 0)
+        NSLayoutConstraint.activate([
+            navigationController.view.topAnchor.constraint(equalTo: hostViewController.view.topAnchor),
+            navigationController.view.leadingAnchor.constraint(equalTo: hostViewController.view.leadingAnchor),
+            navigationController.view.trailingAnchor.constraint(equalTo: hostViewController.view.trailingAnchor),
+            navigationController.view.bottomAnchor.constraint(equalTo: hostViewController.view.bottomAnchor)
+        ])
+        navigationController.didMove(toParent: hostViewController)
+
+        self.navigationController = navigationController
+        navigationController.loadViewIfNeeded()
+        entryController.loadViewIfNeeded()
+        navigationController.view.setNeedsLayout()
+        navigationController.view.layoutIfNeeded()
+        entryController.setContentHidden(contentHidden)
+        entryController.advance(delta: 0)
+    }
+
+    func tearDown() {
+        if let activePresentedController {
+            activePresentedController.dismiss(animated: false)
+            self.activePresentedController = nil
+        }
+
+        if let navigationController {
+            navigationController.willMove(toParent: nil)
+            navigationController.view.removeFromSuperview()
+            navigationController.removeFromParent()
+            self.navigationController = nil
+        }
+
+        cachedControllersByScreenId.removeAll()
+        latestSnapshot = nil
+        activeTransitionCompletion = nil
+    }
+
+    func setContentHidden(_ hidden: Bool) {
+        contentHidden = hidden
+        navigationController?.view.isHidden = hidden
+        activePresentedController?.setContentHidden(hidden)
+        cachedControllersByScreenId.values.forEach { $0.setContentHidden(hidden) }
+    }
+
+    func layoutTextInputs() {
+        cachedControllersByScreenId.values.forEach { $0.layoutTextInputs() }
+    }
+
+    @discardableResult
+    func applySnapshot(_ snapshot: FlowViewModelSnapshot, screenId: String?) -> Bool {
+        latestSnapshot = snapshot
+        var didApply = false
+        for controller in cachedControllersByScreenId.values {
+            didApply = controller.applySnapshot(snapshot, screenId: screenId) || didApply
+        }
+        return didApply
+    }
+
+    @discardableResult
+    func applyValue(
+        path: VmPathRef,
+        value: Any,
+        screenId: String?,
+        instanceId: String?
+    ) -> Bool {
+        var didApply = false
+        do {
+            for controller in try targetControllers(for: screenId) {
+                didApply = controller.applyValue(
+                    path: path,
+                    value: value,
+                    screenId: screenId,
+                    instanceId: instanceId
+                ) || didApply
+            }
+        } catch {
+            LogWarning(
+                "FlowScreenTransitionCoordinator: failed to apply value to screen \(screenId ?? "<all>"): \(error)"
+            )
+        }
+        return didApply
+    }
+
+    @discardableResult
+    func applyListOperation(
+        _ operation: FlowViewModelListOperation,
+        path: VmPathRef,
+        payload: [String: Any],
+        screenId: String?,
+        instanceId: String?
+    ) -> Bool {
+        var didApply = false
+        do {
+            for controller in try targetControllers(for: screenId) {
+                didApply = controller.applyListOperation(
+                    operation,
+                    path: path,
+                    payload: payload,
+                    screenId: screenId,
+                    instanceId: instanceId
+                ) || didApply
+            }
+        } catch {
+            LogWarning(
+                "FlowScreenTransitionCoordinator: failed to apply list operation to screen \(screenId ?? "<all>"): \(error)"
+            )
+        }
+        return didApply
+    }
+
+    @discardableResult
+    func fireTrigger(path: VmPathRef, screenId: String?, instanceId: String?) -> Bool {
+        var didFire = false
+        do {
+            for controller in try targetControllers(for: screenId) {
+                didFire = controller.fireTrigger(
+                    path: path,
+                    screenId: screenId,
+                    instanceId: instanceId
+                ) || didFire
+            }
+        } catch {
+            LogWarning(
+                "FlowScreenTransitionCoordinator: failed to fire trigger on screen \(screenId ?? "<all>"): \(error)"
+            )
+        }
+        return didFire
+    }
+
+    @discardableResult
+    func navigate(to screenId: String, transition rawTransition: Any?, completion: @escaping Completion) -> Bool {
+        guard artifact.manifest.screens.contains(where: { $0.screenId == screenId }) else {
+            return false
+        }
+
+        if activeScreenId == screenId {
+            completion(true, screenId)
+            return true
+        }
+
+        let spec = FlowScreenTransitionSpec(raw: rawTransition)
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+
+        do {
+            switch spec.kind {
+            case .instant, .custom:
+                try replaceRoot(with: screenId, completion: completion)
+            case .push:
+                if reduceMotion || !spec.isAnimated {
+                    try replaceRoot(with: screenId, completion: completion)
+                } else {
+                    try pushOrPop(to: screenId, completion: completion)
+                }
+            case .present:
+                if reduceMotion || !spec.isAnimated {
+                    try replaceRoot(with: screenId, completion: completion)
+                } else {
+                    try present(screenId: screenId, completion: completion)
+                }
+            case .dissolve, .moveIn, .moveOut, .slideIn, .slideOut:
+                if reduceMotion || !spec.isAnimated {
+                    try replaceRoot(with: screenId, completion: completion)
+                } else {
+                    try runLiveReplacementTransition(to: screenId, spec: spec, completion: completion)
+                }
+            }
+            return true
+        } catch {
+            LogWarning("FlowScreenTransitionCoordinator: failed to navigate to screen \(screenId): \(error)")
+            completion(false, screenId)
+            return false
+        }
+    }
+
+    private func screenController(for screenId: String) throws -> FlowScreenViewController {
+        if let cached = cachedControllersByScreenId[screenId] {
+            return cached
+        }
+        guard let screen = artifact.manifest.screens.first(where: { $0.screenId == screenId }) else {
+            throw FlowScreenTransitionCoordinatorError.missingScreen(screenId)
+        }
+        let controller = try FlowScreenViewController(
+            flow: flow,
+            artifact: artifact,
+            screen: screen,
+            delegate: screenDelegate
+        )
+        controller.setContentHidden(contentHidden)
+        if let latestSnapshot {
+            _ = controller.applySnapshot(latestSnapshot, screenId: screenId)
+        }
+        cachedControllersByScreenId[screenId] = controller
+        return controller
+    }
+
+    private func targetControllers(for screenId: String?) throws -> [FlowScreenViewController] {
+        if let screenId {
+            return [try screenController(for: screenId)]
+        }
+        return Array(cachedControllersByScreenId.values)
+    }
+
+    private func replaceRoot(with screenId: String, completion: Completion) throws {
+        let controller = try screenController(for: screenId)
+        dismissActivePresentedControllerIfNeeded(animated: false)
+        navigationController?.setViewControllers([controller], animated: false)
+        controller.loadViewIfNeeded()
+        navigationController?.view.setNeedsLayout()
+        navigationController?.view.layoutIfNeeded()
+        controller.setContentHidden(contentHidden)
+        controller.advance(delta: 0)
+        completion(true, screenId)
+    }
+
+    private func pushOrPop(to screenId: String, completion: @escaping Completion) throws {
+        guard let navigationController else {
+            try replaceRoot(with: screenId, completion: completion)
+            return
+        }
+
+        if activePresentedController != nil {
+            dismissActivePresentedControllerIfNeeded(animated: true) { [weak self] in
+                guard let self else { return }
+                do {
+                    try self.performPushOrPop(to: screenId, in: navigationController, completion: completion)
+                } catch {
+                    LogWarning(
+                        "FlowScreenTransitionCoordinator: failed to navigate to screen \(screenId) after modal dismiss: \(error)"
+                    )
+                    completion(false, screenId)
+                }
+            }
+            return
+        }
+
+        try performPushOrPop(to: screenId, in: navigationController, completion: completion)
+    }
+
+    private func performPushOrPop(
+        to screenId: String,
+        in navigationController: UINavigationController,
+        completion: @escaping Completion
+    ) throws {
+        if let existingController = navigationController.viewControllers
+            .compactMap({ $0 as? FlowScreenViewController })
+            .first(where: { $0.screenId == screenId }) {
+            animateNavigationControllerOperation(screenId: screenId, completion: completion) {
+                navigationController.popToViewController(existingController, animated: true)
+            }
+            return
+        }
+
+        let controller = try screenController(for: screenId)
+        controller.loadViewIfNeeded()
+        controller.setContentHidden(contentHidden)
+        animateNavigationControllerOperation(screenId: screenId, completion: completion) {
+            navigationController.pushViewController(controller, animated: true)
+        }
+    }
+
+    private func present(screenId: String, completion: @escaping Completion) throws {
+        guard let presenter = activePresentedController
+            ?? navigationController?.topViewController
+            ?? hostViewController else {
+            try replaceRoot(with: screenId, completion: completion)
+            return
+        }
+
+        let controller = try screenController(for: screenId)
+        controller.loadViewIfNeeded()
+        controller.modalPresentationStyle = .fullScreen
+        controller.setContentHidden(contentHidden)
+        presenter.present(controller, animated: true) { [weak self] in
+            self?.activePresentedController = controller
+            controller.advance(delta: 0)
+            completion(true, screenId)
+        }
+    }
+
+    private func runLiveReplacementTransition(
+        to screenId: String,
+        spec: FlowScreenTransitionSpec,
+        completion: @escaping Completion
+    ) throws {
+        guard let hostView = navigationController?.view ?? hostViewController?.view,
+              let currentView = activePresentedController?.view
+                ?? (navigationController?.topViewController as? FlowScreenViewController)?.view else {
+            try replaceRoot(with: screenId, completion: completion)
+            return
+        }
+
+        dismissActivePresentedControllerIfNeeded(animated: false)
+
+        let nextController = try screenController(for: screenId)
+        nextController.loadViewIfNeeded()
+        guard let hostViewController else {
+            try replaceRoot(with: screenId, completion: completion)
+            return
+        }
+
+        hostViewController.addChild(nextController)
+        nextController.view.frame = hostView.bounds
+        nextController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        hostView.addSubview(nextController.view)
+        nextController.didMove(toParent: hostViewController)
+        nextController.setContentHidden(contentHidden)
+        nextController.advance(delta: 0)
+
+        let offset = transitionOffset(spec.direction, in: hostView.bounds)
+        let reverseOffset = transitionOffset(spec.direction.reversed, in: hostView.bounds)
+
+        switch spec.kind {
+        case .dissolve:
+            nextController.view.alpha = 0
+        case .moveIn:
+            nextController.view.transform = offset
+        case .moveOut:
+            break
+        case .slideIn:
+            nextController.view.transform = offset
+            nextController.view.alpha = 0
+        case .slideOut:
+            break
+        case .push:
+            nextController.view.transform = offset
+        case .instant, .present, .custom:
+            break
+        }
+
+        UIView.animate(
+            withDuration: spec.duration,
+            delay: 0,
+            options: animationOptions(spec.easing)
+        ) {
+            nextController.view.transform = .identity
+            nextController.view.alpha = 1
+
+            switch spec.kind {
+            case .dissolve:
+                currentView.alpha = 0
+            case .moveOut, .slideOut:
+                currentView.transform = offset
+                currentView.alpha = spec.kind == .slideOut ? 0 : 1
+            case .push:
+                currentView.transform = reverseOffset
+            case .instant, .moveIn, .slideIn, .present, .custom:
+                break
+            }
+        } completion: { [weak self, weak nextController] _ in
+            guard let self,
+                  let nextController else {
+                completion(false, screenId)
+                return
+            }
+            currentView.transform = .identity
+            currentView.alpha = 1
+            nextController.view.transform = .identity
+            nextController.view.alpha = 1
+            nextController.willMove(toParent: nil)
+            nextController.view.removeFromSuperview()
+            nextController.removeFromParent()
+            self.navigationController?.setViewControllers([nextController], animated: false)
+            self.completeNavigation(to: screenId, completion: completion)
+        }
+    }
+
+    private func animateNavigationControllerOperation(
+        screenId: String,
+        completion: @escaping Completion,
+        operation: () -> Void
+    ) {
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            self?.completeNavigation(to: screenId, completion: completion)
+        }
+        operation()
+        CATransaction.commit()
+    }
+
+    private func completeNavigation(to screenId: String, completion: Completion) {
+        (cachedControllersByScreenId[screenId]
+            ?? activePresentedController
+            ?? navigationController?.topViewController as? FlowScreenViewController)?
+            .advance(delta: 0)
+        completion(true, screenId)
+    }
+
+    private func dismissActivePresentedControllerIfNeeded(
+        animated: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        guard let activePresentedController else {
+            completion?()
+            return
+        }
+        self.activePresentedController = nil
+        activePresentedController.dismiss(animated: animated, completion: completion)
+    }
+
+    private func transitionOffset(
+        _ direction: FlowScreenTransitionSpec.Direction,
+        in bounds: CGRect
+    ) -> CGAffineTransform {
+        let width = max(bounds.width, 1)
+        let height = max(bounds.height, 1)
+        switch direction {
+        case .left:
+            return CGAffineTransform(translationX: -width, y: 0)
+        case .right:
+            return CGAffineTransform(translationX: width, y: 0)
+        case .up:
+            return CGAffineTransform(translationX: 0, y: -height)
+        case .down:
+            return CGAffineTransform(translationX: 0, y: height)
+        }
+    }
+
+    private func animationOptions(
+        _ easing: FlowScreenTransitionSpec.Easing
+    ) -> UIView.AnimationOptions {
+        let curve: UIView.AnimationOptions
+        switch easing {
+        case .linear:
+            curve = .curveLinear
+        case .easeIn:
+            curve = .curveEaseIn
+        case .easeOut:
+            curve = .curveEaseOut
+        case .easeInOut:
+            curve = .curveEaseInOut
+        }
+        return [.beginFromCurrentState, .allowUserInteraction, curve]
+    }
+}
+
+private enum FlowScreenTransitionCoordinatorError: LocalizedError {
+    case missingScreen(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingScreen(let screenId):
+            return "Flow artifact does not contain screen \(screenId)."
+        }
+    }
+}
+#endif

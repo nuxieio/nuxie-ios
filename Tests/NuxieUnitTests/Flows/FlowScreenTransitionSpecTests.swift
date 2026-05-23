@@ -55,4 +55,32 @@ final class FlowScreenTransitionSpecTests: XCTestCase {
         XCTAssertEqual(spec.duration, 0.2, accuracy: 0.0001)
         XCTAssertEqual(spec.easing, .easeIn)
     }
+
+    func testParsesSystemPresentAliasAndFadeCompatibility() {
+        let present = FlowScreenTransitionSpec(raw: [
+            "type": "modal",
+            "durationMs": 500
+        ])
+
+        XCTAssertEqual(present.kind, .present)
+        XCTAssertEqual(present.duration, 0.5, accuracy: 0.0001)
+
+        let fade = FlowScreenTransitionSpec(raw: [
+            "type": "fade"
+        ])
+
+        XCTAssertEqual(fade.kind, .dissolve)
+    }
+
+    func testParsesCustomTransitionIdButDoesNotTreatItAsUIKitAnimation() {
+        let custom = FlowScreenTransitionSpec(raw: [
+            "type": "custom",
+            "transitionId": "transition.checkout_to_success",
+            "durationMs": 450
+        ])
+
+        XCTAssertEqual(custom.kind, .custom)
+        XCTAssertEqual(custom.transitionId, "transition.checkout_to_success")
+        XCTAssertFalse(custom.isAnimated)
+    }
 }
