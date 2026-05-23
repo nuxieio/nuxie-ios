@@ -14,30 +14,159 @@ struct NuxieFlowRuntimeHostApp: App {
 
 private struct FlowRuntimeHostView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        FlowRuntimeHostRootViewController()
+        FlowRuntimeHostNavigationController()
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 }
 
-private final class FlowRuntimeHostRootViewController: UIViewController {
-    private var currentViewController: UIViewController?
-    private let fixtureNames: [String]
-    private let currentFixtureLabel = UILabel()
-    private let fixtureSelector = UIStackView()
-
+private final class FlowRuntimeHostNavigationController: UINavigationController {
     init() {
-        let fixtureList = Self.launchArgumentValue(named: "--nuxie-fixtures")
+        let configuration = FlowRuntimeHostConfiguration.current()
+        super.init(rootViewController: FlowRuntimeFixtureListViewController(configuration: configuration))
+        navigationBar.prefersLargeTitles = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private struct FlowRuntimeHostConfiguration {
+    let fixtureNames: [String]
+    let flowDescriptionVariant: String?
+    let initialNavigationStack: [String]
+    let scenarioTitle: String?
+    let scenarioExpectation: String?
+    let forceReduceMotion: Bool
+    let manualEventName: String?
+
+    static func current() -> FlowRuntimeHostConfiguration {
+        let fixtureList = launchArgumentValue(named: "--nuxie-fixtures")
             .map { value in
                 value
                     .split(separator: ",")
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
             }
-        let singleFixture = Self.launchArgumentValue(named: "--nuxie-fixture") ?? "layout-paint"
+        let singleFixture = launchArgumentValue(named: "--nuxie-fixture") ?? "layout-paint"
         let fixtures = fixtureList?.isEmpty == false ? fixtureList! : [singleFixture]
-        self.fixtureNames = fixtures
+
+        return FlowRuntimeHostConfiguration(
+            fixtureNames: fixtures,
+            flowDescriptionVariant: launchArgumentValue(named: "--nuxie-flow-description-variant"),
+            initialNavigationStack: launchArgumentValue(named: "--nuxie-initial-navigation-stack")
+                .map(commaSeparatedValues) ?? [],
+            scenarioTitle: launchArgumentValue(named: "--nuxie-scenario-title"),
+            scenarioExpectation: launchArgumentValue(named: "--nuxie-scenario-expectation"),
+            forceReduceMotion: ProcessInfo.processInfo.arguments.contains("--nuxie-force-reduce-motion"),
+            manualEventName: launchArgumentValue(named: "--nuxie-manual-event")
+        )
+    }
+
+    private static func launchArgumentValue(named name: String) -> String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: name),
+              arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        return arguments[index + 1]
+    }
+
+    private static func commaSeparatedValues(_ value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    var fixtureListDetail: String? {
+        var details: [String] = []
+        if let scenarioTitle, !scenarioTitle.isEmpty {
+            details.append(scenarioTitle)
+        }
+        if let flowDescriptionVariant, !flowDescriptionVariant.isEmpty {
+            details.append("variant: \(flowDescriptionVariant)")
+        }
+        if !initialNavigationStack.isEmpty {
+            details.append("initial stack: \(initialNavigationStack.joined(separator: " > "))")
+        }
+        if forceReduceMotion {
+            details.append("reduce motion forced")
+        }
+        if manualEventName?.isEmpty == false {
+            details.append("manual trigger")
+        }
+        return details.isEmpty ? nil : details.joined(separator: " | ")
+    }
+}
+
+private final class FlowRuntimeFixtureListViewController: UITableViewController {
+    private let configuration: FlowRuntimeHostConfiguration
+
+    init(configuration: FlowRuntimeHostConfiguration) {
+        self.configuration = configuration
+        super.init(style: .insetGrouped)
+        title = "Fixtures"
+        navigationItem.largeTitleDisplayMode = .always
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.accessibilityIdentifier = "nuxie-fixture-list"
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "FixtureCell")
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        configuration.fixtureNames.count
+    }
+
+    override func tableView(
+        _ tableView: UITableView,
+        cellForRowAt indexPath: IndexPath
+    ) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "FixtureCell", for: indexPath)
+        let fixtureName = configuration.fixtureNames[indexPath.row]
+        var content = cell.defaultContentConfiguration()
+        content.text = fixtureName
+        content.secondaryText = configuration.fixtureListDetail
+        content.textProperties.font = .preferredFont(forTextStyle: .body)
+        content.secondaryTextProperties.font = .preferredFont(forTextStyle: .caption1)
+        content.secondaryTextProperties.color = .secondaryLabel
+        cell.contentConfiguration = content
+        cell.accessoryType = .disclosureIndicator
+        cell.accessibilityIdentifier = "nuxie-fixture-\(fixtureName)"
+        cell.accessibilityLabel = fixtureName
+        cell.accessibilityHint = configuration.scenarioExpectation
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let fixtureName = configuration.fixtureNames[indexPath.row]
+        navigationController?.pushViewController(
+            FlowRuntimeHostRootViewController(fixtureName: fixtureName, configuration: configuration),
+            animated: true
+        )
+    }
+}
+
+private final class FlowRuntimeHostRootViewController: UIViewController {
+    private var currentViewController: UIViewController?
+    private let fixtureName: String
+    private let configuration: FlowRuntimeHostConfiguration
+    private let currentFixtureLabel = UILabel()
+
+    init(fixtureName: String, configuration: FlowRuntimeHostConfiguration) {
+        self.fixtureName = fixtureName
+        self.configuration = configuration
         super.init(nibName: nil, bundle: nil)
+        title = fixtureName
+        navigationItem.largeTitleDisplayMode = .never
     }
 
     required init?(coder: NSCoder) {
@@ -48,47 +177,20 @@ private final class FlowRuntimeHostRootViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        configureFixtureSelector()
-        loadFixture(named: fixtureNames.first ?? "layout-paint")
+        configureCurrentFixtureLabel()
+        loadFixture()
     }
 
-    private func configureFixtureSelector() {
-        guard fixtureNames.count > 1 else { return }
-
-        fixtureSelector.translatesAutoresizingMaskIntoConstraints = false
-        fixtureSelector.axis = .horizontal
-        fixtureSelector.spacing = 8
-        fixtureSelector.distribution = .fillEqually
-        fixtureSelector.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.86)
-        fixtureSelector.layer.cornerRadius = 12
-        fixtureSelector.layoutMargins = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        fixtureSelector.isLayoutMarginsRelativeArrangement = true
-        fixtureSelector.accessibilityIdentifier = "nuxie-fixture-selector"
-
-        for fixtureName in fixtureNames {
-            let button = UIButton(type: .system)
-            button.setTitle(fixtureName, for: .normal)
-            button.titleLabel?.font = .systemFont(ofSize: 12, weight: .semibold)
-            button.accessibilityIdentifier = "nuxie-fixture-\(fixtureName)"
-            button.addAction(UIAction { [weak self] _ in
-                self?.loadFixture(named: fixtureName)
-            }, for: .touchUpInside)
-            fixtureSelector.addArrangedSubview(button)
-        }
-
+    private func configureCurrentFixtureLabel() {
         currentFixtureLabel.translatesAutoresizingMaskIntoConstraints = false
         currentFixtureLabel.accessibilityIdentifier = "nuxie-current-fixture"
         currentFixtureLabel.isAccessibilityElement = true
         currentFixtureLabel.textColor = .clear
+        currentFixtureLabel.text = fixtureName
+        currentFixtureLabel.accessibilityLabel = fixtureName
 
-        view.addSubview(fixtureSelector)
         view.addSubview(currentFixtureLabel)
         NSLayoutConstraint.activate([
-            fixtureSelector.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            fixtureSelector.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-            fixtureSelector.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            fixtureSelector.heightAnchor.constraint(equalToConstant: 44),
-
             currentFixtureLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             currentFixtureLabel.topAnchor.constraint(equalTo: view.topAnchor),
             currentFixtureLabel.widthAnchor.constraint(equalToConstant: 1),
@@ -96,7 +198,7 @@ private final class FlowRuntimeHostRootViewController: UIViewController {
         ])
     }
 
-    private func loadFixture(named fixtureName: String) {
+    private func loadFixture() {
         do {
             let viewController = try makeFlowViewController(fixtureName: fixtureName)
             replaceCurrentViewController(with: viewController)
@@ -127,11 +229,7 @@ private final class FlowRuntimeHostRootViewController: UIViewController {
         ])
         nextViewController.didMove(toParent: self)
         currentViewController = nextViewController
-
-        if fixtureSelector.superview != nil {
-            view.bringSubviewToFront(fixtureSelector)
-            view.bringSubviewToFront(currentFixtureLabel)
-        }
+        view.bringSubviewToFront(currentFixtureLabel)
     }
 
     private func makeFlowViewController(fixtureName: String) throws -> UIViewController {
@@ -139,37 +237,76 @@ private final class FlowRuntimeHostRootViewController: UIViewController {
             throw FlowRuntimeHostError.missingResourceRoot
         }
 
-        let fixtureBaseURL = resourceURL
+        var fixtureBaseURL = resourceURL
             .appendingPathComponent("Fixtures", isDirectory: true)
             .appendingPathComponent(fixtureName, isDirectory: true)
         guard FileManager.default.fileExists(atPath: fixtureBaseURL.path) else {
             throw FlowRuntimeHostError.missingFixture(fixtureName)
         }
 
+        if let flowDescriptionVariant = configuration.flowDescriptionVariant {
+            fixtureBaseURL = try Self.fixtureURL(
+                fixtureBaseURL,
+                replacingFlowDescriptionWithVariant: flowDescriptionVariant,
+                fixtureName: fixtureName
+            )
+        }
+
         let cacheRootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("nuxie-flow-runtime-host", isDirectory: true)
             .appendingPathComponent(fixtureName, isDirectory: true)
+            .appendingPathComponent(configuration.flowDescriptionVariant ?? "default", isDirectory: true)
 
         return try FlowRuntimeFixtureHost.makeViewController(
             fixtureBaseURL: fixtureBaseURL,
             cacheRootURL: cacheRootURL,
-            flowId: fixtureName
+            flowId: fixtureName,
+            initialNavigationStack: configuration.initialNavigationStack,
+            manualEventName: configuration.manualEventName
         )
     }
 
-    private static func launchArgumentValue(named name: String) -> String? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: name),
-              arguments.indices.contains(index + 1) else {
-            return nil
+    private static func fixtureURL(
+        _ fixtureBaseURL: URL,
+        replacingFlowDescriptionWithVariant variant: String,
+        fixtureName: String
+    ) throws -> URL {
+        let variantFileName = "flow-description.\(variant).json"
+        let variantURL = fixtureBaseURL.appendingPathComponent(variantFileName)
+        guard FileManager.default.fileExists(atPath: variantURL.path) else {
+            throw FlowRuntimeHostError.missingFixtureVariant(fixtureName, variant)
         }
-        return arguments[index + 1]
+
+        let preparedURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nuxie-flow-runtime-host-variants", isDirectory: true)
+            .appendingPathComponent(fixtureName, isDirectory: true)
+            .appendingPathComponent(variant, isDirectory: true)
+
+        if FileManager.default.fileExists(atPath: preparedURL.path) {
+            try FileManager.default.removeItem(at: preparedURL)
+        }
+        try FileManager.default.createDirectory(
+            at: preparedURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.copyItem(at: fixtureBaseURL, to: preparedURL)
+
+        let activeDescriptionURL = preparedURL.appendingPathComponent("flow-description.json")
+        if FileManager.default.fileExists(atPath: activeDescriptionURL.path) {
+            try FileManager.default.removeItem(at: activeDescriptionURL)
+        }
+        try FileManager.default.copyItem(
+            at: preparedURL.appendingPathComponent(variantFileName),
+            to: activeDescriptionURL
+        )
+        return preparedURL
     }
 }
 
 private enum FlowRuntimeHostError: LocalizedError {
     case missingResourceRoot
     case missingFixture(String)
+    case missingFixtureVariant(String, String)
 
     var errorDescription: String? {
         switch self {
@@ -177,6 +314,8 @@ private enum FlowRuntimeHostError: LocalizedError {
             return "Flow runtime host could not resolve Bundle.main.resourceURL"
         case .missingFixture(let fixture):
             return "Flow runtime fixture is missing: \(fixture)"
+        case .missingFixtureVariant(let fixture, let variant):
+            return "Flow runtime fixture \(fixture) is missing flow description variant \(variant)"
         }
     }
 }

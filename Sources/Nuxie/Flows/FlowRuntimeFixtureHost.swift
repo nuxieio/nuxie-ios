@@ -13,7 +13,10 @@ public enum FlowRuntimeFixtureHost {
     public static func makeViewController(
         fixtureBaseURL: URL,
         cacheRootURL: URL,
-        flowId: String = "flow-runtime-fixture"
+        flowId: String = "flow-runtime-fixture",
+        initialNavigationStack: [String] = [],
+        manualEventName: String? = nil,
+        statusObserver: (@MainActor (String) -> Void)? = nil
     ) throws -> UIViewController {
         registerFixtureConfiguration(cacheRootURL: cacheRootURL)
 
@@ -72,7 +75,10 @@ public enum FlowRuntimeFixtureHost {
         if fixtureFlow.interactions?.isEmpty == false {
             return FlowRuntimeFixtureContainerViewController(
                 flowViewController: flowViewController,
-                flow: flow
+                flow: flow,
+                initialNavigationStack: initialNavigationStack,
+                manualEventName: manualEventName,
+                statusObserver: statusObserver
             )
         }
 
@@ -98,16 +104,29 @@ public enum FlowRuntimeFixtureHost {
     private final class FlowRuntimeFixtureContainerViewController: UIViewController {
         private let flowViewController: FlowViewController
         private let statusLabel = UILabel()
+        private let startButton = UIButton(type: .system)
         private let runtime: FlowRuntimeFixtureExecutionRuntime
+        private let manualEventName: String?
+        private let statusObserver: (@MainActor (String) -> Void)?
 
-        init(flowViewController: FlowViewController, flow: Flow) {
+        init(
+            flowViewController: FlowViewController,
+            flow: Flow,
+            initialNavigationStack: [String],
+            manualEventName: String?,
+            statusObserver: (@MainActor (String) -> Void)?
+        ) {
             self.flowViewController = flowViewController
+            self.manualEventName = manualEventName
+            self.statusObserver = statusObserver
             self.runtime = FlowRuntimeFixtureExecutionRuntime(
                 flow: flow,
-                flowViewController: flowViewController
+                flowViewController: flowViewController,
+                initialNavigationStack: initialNavigationStack
             )
             super.init(nibName: nil, bundle: nil)
             self.runtime.statusLabel = statusLabel
+            self.runtime.statusObserver = statusObserver
         }
 
         required init?(coder: NSCoder) {
@@ -125,12 +144,29 @@ public enum FlowRuntimeFixtureHost {
             statusLabel.translatesAutoresizingMaskIntoConstraints = false
             statusLabel.accessibilityIdentifier = "nuxie-flow-event-log"
             statusLabel.text = "ready"
-            statusLabel.textColor = .label
-            statusLabel.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
-            statusLabel.font = .systemFont(ofSize: 13, weight: .medium)
-            statusLabel.textAlignment = .center
+            statusLabel.textColor = .clear
+            statusLabel.backgroundColor = .clear
+            statusLabel.font = .systemFont(ofSize: 1, weight: .regular)
             statusLabel.numberOfLines = 1
+            statusLabel.isAccessibilityElement = true
             view.addSubview(statusLabel)
+            statusObserver?("ready")
+
+            if manualEventName != nil {
+                startButton.translatesAutoresizingMaskIntoConstraints = false
+                startButton.accessibilityIdentifier = "nuxie-flow-manual-start"
+                startButton.setTitle("Run transition", for: .normal)
+                startButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold)
+                startButton.backgroundColor = .systemBlue
+                startButton.tintColor = .white
+                startButton.layer.cornerRadius = 14
+                startButton.addAction(UIAction { [weak self] _ in
+                    guard let self, let manualEventName = self.manualEventName else { return }
+                    self.startButton.isHidden = true
+                    self.runtime.fireManualEvent(named: manualEventName)
+                }, for: .touchUpInside)
+                view.addSubview(startButton)
+            }
 
             NSLayoutConstraint.activate([
                 flowViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -138,11 +174,20 @@ public enum FlowRuntimeFixtureHost {
                 flowViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
                 flowViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-                statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-                statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-                statusLabel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-                statusLabel.heightAnchor.constraint(equalToConstant: 32),
+                statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                statusLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                statusLabel.widthAnchor.constraint(equalToConstant: 1),
+                statusLabel.heightAnchor.constraint(equalToConstant: 1),
             ])
+
+            if manualEventName != nil {
+                NSLayoutConstraint.activate([
+                    startButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                    startButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -28),
+                    startButton.widthAnchor.constraint(equalToConstant: 220),
+                    startButton.heightAnchor.constraint(equalToConstant: 52),
+                ])
+            }
         }
     }
 
@@ -164,6 +209,18 @@ public enum FlowRuntimeFixtureHost {
         func handleScreenChanged(_ screenId: String) async -> FlowJourneyRunner.RunOutcome? {
             currentScreenId = screenId
             return await runner.handleScreenChanged(screenId)
+        }
+
+        func handleScreenDismissed(
+            _ screenId: String,
+            revealingScreenId: String?
+        ) async -> FlowJourneyRunner.RunOutcome? {
+            currentScreenId = revealingScreenId
+            return await runner.handleScreenDismissed(
+                screenId,
+                revealingScreenId: revealingScreenId,
+                method: "native_sheet"
+            )
         }
 
         func handleInteraction(_ interaction: FlowRendererInteraction) async -> FlowJourneyRunner.RunOutcome? {
@@ -190,14 +247,34 @@ public enum FlowRuntimeFixtureHost {
                 event: runtimeEvent
             )
         }
+
+        func handleManualEvent(_ eventName: String) async -> FlowJourneyRunner.RunOutcome? {
+            let runtimeEvent = NuxieEvent(
+                name: eventName,
+                distinctId: "fixture-distinct-id",
+                properties: [:]
+            )
+            return await runner.dispatchTrigger(
+                trigger: .event(eventName: eventName, filter: nil),
+                screenId: currentScreenId,
+                componentId: nil,
+                instanceId: nil,
+                event: runtimeEvent
+            )
+        }
     }
 
     private final class FlowRuntimeFixtureExecutionRuntime: FlowRuntimeDelegate {
         private let bridge: FlowRuntimeFixtureRunnerBridge
         private weak var flowViewController: FlowViewController?
         weak var statusLabel: UILabel?
+        var statusObserver: (@MainActor (String) -> Void)?
 
-        init(flow: Flow, flowViewController: FlowViewController) {
+        init(
+            flow: Flow,
+            flowViewController: FlowViewController,
+            initialNavigationStack: [String]
+        ) {
             let campaign = Campaign(
                 id: "fixture-campaign",
                 name: "Fixture Campaign",
@@ -217,6 +294,7 @@ public enum FlowRuntimeFixtureHost {
                 campaign: campaign,
                 distinctId: "fixture-distinct-id"
             )
+            journey.flowState.navigationStack = initialNavigationStack
             let runner = FlowJourneyRunner(
                 journey: journey,
                 campaign: campaign,
@@ -238,6 +316,14 @@ public enum FlowRuntimeFixtureHost {
             }
         }
 
+        func fireManualEvent(named eventName: String) {
+            setStatus("manual_event:\(eventName)")
+            Task { [bridge, weak self] in
+                guard let self else { return }
+                await self.handleOutcome(await bridge.handleManualEvent(eventName))
+            }
+        }
+
         func flowViewController(
             _ controller: FlowViewController,
             didChangeScreen screenId: String
@@ -246,6 +332,27 @@ public enum FlowRuntimeFixtureHost {
             Task { [bridge, weak self] in
                 guard let self else { return }
                 await self.handleOutcome(await bridge.handleScreenChanged(screenId))
+            }
+        }
+
+        func flowViewController(
+            _ controller: FlowViewController,
+            didDismissScreen screenId: String,
+            revealingScreenId: String?
+        ) {
+            if let revealingScreenId {
+                setStatus("screen_dismissed:\(screenId) | screen:\(revealingScreenId)")
+            } else {
+                setStatus("screen_dismissed:\(screenId)")
+            }
+            Task { [bridge, weak self] in
+                guard let self else { return }
+                await self.handleOutcome(
+                    await bridge.handleScreenDismissed(
+                        screenId,
+                        revealingScreenId: revealingScreenId
+                    )
+                )
             }
         }
 
@@ -296,6 +403,7 @@ public enum FlowRuntimeFixtureHost {
             } else {
                 statusLabel.text = "\(currentText) | \(text)"
             }
+            statusObserver?(statusLabel.text ?? text)
         }
 
         @MainActor

@@ -2,13 +2,14 @@
 import UIKit
 
 @MainActor
-final class FlowScreenTransitionCoordinator {
+final class FlowScreenTransitionCoordinator: NSObject, UIAdaptivePresentationControllerDelegate {
     typealias Completion = (_ didNavigate: Bool, _ screenId: String) -> Void
 
     private weak var hostViewController: FlowViewController?
     private let flow: Flow
     private let artifact: LoadedFlowArtifact
     private weak var screenDelegate: FlowScreenViewControllerDelegate?
+    private let onPresentedScreenDismissed: (_ dismissedScreenId: String, _ revealingScreenId: String?) -> Void
 
     private var navigationController: UINavigationController?
     private var activePresentedController: FlowScreenViewController?
@@ -26,12 +27,15 @@ final class FlowScreenTransitionCoordinator {
         flow: Flow,
         artifact: LoadedFlowArtifact,
         hostViewController: FlowViewController,
-        screenDelegate: FlowScreenViewControllerDelegate
+        screenDelegate: FlowScreenViewControllerDelegate,
+        onPresentedScreenDismissed: @escaping (_ dismissedScreenId: String, _ revealingScreenId: String?) -> Void
     ) {
         self.flow = flow
         self.artifact = artifact
         self.hostViewController = hostViewController
         self.screenDelegate = screenDelegate
+        self.onPresentedScreenDismissed = onPresentedScreenDismissed
+        super.init()
     }
 
     func install() throws {
@@ -184,7 +188,7 @@ final class FlowScreenTransitionCoordinator {
         }
 
         let spec = FlowScreenTransitionSpec(raw: rawTransition)
-        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled || Self.forceReduceMotionForTesting
 
         do {
             switch spec.kind {
@@ -313,13 +317,37 @@ final class FlowScreenTransitionCoordinator {
 
         let controller = try screenController(for: screenId)
         controller.loadViewIfNeeded()
-        controller.modalPresentationStyle = .fullScreen
+        controller.modalPresentationStyle = .pageSheet
+        controller.view.backgroundColor = .systemBackground
+        controller.sheetPresentationController?.detents = [.large()]
+        controller.sheetPresentationController?.prefersGrabberVisible = true
+        controller.presentationController?.delegate = self
         controller.setContentHidden(contentHidden)
         presenter.present(controller, animated: true) { [weak self] in
             self?.activePresentedController = controller
             controller.advance(delta: 0)
             completion(true, screenId)
         }
+    }
+
+    nonisolated func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        Task { @MainActor [weak self] in
+            self?.handlePresentedControllerDidDismiss(presentationController)
+        }
+    }
+
+    private func handlePresentedControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard let dismissedController = presentationController.presentedViewController as? FlowScreenViewController,
+              activePresentedController === dismissedController else {
+            return
+        }
+
+        activePresentedController = nil
+        dismissedController.presentationController?.delegate = nil
+
+        let revealingScreenId = (presentationController.presentingViewController as? FlowScreenViewController)?.screenId
+            ?? (navigationController?.topViewController as? FlowScreenViewController)?.screenId
+        onPresentedScreenDismissed(dismissedController.screenId, revealingScreenId)
     }
 
     private func runLiveReplacementTransition(
@@ -475,6 +503,11 @@ final class FlowScreenTransitionCoordinator {
             curve = .curveEaseInOut
         }
         return [.beginFromCurrentState, .allowUserInteraction, curve]
+    }
+
+    private static var forceReduceMotionForTesting: Bool {
+        ProcessInfo.processInfo.arguments.contains("--nuxie-force-reduce-motion")
+            || ProcessInfo.processInfo.environment["NUXIE_FORCE_REDUCE_MOTION"] == "1"
     }
 }
 

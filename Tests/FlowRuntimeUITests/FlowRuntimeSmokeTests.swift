@@ -7,9 +7,9 @@ final class FlowRuntimeSmokeTests: XCTestCase {
     private let fixtureNames = [
         "layout-paint",
         "published-font",
-        "text-input-motion",
         "pressable-interaction",
     ]
+    private let transitionEventName = "__nuxie_test_run_transition"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -53,25 +53,6 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         )
 
         try captureScreenshot(named: "published-font")
-
-        try selectFixture(named: "text-input-motion")
-        try waitForSurface()
-
-        let movingFieldIdentifier = "nuxie-text-input-text-input/screen_1/email_input"
-        XCTAssertTrue(
-            app.textFields[movingFieldIdentifier].waitForExistence(timeout: 10),
-            "Expected the moving editable text input overlay to mount"
-        )
-        let initialMovingFieldFrame = app.textFields[movingFieldIdentifier].frame
-        Thread.sleep(forTimeInterval: 1.4)
-        let movedFieldFrame = app.textFields[movingFieldIdentifier].frame
-        XCTAssertGreaterThan(
-            movedFieldFrame.midX,
-            initialMovingFieldFrame.midX + 16,
-            "Expected the UIKit text input overlay to follow animated Rive text geometry"
-        )
-
-        try captureScreenshot(named: "text-input-motion")
 
         try selectFixture(named: "pressable-interaction")
         try waitForSurface()
@@ -132,12 +113,43 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         try captureScreenshot(named: "pressable-interaction")
     }
 
+    func testTextInputMotionMovesWholeEditableField() throws {
+        try launchFixture(
+            named: "text-input-motion",
+            scenarioTitle: "Animated TextInput follows its rendered field",
+            scenarioExpectation: "The entire TextInput node moves to the right; the native editor overlay should stay aligned with the Rive field background."
+        )
+
+        try waitForSurface()
+        let movingFieldIdentifier = "nuxie-text-input-text-input/screen_1/email_input"
+        let emailField = app.textFields[movingFieldIdentifier]
+        XCTAssertTrue(
+            emailField.waitForExistence(timeout: 10),
+            "Expected the moving editable text input overlay to mount"
+        )
+
+        let initialMovingFieldFrame = emailField.frame
+        try captureScreenshot(named: "text-input-motion-before")
+
+        Thread.sleep(forTimeInterval: 1.4)
+        let movedFieldFrame = emailField.frame
+        XCTAssertGreaterThan(
+            abs(movedFieldFrame.midX - initialMovingFieldFrame.midX),
+            16,
+            "Expected the UIKit text input overlay to follow the animated TextInput node"
+        )
+
+        try captureScreenshot(named: "text-input-motion-after")
+        pauseForRecordedReview()
+    }
+
     func testSystemPushTransitionUsesTwoLiveRiveSurfacesUntilCompletion() throws {
-        app.launchArguments = [
-            "--nuxie-fixture",
-            "screen-transition-push",
-        ]
-        app.launch()
+        try launchFixture(
+            named: "screen-transition-push",
+            manualEventName: transitionEventName,
+            scenarioTitle: "System push: screen_1 -> screen_2",
+            scenarioExpectation: "Tap Run transition; screen_2 should push in as a second live Rive surface, then become current."
+        )
 
         try waitForSurface()
         let eventLog = app.staticTexts["nuxie-flow-event-log"]
@@ -146,30 +158,311 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             "Expected the fixture runtime event log to mount"
         )
 
+        pauseForRecordedReview()
         try captureScreenshot(named: "screen-transition-push-before")
+        tapManualStart()
 
         XCTAssertTrue(
             eventLog.waitForLabel(containing: "navigated:screen_2", timeout: 10),
             "Expected the fixture start action to request a push transition"
         )
+        pauseForRecordedReview(0.2)
         try captureScreenshot(named: "screen-transition-push-during")
 
         XCTAssertTrue(
             eventLog.waitForLabel(containing: "screen:screen_2", timeout: 10),
             "Expected screen_shown to arrive after the push transition completes"
         )
+        pauseForRecordedReview()
         try captureScreenshot(named: "screen-transition-push-after")
     }
 
-    private func selectFixture(named fixtureName: String) throws {
-        if app.staticTexts["nuxie-current-fixture"].label != fixtureName {
-            let button = app.buttons["nuxie-fixture-\(fixtureName)"]
-            XCTAssertTrue(
-                button.waitForExistence(timeout: 10),
-                "Expected fixture selector button for \(fixtureName)"
-            )
-            button.tap()
+    func testSystemPresentTransitionReachesDestinationScreen() throws {
+        try launchFixture(
+            named: "screen-transition-push",
+            variant: "present",
+            manualEventName: transitionEventName,
+            scenarioTitle: "System present: screen_1 presents screen_2",
+            scenarioExpectation: "Tap Run transition; UIKit should present screen_2 as a native sheet modal with its own live Rive surface."
+        )
+
+        try waitForSurface()
+        pauseForRecordedReview()
+        tapManualStart()
+        pauseForRecordedReview(0.2)
+        try captureScreenshot(named: "screen-transition-present-during")
+
+        XCTAssertTrue(
+            waitForSurfaceLabel(containing: "screen_2", timeout: 10),
+            "Expected the presented sheet controller to mount a live screen_2 Rive surface"
+        )
+
+        let presentedSurface = surfaceElement(containing: "screen_2")
+        XCTAssertTrue(
+            presentedSurface.exists,
+            "Expected to locate the presented screen_2 surface"
+        )
+        XCTAssertGreaterThan(
+            presentedSurface.frame.minY,
+            app.windows.element(boundBy: 0).frame.minY + 1,
+            "Expected present transition to use a sheet modal, not a full-screen cover"
+        )
+        pauseForRecordedReview()
+        try captureScreenshot(named: "screen-transition-present-after")
+    }
+
+    func testSystemPresentSwipeDismissReturnsToPresentingScreen() throws {
+        try launchFixture(
+            named: "screen-transition-push",
+            variant: "present",
+            manualEventName: transitionEventName,
+            scenarioTitle: "System present dismissal: screen_2 -> screen_1",
+            scenarioExpectation: "Tap Run transition; swipe down the sheet. The coordinator should report screen_2 dismissed and the journey should return to screen_1."
+        )
+
+        try waitForSurface()
+        let eventLog = app.staticTexts["nuxie-flow-event-log"]
+        XCTAssertTrue(
+            eventLog.waitForExistence(timeout: 10),
+            "Expected the fixture runtime event log to mount"
+        )
+
+        pauseForRecordedReview()
+        tapManualStart()
+        XCTAssertTrue(
+            waitForSurfaceLabel(containing: "screen_2", timeout: 10),
+            "Expected the presented sheet controller to mount a live screen_2 Rive surface"
+        )
+        pauseForRecordedReview()
+        try captureScreenshot(named: "screen-transition-present-dismissible-before")
+
+        let presentedSurface = surfaceElement(containing: "screen_2")
+        let start = presentedSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
+        let end = app.windows.element(boundBy: 0).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92))
+        start.press(forDuration: 0.1, thenDragTo: end)
+
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen_dismissed:screen_2", timeout: 10),
+            "Expected native sheet dismissal to be reported to the fixture runner"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_1", timeout: 10),
+            "Expected native sheet dismissal to reveal and re-enter screen_1"
+        )
+        XCTAssertTrue(
+            waitForSurfaceLabel(containing: "screen_1", timeout: 10),
+            "Expected the underlying screen_1 Rive surface to be current after sheet dismissal"
+        )
+        pauseForRecordedReview()
+        try captureScreenshot(named: "screen-transition-present-dismissible-after")
+    }
+
+    func testBackTransitionReturnsWithReversePushPayload() throws {
+        try launchFixture(
+            named: "screen-transition-push",
+            variant: "back-push",
+            initialNavigationStack: ["screen_1"],
+            manualEventName: transitionEventName,
+            scenarioTitle: "Back transition: screen_2 -> screen_1",
+            scenarioExpectation: "Tap Run transition; screen_2 pushes in, then its screen_shown action backs out with a reverse push to screen_1."
+        )
+
+        try waitForSurface()
+        let eventLog = app.staticTexts["nuxie-flow-event-log"]
+        XCTAssertTrue(
+            eventLog.waitForExistence(timeout: 10),
+            "Expected the fixture runtime event log to mount"
+        )
+
+        pauseForRecordedReview()
+        tapManualStart()
+
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "navigated:screen_2", timeout: 10),
+            "Expected the fixture start action to push to screen_2"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_2", timeout: 10),
+            "Expected the destination screen to be shown before the back action runs"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "navigated:screen_1", timeout: 10),
+            "Expected the screen_2 screen_shown interaction to request back with a reverse push transition"
+        )
+        pauseForRecordedReview(0.2)
+        try captureScreenshot(named: "screen-transition-back-push-during")
+
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_1", timeout: 10),
+            "Expected the reverse push back transition to complete on screen_1"
+        )
+        pauseForRecordedReview()
+        try captureScreenshot(named: "screen-transition-back-push-after")
+    }
+
+    func testReduceMotionFallsBackToInstantReplacement() throws {
+        try launchFixture(
+            named: "screen-transition-push",
+            variant: "reduce-motion-dissolve",
+            forceReduceMotion: true,
+            manualEventName: transitionEventName,
+            scenarioTitle: "Reduce motion: skip authored dissolve",
+            scenarioExpectation: "Tap Run transition; the fixture asks for a 5s dissolve, but forced reduce motion should replace it immediately."
+        )
+
+        try waitForSurface()
+        let eventLog = app.staticTexts["nuxie-flow-event-log"]
+        XCTAssertTrue(
+            eventLog.waitForExistence(timeout: 10),
+            "Expected the fixture runtime event log to mount"
+        )
+
+        pauseForRecordedReview()
+        let startButton = waitForManualStartButton()
+        let startedAt = Date()
+        startButton.tap()
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_2", timeout: 3.5),
+            "Expected forced reduce motion to skip the authored 5s dissolve and show screen_2 quickly"
+        )
+        XCTAssertLessThan(
+            Date().timeIntervalSince(startedAt),
+            3.5,
+            "Expected reduce motion replacement to complete without waiting for the authored dissolve duration"
+        )
+        pauseForRecordedReview()
+        try captureScreenshot(named: "screen-transition-reduce-motion-after")
+    }
+
+    func testTextInputOverlayRebindsAfterBackTransition() throws {
+        try launchFixture(
+            named: "screen-transition-push",
+            variant: "back-push",
+            initialNavigationStack: ["screen_1"],
+            manualEventName: transitionEventName,
+            scenarioTitle: "Static native text input survives screen transitions",
+            scenarioExpectation: "Tap Run transition; after push and back, the UIKit text input overlay should remount on screen_1 and remain editable."
+        )
+
+        try waitForSurface()
+        let eventLog = app.staticTexts["nuxie-flow-event-log"]
+        XCTAssertTrue(
+            eventLog.waitForExistence(timeout: 10),
+            "Expected the fixture runtime event log to mount"
+        )
+        pauseForRecordedReview()
+        tapManualStart()
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "navigated:screen_2", timeout: 10),
+            "Expected the fixture to navigate away from the input-owning screen"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_2", timeout: 10),
+            "Expected the destination screen to be shown before the back action runs"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "navigated:screen_1", timeout: 10),
+            "Expected the screen_2 screen_shown interaction to request the back transition"
+        )
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_1", timeout: 10),
+            "Expected the fixture to complete back on the input-owning screen"
+        )
+
+        let emailField = app.textFields["nuxie-text-input-text-input/screen_1/email_input"]
+        XCTAssertTrue(
+            emailField.waitForExistence(timeout: 10),
+            "Expected the screen_1 editable text input overlay to remount after the back transition"
+        )
+        XCTAssertTrue(
+            emailField.isHittable,
+            "Expected the remounted text input overlay to be active on the current screen"
+        )
+
+        emailField.tap()
+        emailField.typeText("+afterback")
+        XCTAssertTrue(
+            emailField.waitForValue(containing: "+afterback", timeout: 5),
+            "Expected typing after the transition to update the rebound UIKit text input"
+        )
+        pauseForRecordedReview()
+        try captureScreenshot(named: "screen-transition-text-input-after-back")
+    }
+
+    private func launchFixture(
+        named fixtureName: String,
+        variant: String? = nil,
+        initialNavigationStack: [String] = [],
+        forceReduceMotion: Bool = false,
+        manualEventName: String? = nil,
+        scenarioTitle: String? = nil,
+        scenarioExpectation: String? = nil
+    ) throws {
+        var arguments = [
+            "--nuxie-fixture",
+            fixtureName,
+        ]
+        if let variant {
+            arguments.append(contentsOf: [
+                "--nuxie-flow-description-variant",
+                variant,
+            ])
         }
+        if forceReduceMotion {
+            arguments.append("--nuxie-force-reduce-motion")
+        }
+        if let manualEventName {
+            arguments.append(contentsOf: [
+                "--nuxie-manual-event",
+                manualEventName,
+                "--nuxie-show-screen-debug-badges",
+            ])
+        }
+        if !initialNavigationStack.isEmpty {
+            arguments.append(contentsOf: [
+                "--nuxie-initial-navigation-stack",
+                initialNavigationStack.joined(separator: ","),
+            ])
+        }
+        if let scenarioTitle {
+            arguments.append(contentsOf: [
+                "--nuxie-scenario-title",
+                scenarioTitle,
+            ])
+        }
+        if let scenarioExpectation {
+            arguments.append(contentsOf: [
+                "--nuxie-scenario-expectation",
+                scenarioExpectation,
+            ])
+        }
+        app.launchArguments = arguments
+        app.launch()
+        try selectFixture(named: fixtureName)
+    }
+
+    private func selectFixture(named fixtureName: String) throws {
+        let currentFixtureLabel = app.staticTexts["nuxie-current-fixture"]
+        if currentFixtureLabel.exists && currentFixtureLabel.label == fixtureName {
+            return
+        }
+
+        if currentFixtureLabel.exists {
+            let backButton = app.navigationBars.buttons["Fixtures"]
+            XCTAssertTrue(
+                backButton.waitForExistence(timeout: 10),
+                "Expected navigation back button to return to the fixture list"
+            )
+            backButton.tap()
+        }
+
+        let fixtureRow = app.cells["nuxie-fixture-\(fixtureName)"]
+        XCTAssertTrue(
+            fixtureRow.waitForExistence(timeout: 10),
+            "Expected fixture table row for \(fixtureName)"
+        )
+        fixtureRow.tap()
+
         XCTAssertTrue(
             app.staticTexts["nuxie-current-fixture"].waitForLabel(containing: fixtureName, timeout: 10),
             "Expected host app to switch to fixture \(fixtureName)"
@@ -182,6 +475,49 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             surface.waitForExistence(timeout: 20),
             "Expected the native Rive flow surface to mount"
         )
+    }
+
+    private func waitForSurfaceLabel(containing expectedValue: String, timeout: TimeInterval) -> Bool {
+        let query = app.otherElements.matching(identifier: "nuxie-flow-surface")
+        let predicate = NSPredicate { _, _ in
+            guard query.count > 0 else { return false }
+            for index in 0..<query.count {
+                if query.element(boundBy: index).label.contains(expectedValue) {
+                    return true
+                }
+            }
+            return false
+        }
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
+        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    private func surfaceElement(containing expectedValue: String) -> XCUIElement {
+        let query = app.otherElements.matching(identifier: "nuxie-flow-surface")
+        for index in 0..<query.count {
+            let element = query.element(boundBy: index)
+            if element.label.contains(expectedValue) {
+                return element
+            }
+        }
+        return query.element(boundBy: 0)
+    }
+
+    private func tapManualStart() {
+        waitForManualStartButton().tap()
+    }
+
+    private func waitForManualStartButton() -> XCUIElement {
+        let button = app.buttons["nuxie-flow-manual-start"]
+        XCTAssertTrue(
+            button.waitForExistence(timeout: 10),
+            "Expected the fixture harness to show the manual start control"
+        )
+        return button
+    }
+
+    private func pauseForRecordedReview(_ duration: TimeInterval = 0.45) {
+        Thread.sleep(forTimeInterval: duration)
     }
 
     @discardableResult

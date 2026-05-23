@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "flowId": "flow_text_input_motion",
-  "buildId": "build_text_input_motion",
+  "flowId": "flow_publish_path_visual_view",
+  "buildId": "build_publish_path_visual_view",
   "renderer": "rive",
   "riv": {
     "path": "flow.riv",
-    "sha256": "b5d4e1d9c27a01740c022aec28a5bfda8dbb56ff5d021f2986185cd1cf5f4cf9",
-    "sizeBytes": 2249
+    "sha256": "aea09badf9a350d9f08ca1eb34d4b6cc8b96468fe46e5bf4cd3de940f6822177",
+    "sizeBytes": 2151
   },
   "entry": {
     "screenId": "screen_1",
