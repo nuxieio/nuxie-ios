@@ -187,15 +187,50 @@ final class FlowJourneyRunner {
             name: SystemEventNames.screenDismissed,
             properties: ["screen_id": screenId, "method": method]
         )
-        if let outcome = await dispatchEventTrigger(event) {
-            return outcome
-        }
+        let outcome = await dispatchTrigger(
+            trigger: .event(eventName: event.name, filter: nil),
+            screenId: screenId,
+            componentId: nil,
+            instanceId: nil,
+            event: event
+        )
 
+        let didRevealScreen = reconcileDismissedScreenState(
+            dismissedScreenId: screenId,
+            revealingScreenId: revealingScreenId
+        )
+        if let outcome { return outcome }
+
+        guard didRevealScreen, let revealingScreenId, !revealingScreenId.isEmpty else { return nil }
+
+        let shownEvent = makeSystemEvent(
+            name: SystemEventNames.screenShown,
+            properties: ["screen_id": revealingScreenId]
+        )
+        return await dispatchTrigger(
+            trigger: .event(eventName: shownEvent.name, filter: nil),
+            screenId: revealingScreenId,
+            componentId: nil,
+            instanceId: nil,
+            event: shownEvent
+        )
+    }
+
+    @discardableResult
+    private func reconcileDismissedScreenState(
+        dismissedScreenId: String,
+        revealingScreenId: String?
+    ) -> Bool {
         guard let revealingScreenId, !revealingScreenId.isEmpty else {
-            if journey.flowState.currentScreenId == screenId {
+            if journey.flowState.currentScreenId == dismissedScreenId {
                 journey.flowState.currentScreenId = nil
             }
-            return nil
+            return false
+        }
+
+        guard journey.flowState.currentScreenId == dismissedScreenId ||
+            journey.flowState.currentScreenId == nil else {
+            return false
         }
 
         if journey.flowState.navigationStack.last == revealingScreenId {
@@ -205,11 +240,7 @@ final class FlowJourneyRunner {
         }
 
         journey.flowState.currentScreenId = revealingScreenId
-        let shownEvent = makeSystemEvent(
-            name: SystemEventNames.screenShown,
-            properties: ["screen_id": revealingScreenId]
-        )
-        return await dispatchEventTrigger(shownEvent)
+        return true
     }
 
     func handleDidSet(
