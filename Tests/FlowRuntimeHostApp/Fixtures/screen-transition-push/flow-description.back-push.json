@@ -25,10 +25,7 @@
             "type": "navigate",
             "screenId": "screen_2",
             "transition": {
-              "type": "push",
-              "direction": "right",
-              "durationMs": 550,
-              "easing": "ease_in_out"
+              "type": "push"
             }
           }
         ]
@@ -47,10 +44,7 @@
             "type": "back",
             "steps": 1,
             "transition": {
-              "type": "push",
-              "direction": "left",
-              "durationMs": 550,
-              "easing": "ease_in_out"
+              "type": "push"
             }
           }
         ]

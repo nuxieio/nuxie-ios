@@ -14,7 +14,7 @@
   "interactions": {
     "__global__": [
       {
-        "id": "interaction_auto_present",
+        "id": "interaction_auto_modal",
         "enabled": true,
         "trigger": {
           "type": "event",
@@ -25,7 +25,7 @@
             "type": "navigate",
             "screenId": "screen_2",
             "transition": {
-              "type": "present"
+              "type": "modal"
             }
           }
         ]

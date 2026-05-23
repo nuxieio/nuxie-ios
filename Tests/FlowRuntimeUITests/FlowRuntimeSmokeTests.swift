@@ -151,20 +151,20 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         try captureScreenshot(named: "screen-transition-push-after")
     }
 
-    func testSystemPresentTransitionReachesDestinationScreen() throws {
+    func testSystemModalTransitionReachesDestinationScreen() throws {
         try launchFixture(
             named: "screen-transition-push",
-            variant: "present",
+            variant: "modal",
             manualEventName: transitionEventName,
-            scenarioTitle: "System present: screen_1 presents screen_2",
-            scenarioExpectation: "Tap Run transition; UIKit should present screen_2 as a native sheet modal with its own live Rive surface."
+            scenarioTitle: "System modal: screen_1 opens screen_2",
+            scenarioExpectation: "Tap Run transition; UIKit should open screen_2 as a native sheet modal with its own live Rive surface."
         )
 
         try waitForSurface()
         pauseForRecordedReview()
         tapManualStart()
         pauseForRecordedReview(0.2)
-        try captureScreenshot(named: "screen-transition-present-during")
+        try captureScreenshot(named: "screen-transition-modal-during")
 
         XCTAssertTrue(
             waitForSurfaceLabel(containing: "screen_2", timeout: 10),
@@ -179,18 +179,18 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         XCTAssertGreaterThan(
             presentedSurface.frame.minY,
             app.windows.element(boundBy: 0).frame.minY + 1,
-            "Expected present transition to use a sheet modal, not a full-screen cover"
+            "Expected modal transition to use a sheet modal, not a full-screen cover"
         )
         pauseForRecordedReview()
-        try captureScreenshot(named: "screen-transition-present-after")
+        try captureScreenshot(named: "screen-transition-modal-after")
     }
 
-    func testSystemPresentSwipeDismissReturnsToPresentingScreen() throws {
+    func testSystemModalSwipeDismissReturnsToPresentingScreen() throws {
         try launchFixture(
             named: "screen-transition-push",
-            variant: "present",
+            variant: "modal",
             manualEventName: transitionEventName,
-            scenarioTitle: "System present dismissal: screen_2 -> screen_1",
+            scenarioTitle: "System modal dismissal: screen_2 -> screen_1",
             scenarioExpectation: "Tap Run transition; swipe down the sheet. The coordinator should report screen_2 dismissed and the journey should return to screen_1."
         )
 
@@ -208,7 +208,7 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             "Expected the presented sheet controller to mount a live screen_2 Rive surface"
         )
         pauseForRecordedReview()
-        try captureScreenshot(named: "screen-transition-present-dismissible-before")
+        try captureScreenshot(named: "screen-transition-modal-dismissible-before")
 
         let presentedSurface = surfaceElement(containing: "screen_2")
         let start = presentedSurface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
@@ -228,17 +228,17 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             "Expected the underlying screen_1 Rive surface to be current after sheet dismissal"
         )
         pauseForRecordedReview()
-        try captureScreenshot(named: "screen-transition-present-dismissible-after")
+        try captureScreenshot(named: "screen-transition-modal-dismissible-after")
     }
 
-    func testBackTransitionReturnsWithReversePushPayload() throws {
+    func testBackTransitionReturnsWithPushPayload() throws {
         try launchFixture(
             named: "screen-transition-push",
             variant: "back-push",
             initialNavigationStack: ["screen_1"],
             manualEventName: transitionEventName,
             scenarioTitle: "Back transition: screen_2 -> screen_1",
-            scenarioExpectation: "Tap Run transition; screen_2 pushes in, then its screen_shown action backs out with a reverse push to screen_1."
+            scenarioExpectation: "Tap Run transition; screen_2 pushes in, then its screen_shown action backs out to screen_1."
         )
 
         try waitForSurface()
@@ -261,27 +261,27 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         )
         XCTAssertTrue(
             eventLog.waitForLabel(containing: "navigated:screen_1", timeout: 10),
-            "Expected the screen_2 screen_shown interaction to request back with a reverse push transition"
+            "Expected the screen_2 screen_shown interaction to request back with a push transition"
         )
         pauseForRecordedReview(0.2)
         try captureScreenshot(named: "screen-transition-back-push-during")
 
         XCTAssertTrue(
             eventLog.waitForLabel(containing: "screen:screen_1", timeout: 10),
-            "Expected the reverse push back transition to complete on screen_1"
+            "Expected the push back transition to complete on screen_1"
         )
         pauseForRecordedReview()
         try captureScreenshot(named: "screen-transition-back-push-after")
     }
 
-    func testReduceMotionFallsBackToInstantReplacement() throws {
+    func testReduceMotionFallsBackToImmediateReplacement() throws {
         try launchFixture(
             named: "screen-transition-push",
-            variant: "reduce-motion-dissolve",
+            variant: "reduce-motion-fade",
             forceReduceMotion: true,
             manualEventName: transitionEventName,
-            scenarioTitle: "Reduce motion: skip authored dissolve",
-            scenarioExpectation: "Tap Run transition; the fixture asks for a 5s dissolve, but forced reduce motion should replace it immediately."
+            scenarioTitle: "Reduce motion: skip authored fade",
+            scenarioExpectation: "Tap Run transition; the fixture asks for a fade, but forced reduce motion should replace it immediately."
         )
 
         try waitForSurface()
@@ -297,12 +297,12 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         startButton.tap()
         XCTAssertTrue(
             eventLog.waitForLabel(containing: "screen:screen_2", timeout: 3.5),
-            "Expected forced reduce motion to skip the authored 5s dissolve and show screen_2 quickly"
+            "Expected forced reduce motion to skip the authored fade and show screen_2 quickly"
         )
         XCTAssertLessThan(
             Date().timeIntervalSince(startedAt),
             3.5,
-            "Expected reduce motion replacement to complete without waiting for the authored dissolve duration"
+            "Expected reduce motion replacement to complete quickly"
         )
         pauseForRecordedReview()
         try captureScreenshot(named: "screen-transition-reduce-motion-after")
