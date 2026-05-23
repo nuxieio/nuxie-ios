@@ -14,7 +14,7 @@
   "interactions": {
     "__global__": [
       {
-        "id": "interaction_auto_dissolve",
+        "id": "interaction_auto_fade",
         "enabled": true,
         "trigger": {
           "type": "event",
@@ -25,9 +25,7 @@
             "type": "navigate",
             "screenId": "screen_2",
             "transition": {
-              "type": "dissolve",
-              "durationMs": 5000,
-              "easing": "linear"
+              "type": "fade"
             }
           }
         ]

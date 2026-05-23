@@ -25,10 +25,7 @@
             "type": "navigate",
             "screenId": "screen_2",
             "transition": {
-              "type": "push",
-              "direction": "right",
-              "durationMs": 450,
-              "easing": "ease_in_out"
+              "type": "push"
             }
           }
         ]

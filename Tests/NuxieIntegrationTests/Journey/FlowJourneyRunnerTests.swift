@@ -1819,7 +1819,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             it("uses explicit back transitions when provided") {
                 let flowId = "flow-back-transition"
-                let transition = AnyCodable(["type": "push", "direction": "left"])
+                let transition = AnyCodable(["type": "push"])
                 let interaction = Interaction(
                     id: "int-back",
                     trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
@@ -1851,7 +1851,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-1"))
                 let transitionPayload = controller.navigationRequests.last?.transition as? [String: Any]
                 expect(transitionPayload?["type"] as? String).to(equal("push"))
-                expect(transitionPayload?["direction"] as? String).to(equal("left"))
+                expect(transitionPayload?["direction"]).to(beNil())
             }
 
             it("omits back transitions when not configured") {

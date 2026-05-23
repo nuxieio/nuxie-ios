@@ -192,7 +192,7 @@ final class FlowScreenTransitionCoordinator: NSObject, UIAdaptivePresentationCon
 
         do {
             switch spec.kind {
-            case .instant, .custom:
+            case .none, .custom:
                 try replaceRoot(with: screenId, completion: completion)
             case .push:
                 if reduceMotion || !spec.isAnimated {
@@ -200,13 +200,13 @@ final class FlowScreenTransitionCoordinator: NSObject, UIAdaptivePresentationCon
                 } else {
                     try pushOrPop(to: screenId, completion: completion)
                 }
-            case .present:
+            case .modal:
                 if reduceMotion || !spec.isAnimated {
                     try replaceRoot(with: screenId, completion: completion)
                 } else {
                     try present(screenId: screenId, completion: completion)
                 }
-            case .dissolve, .moveIn, .moveOut, .slideIn, .slideOut:
+            case .fade:
                 if reduceMotion || !spec.isAnimated {
                     try replaceRoot(with: screenId, completion: completion)
                 } else {
@@ -391,44 +391,25 @@ final class FlowScreenTransitionCoordinator: NSObject, UIAdaptivePresentationCon
         nextController.setContentHidden(contentHidden)
         nextController.advance(delta: 0)
 
-        let offset = transitionOffset(spec.direction, in: hostView.bounds)
-        let reverseOffset = transitionOffset(spec.direction.reversed, in: hostView.bounds)
-
         switch spec.kind {
-        case .dissolve:
+        case .fade:
             nextController.view.alpha = 0
-        case .moveIn:
-            nextController.view.transform = offset
-        case .moveOut:
-            break
-        case .slideIn:
-            nextController.view.transform = offset
-            nextController.view.alpha = 0
-        case .slideOut:
-            break
-        case .push:
-            nextController.view.transform = offset
-        case .instant, .present, .custom:
+        case .none, .push, .modal, .custom:
             break
         }
 
         UIView.animate(
-            withDuration: spec.duration,
+            withDuration: 0.3,
             delay: 0,
-            options: animationOptions(spec.easing)
+            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]
         ) {
             nextController.view.transform = .identity
             nextController.view.alpha = 1
 
             switch spec.kind {
-            case .dissolve:
+            case .fade:
                 currentView.alpha = 0
-            case .moveOut, .slideOut:
-                currentView.transform = offset
-                currentView.alpha = spec.kind == .slideOut ? 0 : 1
-            case .push:
-                currentView.transform = reverseOffset
-            case .instant, .moveIn, .slideIn, .present, .custom:
+            case .none, .push, .modal, .custom:
                 break
             }
         } completion: { [weak self, weak nextController] _ in
@@ -480,41 +461,6 @@ final class FlowScreenTransitionCoordinator: NSObject, UIAdaptivePresentationCon
         }
         self.activePresentedController = nil
         activePresentedController.dismiss(animated: animated, completion: completion)
-    }
-
-    private func transitionOffset(
-        _ direction: FlowScreenTransitionSpec.Direction,
-        in bounds: CGRect
-    ) -> CGAffineTransform {
-        let width = max(bounds.width, 1)
-        let height = max(bounds.height, 1)
-        switch direction {
-        case .left:
-            return CGAffineTransform(translationX: -width, y: 0)
-        case .right:
-            return CGAffineTransform(translationX: width, y: 0)
-        case .up:
-            return CGAffineTransform(translationX: 0, y: -height)
-        case .down:
-            return CGAffineTransform(translationX: 0, y: height)
-        }
-    }
-
-    private func animationOptions(
-        _ easing: FlowScreenTransitionSpec.Easing
-    ) -> UIView.AnimationOptions {
-        let curve: UIView.AnimationOptions
-        switch easing {
-        case .linear:
-            curve = .curveLinear
-        case .easeIn:
-            curve = .curveEaseIn
-        case .easeOut:
-            curve = .curveEaseOut
-        case .easeInOut:
-            curve = .curveEaseInOut
-        }
-        return [.beginFromCurrentState, .allowUserInteraction, curve]
     }
 
     private static var forceReduceMotionForTesting: Bool {
