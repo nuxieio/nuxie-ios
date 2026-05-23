@@ -513,13 +513,8 @@ public class FlowViewController: NuxiePlatformViewController {
 
     // UI Components
     #if canImport(RiveRuntime) && canImport(UIKit)
-    private var flowRiveViewModel: RiveViewModel?
-    private var flowRiveView: RiveView?
-    private var flowViewModelBridge: FlowViewModelBridge?
-    private var textInputOverlayBridge: FlowTextInputOverlayBridge?
+    private var flowTransitionCoordinator: FlowScreenTransitionCoordinator?
     private var flowArtifact: LoadedFlowArtifact?
-    private var activeNativeScreenId: String?
-    private var pendingNativeScreenBindingId: String?
     #endif
     #if canImport(UIKit)
     var loadingView: UIView!
@@ -592,7 +587,7 @@ public class FlowViewController: NuxiePlatformViewController {
     public override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         #if canImport(RiveRuntime)
-        textInputOverlayBridge?.layout()
+        flowTransitionCoordinator?.layoutTextInputs()
         #endif
     }
     #endif
@@ -861,111 +856,27 @@ public class FlowViewController: NuxiePlatformViewController {
         #if canImport(RiveRuntime) && canImport(UIKit)
         do {
             runtimeReady = false
-            flowRiveView?.removeFromSuperview()
-            flowRiveView = nil
-            flowRiveViewModel = nil
-            flowViewModelBridge = nil
-            textInputOverlayBridge?.clear()
-            textInputOverlayBridge = nil
+            flowTransitionCoordinator?.tearDown()
+            flowTransitionCoordinator = nil
             flowArtifact = nil
-            activeNativeScreenId = nil
-            pendingNativeScreenBindingId = nil
 
-            let data = try Data(contentsOf: artifact.rivURL)
-            let riveFile = try RiveFile(
-                data: data,
-                loadCdn: false,
-                customAssetLoader: { [weak self] asset, embeddedData, factory in
-                    self?.loadRiveAsset(
-                        asset,
-                        embeddedData: embeddedData,
-                        factory: factory,
-                        artifact: artifact
-                    ) ?? false
-                }
-            )
-            let model = RiveModel(riveFile: riveFile)
-            let riveViewModel = RiveViewModel(
-                model,
-                animationName: nil,
-                fit: .contain,
-                alignment: .center,
-                autoPlay: true,
-                artboardName: artifact.manifest.entry.artboardName
-            )
-
-            let viewModelBridge = FlowViewModelBridge(
-                model: model,
-                remoteFlow: flow.remoteFlow,
-                imageResolver: { [weak self] imageKey in
-                    self?.resolveRiveImage(imageKey, artifact: artifact)
-                },
-                onValueChange: { [weak self] path, value, source in
-                    guard let self else { return }
-                    self.runtimeDelegate?.flowViewController(
-                        self,
-                        didEmitViewModelChange: FlowRendererViewModelChange(
-                            path: path,
-                            value: value,
-                            source: source,
-                            screenId: self.activeNativeScreenId,
-                            instanceId: nil,
-                            isTrigger: self.flowViewModelBridge?.isTriggerPath(
-                                path: path,
-                                screenId: self.activeNativeScreenId,
-                                instanceId: nil
-                            ) == true
-                        )
-                    )
-                }
-            )
-            let didBindViewModel = try viewModelBridge.bindDefaultInstanceForActiveArtboard()
-
-            let riveView = riveViewModel.createRiveView()
-            riveView.playerDelegate = self
-            riveView.stateMachineDelegate = self
-            riveView.translatesAutoresizingMaskIntoConstraints = false
-            riveView.accessibilityIdentifier = "nuxie-flow-surface"
-            riveView.isAccessibilityElement = true
-            riveView.isHidden = true
-
-            view.insertSubview(riveView, at: 0)
-            NSLayoutConstraint.activate([
-                riveView.topAnchor.constraint(equalTo: view.topAnchor),
-                riveView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                riveView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                riveView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-            ])
-
-            flowViewModelBridge = viewModelBridge
-            if didBindViewModel {
-                LogDebug("Bound native flow ViewModel \(viewModelBridge.boundViewModelName ?? "<unknown>")")
-            } else {
-                LogDebug("Mounted native flow artifact without a default ViewModel")
-            }
-
-            flowRiveViewModel = riveViewModel
-            flowRiveView = riveView
-            flowArtifact = artifact
-            activeNativeScreenId = artifact.manifest.entry.screenId
-            let textInputBridge = FlowTextInputOverlayBridge()
-            textInputBridge.bind(
-                screenId: artifact.manifest.entry.screenId,
+            let coordinator = FlowScreenTransitionCoordinator(
+                flow: flow,
                 artifact: artifact,
-                riveView: riveView,
-                riveViewModel: riveViewModel,
-                viewModelBridge: viewModelBridge
+                hostViewController: self,
+                screenDelegate: self
             )
-            textInputOverlayBridge = textInputBridge
-            riveView.advance(delta: 0)
+            try coordinator.install()
+            coordinator.setContentHidden(true)
+
+            flowTransitionCoordinator = coordinator
+            flowArtifact = artifact
             handleNativeRuntimeReady()
             LogDebug("Mounted native flow artifact for flow \(flow.id)")
         } catch {
+            flowTransitionCoordinator?.tearDown()
+            flowTransitionCoordinator = nil
             flowArtifact = nil
-            activeNativeScreenId = nil
-            pendingNativeScreenBindingId = nil
-            textInputOverlayBridge?.clear()
-            textInputOverlayBridge = nil
             viewModel.handleLoadingFailed(error)
         }
         #else
@@ -980,62 +891,9 @@ public class FlowViewController: NuxiePlatformViewController {
         flushPendingNativeRuntimeCommands()
     }
 
-    #if canImport(RiveRuntime) && canImport(UIKit)
-    private func loadRiveAsset(
-        _ asset: RiveFileAsset,
-        embeddedData: Data,
-        factory: RiveFactory,
-        artifact: LoadedFlowArtifact
-    ) -> Bool {
-        let assetName = asset.uniqueName()
-        guard let assetURL = artifact.localAssetURL(forRiveUniqueName: assetName) else {
-            LogError("Missing prepared runtime asset for Rive asset \(assetName)")
-            return false
-        }
-
-        let data: Data
-        do {
-            data = try Data(contentsOf: assetURL)
-        } catch {
-            LogError("Failed to read prepared runtime asset \(assetName) at \(assetURL.path): \(error)")
-            return false
-        }
-
-        if let imageAsset = asset as? RiveImageAsset {
-            imageAsset.renderImage(factory.decodeImage(data))
-            LogDebug("Loaded Rive image asset \(assetName) from \(assetURL.path)")
-            return true
-        }
-
-        if let fontAsset = asset as? RiveFontAsset {
-            _ = FlowRuntimeFontRegistry.registerFont(riveUniqueName: assetName, data: data)
-            fontAsset.font(factory.decodeFont(data))
-            LogDebug("Loaded Rive font asset \(assetName) from \(assetURL.path)")
-            return true
-        }
-
-        LogDebug("Unsupported Rive asset type for prepared asset \(assetName)")
-        return false
-    }
-
-    private func resolveRiveImage(_ imageKey: String, artifact: LoadedFlowArtifact) -> RiveRenderImage? {
-        guard let asset = artifact.manifest.assets.images.first(where: {
-            $0.sourceAssetKey == imageKey || $0.riveUniqueName == imageKey || $0.path == imageKey
-        }) else {
-            return nil
-        }
-        guard let assetURL = try? artifact.localImageURL(for: asset),
-              let data = try? Data(contentsOf: assetURL) else {
-            return nil
-        }
-        return RiveRenderImage(data: data)
-    }
-    #endif
-
     private func setFlowContentHidden(_ hidden: Bool) {
         #if canImport(RiveRuntime) && canImport(UIKit)
-        flowRiveView?.isHidden = hidden
-        textInputOverlayBridge?.setHidden(hidden)
+        flowTransitionCoordinator?.setContentHidden(hidden)
         #endif
     }
 
@@ -1324,25 +1182,16 @@ private extension FlowViewController {
         #if canImport(RiveRuntime) && canImport(UIKit)
         switch command {
         case .viewModelSnapshot(let snapshot, let screenId):
-            _ = flowViewModelBridge?.applySnapshot(snapshot, screenId: screenId)
-            let didSatisfyPendingScreenBinding = screenId != nil && pendingNativeScreenBindingId == screenId
-            if let screenId,
-               flowViewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true {
-                pendingNativeScreenBindingId = nil
-                if didSatisfyPendingScreenBinding {
-                    flowRiveView?.advance(delta: 0)
-                }
-            }
-            bindPendingNativeScreenIfNeeded()
+            _ = flowTransitionCoordinator?.applySnapshot(snapshot, screenId: screenId)
         case .viewModelValue(let path, let value, let screenId, let instanceId):
-            _ = flowViewModelBridge?.applyValue(
+            _ = flowTransitionCoordinator?.applyValue(
                 path: path,
                 value: value,
                 screenId: screenId,
                 instanceId: instanceId
             )
         case .viewModelList(let operation, let path, let payload, let screenId, let instanceId):
-            _ = flowViewModelBridge?.applyListOperation(
+            _ = flowTransitionCoordinator?.applyListOperation(
                 operation,
                 path: path,
                 payload: payload,
@@ -1350,7 +1199,7 @@ private extension FlowViewController {
                 instanceId: instanceId
             )
         case .viewModelTrigger(let path, let screenId, let instanceId):
-            _ = flowViewModelBridge?.fireTrigger(
+            _ = flowTransitionCoordinator?.fireTrigger(
                 path: path,
                 screenId: screenId,
                 instanceId: instanceId
@@ -1364,223 +1213,18 @@ private extension FlowViewController {
     #if canImport(RiveRuntime) && canImport(UIKit)
     @discardableResult
     private func handleNativeRuntimeNavigate(to screenId: String, transition: Any?) -> Bool {
-        guard let artifact = flowArtifact,
-              let screen = artifact.manifest.screens.first(where: { $0.screenId == screenId }),
-              let riveViewModel = flowRiveViewModel else {
+        guard let flowTransitionCoordinator else {
             return false
         }
-
-        let transitionSpec = FlowScreenTransitionSpec(raw: transition)
-        let previousSnapshot = makeNativeScreenTransitionSnapshot(for: transitionSpec)
-
-        do {
-            try riveViewModel.configureModel(
-                artboardName: screen.artboardName,
-                stateMachineName: nil,
-                animationName: nil
+        return flowTransitionCoordinator.navigate(
+            to: screenId,
+            transition: transition
+        ) { [weak self] didNavigate, completedScreenId in
+            guard let self, didNavigate else { return }
+            self.runtimeDelegate?.flowViewController(
+                self,
+                didChangeScreen: completedScreenId
             )
-            _ = try bindNativeViewModelForScreen(screenId)
-            activeNativeScreenId = screenId
-            if let riveView = flowRiveView,
-               let artifact = flowArtifact,
-               let viewModelBridge = flowViewModelBridge {
-                textInputOverlayBridge?.bind(
-                    screenId: screenId,
-                    artifact: artifact,
-                    riveView: riveView,
-                    riveViewModel: riveViewModel,
-                    viewModelBridge: viewModelBridge
-                )
-            }
-            flowRiveView?.advance(delta: 0)
-            animateNativeScreenTransition(transitionSpec, previousSnapshot: previousSnapshot)
-            runtimeDelegate?.flowViewController(self, didChangeScreen: screenId)
-            return true
-        } catch {
-            previousSnapshot?.removeFromSuperview()
-            LogWarning("FlowViewController: failed to navigate native artifact to screen \(screenId): \(error)")
-            return false
-        }
-    }
-
-    @discardableResult
-    private func bindNativeViewModelForScreen(_ screenId: String) throws -> Bool {
-        guard let viewModelBridge = flowViewModelBridge else {
-            pendingNativeScreenBindingId = screenId
-            return false
-        }
-
-        if viewModelBridge.bindDefaultInstance(forScreenId: screenId) {
-            pendingNativeScreenBindingId = nil
-            return true
-        }
-
-        if try viewModelBridge.bindDefaultInstanceForActiveArtboard() {
-            pendingNativeScreenBindingId = shouldKeepPendingNativeScreenBinding(for: screenId) ? screenId : nil
-            return true
-        }
-
-        pendingNativeScreenBindingId = screenId
-        return false
-    }
-
-    private func shouldKeepPendingNativeScreenBinding(for screenId: String) -> Bool {
-        guard let screen = flow.remoteFlow.screens.first(where: { $0.id == screenId }) else {
-            return false
-        }
-        return screen.defaultViewModelName != nil || screen.defaultInstanceId != nil
-    }
-
-    private func makeNativeScreenTransitionSnapshot(for spec: FlowScreenTransitionSpec) -> UIView? {
-        guard spec.isAnimated,
-              !UIAccessibility.isReduceMotionEnabled,
-              let riveView = flowRiveView,
-              !riveView.isHidden,
-              let snapshot = riveView.snapshotView(afterScreenUpdates: false) else {
-            return nil
-        }
-
-        snapshot.frame = riveView.frame
-        snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-
-        switch spec.kind {
-        case .moveIn, .slideIn:
-            view.insertSubview(snapshot, belowSubview: riveView)
-        default:
-            view.insertSubview(snapshot, aboveSubview: riveView)
-        }
-
-        return snapshot
-    }
-
-    private func animateNativeScreenTransition(
-        _ spec: FlowScreenTransitionSpec,
-        previousSnapshot: UIView?
-    ) {
-        guard let riveView = flowRiveView else {
-            previousSnapshot?.removeFromSuperview()
-            return
-        }
-
-        guard spec.isAnimated, !UIAccessibility.isReduceMotionEnabled else {
-            riveView.transform = .identity
-            riveView.alpha = 1
-            previousSnapshot?.removeFromSuperview()
-            return
-        }
-
-        let offset = nativeScreenTransitionOffset(spec.direction)
-        let reverseOffset = nativeScreenTransitionOffset(spec.direction.reversed)
-
-        switch spec.kind {
-        case .instant:
-            riveView.transform = .identity
-            riveView.alpha = 1
-            previousSnapshot?.removeFromSuperview()
-            return
-        case .dissolve:
-            riveView.transform = .identity
-            riveView.alpha = 0
-            previousSnapshot?.transform = .identity
-            previousSnapshot?.alpha = 1
-        case .moveIn:
-            riveView.transform = offset
-            riveView.alpha = 1
-            previousSnapshot?.transform = .identity
-            previousSnapshot?.alpha = 1
-        case .moveOut:
-            riveView.transform = .identity
-            riveView.alpha = 1
-            previousSnapshot?.transform = .identity
-            previousSnapshot?.alpha = 1
-        case .push:
-            riveView.transform = offset
-            riveView.alpha = 1
-            previousSnapshot?.transform = .identity
-            previousSnapshot?.alpha = 1
-        case .slideIn:
-            riveView.transform = offset
-            riveView.alpha = 0
-            previousSnapshot?.transform = .identity
-            previousSnapshot?.alpha = 1
-        case .slideOut:
-            riveView.transform = .identity
-            riveView.alpha = 1
-            previousSnapshot?.transform = .identity
-            previousSnapshot?.alpha = 1
-        }
-
-        UIView.animate(
-            withDuration: spec.duration,
-            delay: 0,
-            options: nativeScreenTransitionAnimationOptions(spec.easing)
-        ) {
-            riveView.transform = .identity
-            riveView.alpha = 1
-
-            switch spec.kind {
-            case .instant:
-                break
-            case .dissolve:
-                previousSnapshot?.alpha = 0
-            case .moveIn, .slideIn:
-                previousSnapshot?.alpha = 1
-            case .moveOut, .slideOut:
-                previousSnapshot?.transform = offset
-                previousSnapshot?.alpha = spec.kind == .slideOut ? 0 : 1
-            case .push:
-                previousSnapshot?.transform = reverseOffset
-            }
-        } completion: { _ in
-            riveView.transform = .identity
-            riveView.alpha = 1
-            previousSnapshot?.removeFromSuperview()
-        }
-    }
-
-    private func nativeScreenTransitionOffset(_ direction: FlowScreenTransitionSpec.Direction) -> CGAffineTransform {
-        let width = max(view.bounds.width, 1)
-        let height = max(view.bounds.height, 1)
-        switch direction {
-        case .left:
-            return CGAffineTransform(translationX: -width, y: 0)
-        case .right:
-            return CGAffineTransform(translationX: width, y: 0)
-        case .up:
-            return CGAffineTransform(translationX: 0, y: -height)
-        case .down:
-            return CGAffineTransform(translationX: 0, y: height)
-        }
-    }
-
-    private func nativeScreenTransitionAnimationOptions(
-        _ easing: FlowScreenTransitionSpec.Easing
-    ) -> UIView.AnimationOptions {
-        let curve: UIView.AnimationOptions
-        switch easing {
-        case .linear:
-            curve = .curveLinear
-        case .easeIn:
-            curve = .curveEaseIn
-        case .easeOut:
-            curve = .curveEaseOut
-        case .easeInOut:
-            curve = .curveEaseInOut
-        }
-        return [.beginFromCurrentState, .allowUserInteraction, curve]
-    }
-
-    private func bindPendingNativeScreenIfNeeded() {
-        guard let screenId = pendingNativeScreenBindingId else {
-            return
-        }
-        do {
-            guard try bindNativeViewModelForScreen(screenId) else {
-                return
-            }
-            flowRiveView?.advance(delta: 0)
-        } catch {
-            LogWarning("FlowViewController: failed to bind native ViewModel for screen \(screenId): \(error)")
         }
     }
     #endif
@@ -1588,170 +1232,37 @@ private extension FlowViewController {
 }
 
 #if canImport(RiveRuntime) && canImport(UIKit)
-extension FlowViewController: RivePlayerDelegate {
-    public func player(playedWithModel riveModel: RiveModel?) {}
-
-    public func player(pausedWithModel riveModel: RiveModel?) {}
-
-    public func player(loopedWithModel riveModel: RiveModel?, type: Int) {}
-
-    public func player(stoppedWithModel riveModel: RiveModel?) {}
-
-    public func player(didAdvanceby seconds: Double, riveModel: RiveModel?) {
-        flowViewModelBridge?.updateBoundListeners()
-        textInputOverlayBridge?.layout()
-    }
-}
-
-extension FlowViewController: RiveStateMachineDelegate {
-    public func onRiveEventReceived(onRiveEvent riveEvent: RiveEvent) {
-        let properties = rendererEventProperties(from: riveEvent)
-        let screenId = rendererStringProperty(
-            ["screenId", "screen_id"],
-            from: properties
-        ) ?? activeNativeScreenId
-        let componentId = rendererStringProperty(
-            ["componentId", "component_id", "elementId", "element_id"],
-            from: properties
-        )
-        let instanceId = rendererStringProperty(
-            ["instanceId", "instance_id"],
-            from: properties
-        )
-
-        if let openUrlEvent = riveEvent as? RiveOpenUrlEvent {
-            runtimeDelegate?.flowViewController(
-                self,
-                didRequestOpenLink: FlowRendererOpenLinkRequest(
-                    urlString: openUrlEvent.url(),
-                    target: openUrlEvent.target(),
-                    screenId: screenId,
-                    instanceId: instanceId
-                )
-            )
-            return
-        }
-
-        if let rawTrigger = rendererStringProperty(
-            ["nuxieTrigger", "trigger", "triggerType", "trigger_type"],
-            from: properties
-        ), let trigger = rendererInteractionTrigger(
-            from: rawTrigger,
-            properties: properties,
-            eventName: riveEvent.name()
-        ) {
-            runtimeDelegate?.flowViewController(
-                self,
-                didEmitInteraction: FlowRendererInteraction(
-                    trigger: trigger,
-                    screenId: screenId,
-                    componentId: componentId,
-                    instanceId: instanceId,
-                    properties: properties
-                )
-            )
-            return
-        }
-
-        runtimeDelegate?.flowViewController(
-            self,
-            didEmitEvent: FlowRendererEvent(
-                name: riveEvent.name(),
-                properties: properties,
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId
-            )
-        )
+extension FlowViewController: FlowScreenViewControllerDelegate {
+    func flowScreenViewControllerDidAdvance(_ controller: FlowScreenViewController) {
+        flowTransitionCoordinator?.layoutTextInputs()
     }
 
-    private func rendererEventProperties(from event: RiveEvent) -> [String: Any] {
-        guard let rawProperties = event.properties() as? [String: Any] else {
-            return [:]
-        }
-        return rawProperties
+    func flowScreenViewController(
+        _ controller: FlowScreenViewController,
+        didEmitInteraction interaction: FlowRendererInteraction
+    ) {
+        runtimeDelegate?.flowViewController(self, didEmitInteraction: interaction)
     }
 
-    private func rendererStringProperty(
-        _ keys: [String],
-        from properties: [String: Any]
-    ) -> String? {
-        for key in keys {
-            if let value = properties[key] as? String,
-               !value.isEmpty {
-                return value
-            }
-        }
-        return nil
+    func flowScreenViewController(
+        _ controller: FlowScreenViewController,
+        didEmitEvent event: FlowRendererEvent
+    ) {
+        runtimeDelegate?.flowViewController(self, didEmitEvent: event)
     }
 
-    private func rendererInteractionTrigger(
-        from rawValue: String,
-        properties: [String: Any],
-        eventName: String
-    ) -> InteractionTrigger? {
-        let normalized = rawValue
-            .replacingOccurrences(of: "action/", with: "")
-            .replacingOccurrences(of: "-", with: "_")
-            .lowercased()
-
-        switch normalized {
-        case "long_press", "longpress":
-            return .longPress(
-                minMs: rendererIntProperty(["minMs", "min_ms"], from: properties)
-            )
-        case "hover":
-            return .hover
-        case "press":
-            return .press
-        case "drag":
-            let direction = rendererStringProperty(["direction"], from: properties)
-                .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
-            return .drag(
-                direction: direction,
-                threshold: rendererDoubleProperty(["threshold"], from: properties)
-            )
-        case "manual":
-            return .manual(
-                label: rendererStringProperty(["label"], from: properties)
-            )
-        case "event":
-            return .event(
-                eventName: rendererStringProperty(
-                    ["eventName", "event_name"],
-                    from: properties
-                ) ?? eventName,
-                filter: nil
-            )
-        default:
-            return nil
-        }
+    func flowScreenViewController(
+        _ controller: FlowScreenViewController,
+        didEmitViewModelChange change: FlowRendererViewModelChange
+    ) {
+        runtimeDelegate?.flowViewController(self, didEmitViewModelChange: change)
     }
 
-    private func rendererIntProperty(
-        _ keys: [String],
-        from properties: [String: Any]
-    ) -> Int? {
-        for key in keys {
-            if let value = properties[key] as? Int { return value }
-            if let value = properties[key] as? Double { return Int(value) }
-            if let value = properties[key] as? NSNumber { return value.intValue }
-            if let value = properties[key] as? String { return Int(value) }
-        }
-        return nil
-    }
-
-    private func rendererDoubleProperty(
-        _ keys: [String],
-        from properties: [String: Any]
-    ) -> Double? {
-        for key in keys {
-            if let value = properties[key] as? Double { return value }
-            if let value = properties[key] as? Int { return Double(value) }
-            if let value = properties[key] as? NSNumber { return value.doubleValue }
-            if let value = properties[key] as? String { return Double(value) }
-        }
-        return nil
+    func flowScreenViewController(
+        _ controller: FlowScreenViewController,
+        didRequestOpenLink request: FlowRendererOpenLinkRequest
+    ) {
+        runtimeDelegate?.flowViewController(self, didRequestOpenLink: request)
     }
 }
 #endif

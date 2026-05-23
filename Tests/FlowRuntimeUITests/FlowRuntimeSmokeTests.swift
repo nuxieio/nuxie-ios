@@ -132,6 +132,35 @@ final class FlowRuntimeSmokeTests: XCTestCase {
         try captureScreenshot(named: "pressable-interaction")
     }
 
+    func testSystemPushTransitionUsesTwoLiveRiveSurfacesUntilCompletion() throws {
+        app.launchArguments = [
+            "--nuxie-fixture",
+            "screen-transition-push",
+        ]
+        app.launch()
+
+        try waitForSurface()
+        let eventLog = app.staticTexts["nuxie-flow-event-log"]
+        XCTAssertTrue(
+            eventLog.waitForExistence(timeout: 10),
+            "Expected the fixture runtime event log to mount"
+        )
+
+        try captureScreenshot(named: "screen-transition-push-before")
+
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "navigated:screen_2", timeout: 10),
+            "Expected the fixture start action to request a push transition"
+        )
+        try captureScreenshot(named: "screen-transition-push-during")
+
+        XCTAssertTrue(
+            eventLog.waitForLabel(containing: "screen:screen_2", timeout: 10),
+            "Expected screen_shown to arrive after the push transition completes"
+        )
+        try captureScreenshot(named: "screen-transition-push-after")
+    }
+
     private func selectFixture(named fixtureName: String) throws {
         if app.staticTexts["nuxie-current-fixture"].label != fixtureName {
             let button = app.buttons["nuxie-fixture-\(fixtureName)"]

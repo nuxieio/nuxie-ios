@@ -7,12 +7,42 @@ cd "$ROOT_DIR"
 OUTPUT_DIR="${NUXIE_FLOW_RUNTIME_OUTPUT_DIR:-$ROOT_DIR/test-results/flow-runtime}"
 RESULT_BUNDLE="$OUTPUT_DIR/NuxieFlowRuntimeUITests.xcresult"
 SCREENSHOTS_DIR="$OUTPUT_DIR/screenshots"
+VIDEOS_DIR="$OUTPUT_DIR/videos"
+VIDEO_FILE="$VIDEOS_DIR/flow-runtime-ui.mp4"
 DESTINATION="${TEST_DESTINATION:-platform=iOS Simulator,name=${TEST_SIMULATOR_NAME:-iPhone 17 Pro},OS=${TEST_SIMULATOR_OS:-26.4}}"
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$SCREENSHOTS_DIR"
+mkdir -p "$VIDEOS_DIR"
+
+start_recording() {
+  (
+    for _ in $(seq 1 120); do
+      if xcrun simctl list devices booted 2>/dev/null | grep -q "(Booted)"; then
+        xcrun simctl io booted recordVideo --codec=h264 "$VIDEO_FILE"
+        exit 0
+      fi
+      sleep 1
+    done
+  ) >/dev/null 2>&1 &
+  RECORDER_PID=$!
+}
+
+stop_recording() {
+  local pid="${1:-}"
+  if [ -z "$pid" ]; then
+    return
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    pkill -INT -f "simctl io booted recordVideo.*$VIDEO_FILE" 2>/dev/null || true
+    kill -INT "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+}
 
 set +e
+RECORDER_PID=""
+start_recording
 if [ -n "${CLONED_SOURCE_PACKAGES_DIR_PATH:-}" ]; then
   NUXIE_FLOW_RUNTIME_OUTPUT_DIR="$OUTPUT_DIR" xcodebuild test \
     -project NuxieSDK.xcodeproj \
@@ -29,9 +59,10 @@ else
     -configuration Debug \
     -derivedDataPath DerivedData \
     -destination "$DESTINATION" \
-    -resultBundlePath "$RESULT_BUNDLE"
+      -resultBundlePath "$RESULT_BUNDLE"
 fi
 STATUS=$?
+stop_recording "$RECORDER_PID"
 set -e
 
 python3 - "$RESULT_BUNDLE" "$SCREENSHOTS_DIR" <<'PY'
@@ -152,6 +183,7 @@ REPORT="$OUTPUT_DIR/index.html"
     .card { background: white; border: 1px solid #dde2ea; border-radius: 10px; padding: 14px; box-shadow: 0 1px 2px rgba(20, 23, 31, 0.05); }
     .card h2 { font-size: 15px; margin: 0 0 12px; }
     img { display: block; width: 100%; border-radius: 8px; border: 1px solid #e6e9ef; background: white; }
+    video { display: block; width: 100%; border-radius: 8px; border: 1px solid #e6e9ef; background: black; margin-bottom: 24px; }
     code { background: #edf0f5; border-radius: 5px; padding: 2px 5px; }
     .empty { background: white; border: 1px dashed #b8c0cc; border-radius: 10px; padding: 28px; color: #596170; }
   </style>
@@ -167,6 +199,15 @@ REPORT="$OUTPUT_DIR/index.html"
     <div class="status">$(if [ "$STATUS" -eq 0 ]; then echo "Passed"; else echo "Failed ($STATUS)"; fi)</div>
   </header>
 HTML
+
+  if [ -s "$VIDEO_FILE" ]; then
+    cat <<HTML
+  <section>
+    <h2>Simulator Recording</h2>
+    <video controls src="videos/$(basename "$VIDEO_FILE")"></video>
+  </section>
+HTML
+  fi
 
   shopt -s nullglob
   screenshots=("$SCREENSHOTS_DIR"/*.png)

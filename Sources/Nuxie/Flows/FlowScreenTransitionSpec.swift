@@ -7,8 +7,10 @@ struct FlowScreenTransitionSpec: Equatable {
         case moveIn = "move_in"
         case moveOut = "move_out"
         case push
+        case present
         case slideIn = "slide_in"
         case slideOut = "slide_out"
+        case custom
     }
 
     enum Direction: String {
@@ -42,28 +44,32 @@ struct FlowScreenTransitionSpec: Equatable {
     let direction: Direction
     let duration: TimeInterval
     let easing: Easing
+    let transitionId: String?
 
     var isAnimated: Bool {
-        kind != .instant && duration > 0
+        kind != .instant && kind != .custom && duration > 0
     }
 
     static let instant = FlowScreenTransitionSpec(
         kind: .instant,
         direction: .right,
         duration: 0,
-        easing: .easeInOut
+        easing: .easeInOut,
+        transitionId: nil
     )
 
     init(
         kind: Kind,
         direction: Direction = .right,
         duration: TimeInterval = 0.3,
-        easing: Easing = .easeInOut
+        easing: Easing = .easeInOut,
+        transitionId: String? = nil
     ) {
         self.kind = kind
         self.direction = direction
         self.duration = max(0, duration)
         self.easing = easing
+        self.transitionId = transitionId
     }
 
     init(raw: Any?) {
@@ -76,7 +82,8 @@ struct FlowScreenTransitionSpec: Equatable {
             kind: FlowScreenTransitionSpec.kind(from: record["type"]),
             direction: FlowScreenTransitionSpec.direction(from: record["direction"]) ?? .right,
             duration: FlowScreenTransitionSpec.duration(from: record),
-            easing: FlowScreenTransitionSpec.easing(from: record["easing"])
+            easing: FlowScreenTransitionSpec.easing(from: record["easing"]),
+            transitionId: FlowScreenTransitionSpec.string(from: record["transitionId"] ?? record["transition_id"])
         )
     }
 
@@ -92,7 +99,7 @@ struct FlowScreenTransitionSpec: Equatable {
         switch normalizeToken(raw) {
         case "none", "instant":
             return .instant
-        case "dissolve", "smart_animate":
+        case "dissolve", "fade", "smart_animate":
             return .dissolve
         case "move_in":
             return .moveIn
@@ -100,10 +107,14 @@ struct FlowScreenTransitionSpec: Equatable {
             return .moveOut
         case "push":
             return .push
+        case "present", "modal":
+            return .present
         case "slide_in":
             return .slideIn
         case "slide_out":
             return .slideOut
+        case "custom":
+            return .custom
         default:
             return .instant
         }
@@ -161,6 +172,17 @@ struct FlowScreenTransitionSpec: Equatable {
         if let value = raw as? NSNumber { return value.doubleValue }
         if let value = raw as? String { return Double(value) }
         if let value = raw as? AnyCodable { return double(from: value.value) }
+        return nil
+    }
+
+    private static func string(from raw: Any?) -> String? {
+        if let value = raw as? String {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let value = raw as? AnyCodable {
+            return string(from: value.value)
+        }
         return nil
     }
 
