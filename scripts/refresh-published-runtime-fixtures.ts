@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NUXIE_RIVE_MANIFEST_ARTIFACT_PATHS, NuxieRiveManifestV1Schema, type NuxieRiveManifestFontAssetV1, type NuxieRiveManifestV1 } from "@nuxie/models/schemas/nuxie-rive-manifest";
@@ -80,6 +80,36 @@ const loadPublishPathFixture = (fixtureId: string): PublishPathFixture => {
   return raw;
 };
 
+const polishedTextInputFixture = (source: PublishPathFixture): PublishPathFixture => {
+  const fixture = cloneJson(source);
+  const snapshot = fixture.snapshotArtifact?.snapshot;
+  const nodes =
+    isRecord(snapshot) &&
+    isRecord(snapshot.document) &&
+    Array.isArray(snapshot.document.nodes)
+      ? snapshot.document.nodes
+      : null;
+  if (!nodes) {
+    throw new Error("Text input fixture source is missing document nodes");
+  }
+
+  const emailInput = nodes.find((node) => isRecord(node) && node.id === "email_input");
+  if (!isRecord(emailInput)) {
+    throw new Error("Text input fixture source is missing email_input node");
+  }
+  const data = isRecord(emailInput.data) ? emailInput.data : null;
+  const view = isRecord(data?.view) ? data.view : null;
+  const props = isRecord(view?.props) ? view.props : null;
+  const style = isRecord(props?.style) ? props.style : null;
+  if (!style) {
+    throw new Error("Text input fixture source is missing email_input style");
+  }
+
+  style.paddingLeft = 16;
+  style.paddingRight = 16;
+  return fixture;
+};
+
 const textInputMotionFixture = (source: PublishPathFixture): PublishPathFixture => {
   const fixture = cloneJson(source);
   fixture.flowId = "flow_text_input_motion";
@@ -122,10 +152,38 @@ const textInputMotionFixture = (source: PublishPathFixture): PublishPathFixture 
         kind: "linear_animation",
         name: "Text Input Motion",
         fps: 60,
-        duration: 600,
+        duration: 120,
         speed: 1,
-        loopValue: 0,
+        loopValue: 1,
         keyedObjects: [
+          {
+            id: "keyed.email_input.field.x",
+            objectKey: "view_shape/email_input",
+            keyedProperties: [
+              {
+                id: "keyed.email_input.field.x.property",
+                propertyKey: 13,
+                valueType: "number",
+                mixBehavior: "interpolate",
+                keyFrames: [
+                  {
+                    id: "keyframe.email_input.field.x.0",
+                    frame: 0,
+                    valueType: "number",
+                    value: 195,
+                    interpolation: { type: "linear" },
+                  },
+                  {
+                    id: "keyframe.email_input.field.x.120",
+                    frame: 120,
+                    valueType: "number",
+                    value: 259,
+                    interpolation: { type: "linear" },
+                  },
+                ],
+              },
+            ],
+          },
           {
             id: "keyed.email_input.text.x",
             objectKey: "artboard/screen_1/email_input/text",
@@ -140,14 +198,14 @@ const textInputMotionFixture = (source: PublishPathFixture): PublishPathFixture 
                     id: "keyframe.email_input.text.x.0",
                     frame: 0,
                     valueType: "number",
-                    value: 32,
+                    value: 48,
                     interpolation: { type: "linear" },
                   },
                   {
-                    id: "keyframe.email_input.text.x.600",
-                    frame: 600,
+                    id: "keyframe.email_input.text.x.120",
+                    frame: 120,
                     valueType: "number",
-                    value: 232,
+                    value: 112,
                     interpolation: { type: "linear" },
                   },
                 ],
@@ -160,6 +218,27 @@ const textInputMotionFixture = (source: PublishPathFixture): PublishPathFixture 
   );
 
   return fixture;
+};
+
+const copyRuntimeArtifacts = (params: {
+  sourceFixtureId: string;
+  destinationFixtureId: string;
+}): void => {
+  const sourceRoot = path.join(fixtureRoot, params.sourceFixtureId);
+  const destinationRoot = path.join(fixtureRoot, params.destinationFixtureId);
+  mkdirSync(destinationRoot, { recursive: true });
+
+  for (const fileName of ["flow.riv", NUXIE_RIVE_MANIFEST_ARTIFACT_PATHS.manifest]) {
+    cpSync(path.join(sourceRoot, fileName), path.join(destinationRoot, fileName));
+  }
+
+  rmSync(path.join(destinationRoot, "assets"), { recursive: true, force: true });
+  cpSync(path.join(sourceRoot, "assets"), path.join(destinationRoot, "assets"), {
+    recursive: true,
+  });
+  console.log(
+    `copied static runtime artifacts ${params.sourceFixtureId} -> ${params.destinationFixtureId}`,
+  );
 };
 
 const canonicalPublishIrInput = (source: PublishPathFixture): unknown => {
@@ -303,7 +382,9 @@ const refreshFixture = async (params: {
 };
 
 const main = async (): Promise<void> => {
-  const visualViewContract = loadPublishPathFixture("visual-view-contract");
+  const visualViewContract = polishedTextInputFixture(
+    loadPublishPathFixture("visual-view-contract"),
+  );
   await refreshFixture({
     source: visualViewContract,
     sourceName: "visual-view-contract",
@@ -313,6 +394,10 @@ const main = async (): Promise<void> => {
     source: textInputMotionFixture(visualViewContract),
     sourceName: "text-input-motion",
     destinationFixtureId: "text-input-motion",
+  });
+  copyRuntimeArtifacts({
+    sourceFixtureId: "published-font",
+    destinationFixtureId: "screen-transition-push",
   });
 };
 

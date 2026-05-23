@@ -178,6 +178,40 @@ final class FlowJourneyRunner {
         return await dispatchEventTrigger(event)
     }
 
+    func handleScreenDismissed(
+        _ screenId: String,
+        revealingScreenId: String?,
+        method: String
+    ) async -> RunOutcome? {
+        let event = makeSystemEvent(
+            name: SystemEventNames.screenDismissed,
+            properties: ["screen_id": screenId, "method": method]
+        )
+        if let outcome = await dispatchEventTrigger(event) {
+            return outcome
+        }
+
+        guard let revealingScreenId, !revealingScreenId.isEmpty else {
+            if journey.flowState.currentScreenId == screenId {
+                journey.flowState.currentScreenId = nil
+            }
+            return nil
+        }
+
+        if journey.flowState.navigationStack.last == revealingScreenId {
+            journey.flowState.navigationStack.removeLast()
+        } else if let index = journey.flowState.navigationStack.lastIndex(of: revealingScreenId) {
+            journey.flowState.navigationStack = Array(journey.flowState.navigationStack.prefix(index))
+        }
+
+        journey.flowState.currentScreenId = revealingScreenId
+        let shownEvent = makeSystemEvent(
+            name: SystemEventNames.screenShown,
+            properties: ["screen_id": revealingScreenId]
+        )
+        return await dispatchEventTrigger(shownEvent)
+    }
+
     func handleDidSet(
         path: VmPathRef,
         value: Any,

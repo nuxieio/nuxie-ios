@@ -86,6 +86,7 @@ final class FlowScreenViewController: UIViewController {
             riveView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
+        installFixtureScreenBadgeIfNeeded()
         bindTextInputs()
         riveView.advance(delta: 0)
     }
@@ -258,6 +259,33 @@ final class FlowScreenViewController: UIViewController {
             return false
         }
         return screen.defaultViewModelName != nil || screen.defaultInstanceId != nil
+    }
+
+    private func installFixtureScreenBadgeIfNeeded() {
+        guard ProcessInfo.processInfo.arguments.contains("--nuxie-show-screen-debug-badges") else {
+            return
+        }
+
+        let badge = UILabel()
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.accessibilityIdentifier = "nuxie-screen-debug-badge-\(screenId)"
+        badge.text = "LIVE SCREEN: \(screenId)"
+        badge.textAlignment = .center
+        badge.textColor = .white
+        badge.font = .systemFont(ofSize: 18, weight: .bold)
+        badge.backgroundColor = screenId == "screen_1" ? .systemIndigo : .systemGreen
+        badge.layer.cornerRadius = 14
+        badge.layer.masksToBounds = true
+        badge.isAccessibilityElement = true
+        badge.accessibilityLabel = "Live screen \(screenId)"
+
+        view.addSubview(badge)
+        NSLayoutConstraint.activate([
+            badge.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 44),
+            badge.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -44),
+            badge.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -104),
+            badge.heightAnchor.constraint(equalToConstant: 52),
+        ])
     }
 
     private func bindTextInputs() {

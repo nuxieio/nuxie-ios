@@ -404,6 +404,37 @@ public actor JourneyService: JourneyServiceProtocol {
     )
   }
 
+  fileprivate func handleRendererScreenDismissed(
+    journeyId: String,
+    screenId: String,
+    revealingScreenId: String?
+  ) async {
+    guard let journey = inMemoryJourneysById[journeyId],
+          let runner = flowRunners[journeyId] else { return }
+
+    let outcome = await runner.handleScreenDismissed(
+      screenId,
+      revealingScreenId: revealingScreenId,
+      method: "native_sheet"
+    )
+    handleOutcome(outcome, journey: journey)
+    persistJourney(journey)
+
+    if let revealingScreenId {
+      eventService.track(
+        "$journey_node_executed",
+        properties: [
+          "session_id": journey.id,
+          "node_id": revealingScreenId,
+          "async": true,
+          "context": journey.context.mapValues { $0.value },
+        ],
+        userProperties: nil,
+        userPropertiesSetOnce: nil
+      )
+    }
+  }
+
   fileprivate func handleRendererViewModelChange(
     journeyId: String,
     change: FlowRendererViewModelChange
@@ -1733,6 +1764,20 @@ private final class FlowRuntimeDelegateAdapter:
       await journeyService?.handleRendererScreenChanged(
         journeyId: journeyId,
         screenId: screenId
+      )
+    }
+  }
+
+  func flowViewController(
+    _ controller: FlowViewController,
+    didDismissScreen screenId: String,
+    revealingScreenId: String?
+  ) {
+    Task { [weak journeyService] in
+      await journeyService?.handleRendererScreenDismissed(
+        journeyId: journeyId,
+        screenId: screenId,
+        revealingScreenId: revealingScreenId
       )
     }
   }

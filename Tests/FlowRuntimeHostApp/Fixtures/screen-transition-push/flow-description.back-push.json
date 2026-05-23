@@ -27,7 +27,29 @@
             "transition": {
               "type": "push",
               "direction": "right",
-              "durationMs": 450,
+              "durationMs": 550,
+              "easing": "ease_in_out"
+            }
+          }
+        ]
+      }
+    ],
+    "screen_2": [
+      {
+        "id": "interaction_auto_back",
+        "enabled": true,
+        "trigger": {
+          "type": "event",
+          "eventName": "$screen_shown"
+        },
+        "actions": [
+          {
+            "type": "back",
+            "steps": 1,
+            "transition": {
+              "type": "push",
+              "direction": "left",
+              "durationMs": 550,
               "easing": "ease_in_out"
             }
           }

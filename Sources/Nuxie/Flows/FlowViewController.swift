@@ -358,6 +358,12 @@ protocol FlowRuntimeDelegate: AnyObject {
 
     func flowViewController(
         _ controller: FlowViewController,
+        didDismissScreen screenId: String,
+        revealingScreenId: String?
+    )
+
+    func flowViewController(
+        _ controller: FlowViewController,
         didEmitInteraction interaction: FlowRendererInteraction
     )
 
@@ -418,6 +424,12 @@ extension FlowRuntimeDelegate {
     func flowViewController(
         _ controller: FlowViewController,
         didChangeScreen screenId: String
+    ) {}
+
+    func flowViewController(
+        _ controller: FlowViewController,
+        didDismissScreen screenId: String,
+        revealingScreenId: String?
     ) {}
 
     func flowViewController(
@@ -864,7 +876,13 @@ public class FlowViewController: NuxiePlatformViewController {
                 flow: flow,
                 artifact: artifact,
                 hostViewController: self,
-                screenDelegate: self
+                screenDelegate: self,
+                onPresentedScreenDismissed: { [weak self] dismissedScreenId, revealingScreenId in
+                    self?.handleNativePresentedScreenDismissed(
+                        dismissedScreenId: dismissedScreenId,
+                        revealingScreenId: revealingScreenId
+                    )
+                }
             )
             try coordinator.install()
             coordinator.setContentHidden(true)
@@ -1226,6 +1244,17 @@ private extension FlowViewController {
                 didChangeScreen: completedScreenId
             )
         }
+    }
+
+    private func handleNativePresentedScreenDismissed(
+        dismissedScreenId: String,
+        revealingScreenId: String?
+    ) {
+        runtimeDelegate?.flowViewController(
+            self,
+            didDismissScreen: dismissedScreenId,
+            revealingScreenId: revealingScreenId
+        )
     }
     #endif
 
