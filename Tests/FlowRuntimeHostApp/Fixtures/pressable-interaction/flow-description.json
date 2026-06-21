@@ -11,14 +11,20 @@
       "defaultInstanceId": null
     }
   ],
-  "interactions": {
-    "cta_pressable": [
+  "events": {
+    "screen_1": [
+      {
+        "id": "event_pressable_pressed",
+        "eventName": "Nuxie Interaction"
+      }
+    ]
+  },
+  "handlers": {
+    "screen_1": [
       {
         "id": "interaction_runtime_actions",
+        "eventName": "Nuxie Interaction",
         "enabled": true,
-        "trigger": {
-          "type": "press"
-        },
         "actions": [
           {
             "type": "navigate",

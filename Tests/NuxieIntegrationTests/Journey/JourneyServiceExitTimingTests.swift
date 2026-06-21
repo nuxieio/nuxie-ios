@@ -249,7 +249,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 "screen-1": [
                     Interaction(
                         id: "press-host-action",
-                        trigger: .press,
+                        trigger: .event(eventName: "__nuxie_test_press", filter: nil),
                         actions: actions,
                         enabled: true
                     )
@@ -260,12 +260,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
         func emitScreenPress(_ controller: FlowViewController) {
             controller.runtimeDelegate?.flowViewController(
                 controller,
-                didEmitInteraction: FlowRendererInteraction(
-                    trigger: .press,
+                didEmitEvent: FlowRendererEvent(
+                    name: "__nuxie_test_press",
+                    properties: [:],
                     screenId: "screen-1",
                     componentId: nil,
-                    instanceId: nil,
-                    properties: [:]
+                    instanceId: nil
                 )
             )
         }

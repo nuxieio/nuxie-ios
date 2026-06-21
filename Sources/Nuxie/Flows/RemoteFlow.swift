@@ -3,24 +3,133 @@ import Foundation
 // MARK: - Remote Flow
 
 public struct RemoteFlow: Codable {
+    public static let journeyEventHostKey = "__journey__"
+
     public let id: String
     public let flowArtifact: FlowArtifact
     public let screens: [RemoteFlowScreen]
-    public let interactions: [String: [Interaction]]
+    public let events: [String: [EventDeclaration]]
+    public let handlers: [String: [JourneyEventHandler]]
+    public let scripts: [String: ScreenScriptRef]
     public let viewModelValues: [RemoteFlowViewModelValue]?
 
     public init(
         id: String,
         flowArtifact: FlowArtifact,
         screens: [RemoteFlowScreen],
-        interactions: [String: [Interaction]],
+        events: [String: [EventDeclaration]] = [:],
+        handlers: [String: [JourneyEventHandler]] = [:],
+        scripts: [String: ScreenScriptRef] = [:],
+        interactions: [String: [Interaction]] = [:],
         viewModelValues: [RemoteFlowViewModelValue]? = nil
     ) {
         self.id = id
         self.flowArtifact = flowArtifact
         self.screens = screens
-        self.interactions = interactions
+        self.events = events.isEmpty && !interactions.isEmpty
+            ? Self.events(fromLegacyInteractions: interactions)
+            : events
+        self.handlers = handlers.isEmpty && !interactions.isEmpty
+            ? Self.handlers(fromLegacyInteractions: interactions)
+            : handlers
+        self.scripts = scripts
         self.viewModelValues = viewModelValues
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case flowArtifact
+        case screens
+        case events
+        case handlers
+        case scripts
+        case viewModelValues
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        flowArtifact = try container.decode(FlowArtifact.self, forKey: .flowArtifact)
+        screens = try container.decode([RemoteFlowScreen].self, forKey: .screens)
+        events = try container.decode([String: [EventDeclaration]].self, forKey: .events)
+        handlers = try container.decode([String: [JourneyEventHandler]].self, forKey: .handlers)
+        scripts = try container.decode([String: ScreenScriptRef].self, forKey: .scripts)
+        viewModelValues = try container.decodeIfPresent([RemoteFlowViewModelValue].self, forKey: .viewModelValues)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(flowArtifact, forKey: .flowArtifact)
+        try container.encode(screens, forKey: .screens)
+        try container.encode(events, forKey: .events)
+        try container.encode(handlers, forKey: .handlers)
+        try container.encode(scripts, forKey: .scripts)
+        try container.encodeIfPresent(viewModelValues, forKey: .viewModelValues)
+    }
+
+    private static func handlers(fromLegacyInteractions interactions: [String: [Interaction]]) -> [String: [JourneyEventHandler]] {
+        var result: [String: [JourneyEventHandler]] = [:]
+        for (hostId, entries) in interactions {
+            for interaction in entries {
+                guard let handler = handler(fromLegacyInteraction: interaction) else { continue }
+                let handlerHostId = legacyHandlerHostId(hostId: hostId, handler: handler)
+                result[handlerHostId, default: []].append(handler)
+            }
+        }
+        return result
+    }
+
+    private static func events(fromLegacyInteractions interactions: [String: [Interaction]]) -> [String: [EventDeclaration]] {
+        var result: [String: [EventDeclaration]] = [:]
+        var seen: [String: Set<String>] = [:]
+        for (hostId, entries) in interactions {
+            for interaction in entries {
+                guard let handler = handler(fromLegacyInteraction: interaction) else { continue }
+                let handlerHostId = legacyHandlerHostId(hostId: hostId, handler: handler)
+                guard handlerHostId != Self.journeyEventHostKey else { continue }
+                if seen[handlerHostId, default: []].contains(handler.eventName) { continue }
+                seen[handlerHostId, default: []].insert(handler.eventName)
+                result[handlerHostId, default: []].append(EventDeclaration(
+                    id: "\(interaction.id):event",
+                    eventName: handler.eventName
+                ))
+            }
+        }
+        return result
+    }
+
+    private static func handler(fromLegacyInteraction interaction: Interaction) -> JourneyEventHandler? {
+        switch interaction.trigger {
+        case .start:
+            return JourneyEventHandler(
+                id: interaction.id,
+                eventName: "$app_opened",
+                enabled: interaction.enabled,
+                order: nil,
+                actions: interaction.actions
+            )
+        case .event(let eventName, _):
+            return JourneyEventHandler(
+                id: interaction.id,
+                eventName: eventName,
+                enabled: interaction.enabled,
+                order: nil,
+                actions: interaction.actions
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func legacyHandlerHostId(
+        hostId: String,
+        handler: JourneyEventHandler
+    ) -> String {
+        if hostId == "__global__" || handler.eventName.hasPrefix("$screen_") {
+            return Self.journeyEventHostKey
+        }
+        return hostId
     }
 }
 
@@ -94,6 +203,85 @@ public struct RemoteFlowScreen: Codable {
 }
 
 public typealias RemoteFlowInteractions = [String: [Interaction]]
+
+public typealias RemoteFlowEventMap = [String: [EventDeclaration]]
+public typealias RemoteFlowHandlerMap = [String: [JourneyEventHandler]]
+
+public enum EventPayloadFieldType: String, Codable {
+    case string
+    case number
+    case boolean
+    case object
+    case array
+}
+
+public typealias EventPayloadSchema = [String: EventPayloadFieldType]
+
+public struct EventDeclaration: Codable {
+    public let id: String
+    public let eventName: String
+    public let payloadSchema: EventPayloadSchema?
+
+    public init(
+        id: String,
+        eventName: String,
+        payloadSchema: EventPayloadSchema? = nil
+    ) {
+        self.id = id
+        self.eventName = eventName
+        self.payloadSchema = payloadSchema
+    }
+}
+
+public struct JourneyEventHandler: Codable {
+    public let id: String
+    public let eventName: String
+    public let enabled: Bool?
+    public let order: Int?
+    public let actions: [InteractionAction]
+
+    public init(
+        id: String,
+        eventName: String,
+        enabled: Bool? = nil,
+        order: Int? = nil,
+        actions: [InteractionAction]
+    ) {
+        self.id = id
+        self.eventName = eventName
+        self.enabled = enabled
+        self.order = order
+        self.actions = actions
+    }
+}
+
+public struct ScreenScriptRef: Codable {
+    public let id: String
+    public let scriptId: String
+    public let assetId: String
+    public let `protocol`: String
+    public let name: String?
+    public let enabled: Bool?
+    public let eventNames: [String]?
+
+    public init(
+        id: String,
+        scriptId: String,
+        assetId: String,
+        `protocol`: String = "listenerAction",
+        name: String? = nil,
+        enabled: Bool? = nil,
+        eventNames: [String]? = nil
+    ) {
+        self.id = id
+        self.scriptId = scriptId
+        self.assetId = assetId
+        self.`protocol` = `protocol`
+        self.name = name
+        self.enabled = enabled
+        self.eventNames = eventNames
+    }
+}
 
 // MARK: - View Model Path References
 

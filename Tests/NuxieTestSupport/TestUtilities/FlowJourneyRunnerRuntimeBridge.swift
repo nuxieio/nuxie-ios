@@ -26,13 +26,15 @@ actor FlowJourneyRunnerRuntimeBridge {
     }
 
     func handleInteraction(_ interaction: FlowRendererInteraction) async {
-        let screenId = interaction.screenId ?? currentScreenId
-        _ = await runner.dispatchTrigger(
-            trigger: interaction.trigger,
-            screenId: screenId,
-            componentId: interaction.componentId,
-            instanceId: interaction.instanceId,
-            event: nil
+        guard case .event(let eventName, _) = interaction.trigger else { return }
+        await handleEvent(
+            FlowRendererEvent(
+                name: eventName,
+                properties: interaction.properties,
+                screenId: interaction.screenId,
+                componentId: interaction.componentId,
+                instanceId: interaction.instanceId
+            )
         )
     }
 
@@ -42,12 +44,11 @@ actor FlowJourneyRunnerRuntimeBridge {
             distinctId: distinctId,
             properties: event.properties
         )
-        _ = await runner.dispatchTrigger(
-            trigger: .event(eventName: event.name, filter: nil),
+        _ = await runner.dispatchScreenEvent(
+            runtimeEvent,
             screenId: event.screenId ?? currentScreenId,
             componentId: event.componentId,
-            instanceId: event.instanceId,
-            event: runtimeEvent
+            instanceId: event.instanceId
         )
     }
 

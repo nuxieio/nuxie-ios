@@ -411,27 +411,6 @@ extension FlowScreenViewController: @preconcurrency RiveStateMachineDelegate {
             return
         }
 
-        if let rawTrigger = rendererStringProperty(
-            ["nuxieTrigger", "trigger", "triggerType", "trigger_type"],
-            from: properties
-        ), let trigger = rendererInteractionTrigger(
-            from: rawTrigger,
-            properties: properties,
-            eventName: riveEvent.name()
-        ) {
-            delegate?.flowScreenViewController(
-                self,
-                didEmitInteraction: FlowRendererInteraction(
-                    trigger: trigger,
-                    screenId: eventScreenId,
-                    componentId: componentId,
-                    instanceId: instanceId,
-                    properties: properties
-                )
-            )
-            return
-        }
-
         delegate?.flowScreenViewController(
             self,
             didEmitEvent: FlowRendererEvent(
@@ -460,75 +439,6 @@ extension FlowScreenViewController: @preconcurrency RiveStateMachineDelegate {
                !value.isEmpty {
                 return value
             }
-        }
-        return nil
-    }
-
-    private func rendererInteractionTrigger(
-        from rawValue: String,
-        properties: [String: Any],
-        eventName: String
-    ) -> InteractionTrigger? {
-        let normalized = rawValue
-            .replacingOccurrences(of: "action/", with: "")
-            .replacingOccurrences(of: "-", with: "_")
-            .lowercased()
-
-        switch normalized {
-        case "long_press", "longpress":
-            return .longPress(
-                minMs: rendererIntProperty(["minMs", "min_ms"], from: properties)
-            )
-        case "hover":
-            return .hover
-        case "press":
-            return .press
-        case "drag":
-            let direction = rendererStringProperty(["direction"], from: properties)
-                .flatMap { InteractionTrigger.DragDirection(rawValue: $0) }
-            return .drag(
-                direction: direction,
-                threshold: rendererDoubleProperty(["threshold"], from: properties)
-            )
-        case "manual":
-            return .manual(
-                label: rendererStringProperty(["label"], from: properties)
-            )
-        case "event":
-            return .event(
-                eventName: rendererStringProperty(
-                    ["eventName", "event_name"],
-                    from: properties
-                ) ?? eventName,
-                filter: nil
-            )
-        default:
-            return nil
-        }
-    }
-
-    private func rendererIntProperty(
-        _ keys: [String],
-        from properties: [String: Any]
-    ) -> Int? {
-        for key in keys {
-            if let value = properties[key] as? Int { return value }
-            if let value = properties[key] as? Double { return Int(value) }
-            if let value = properties[key] as? NSNumber { return value.intValue }
-            if let value = properties[key] as? String { return Int(value) }
-        }
-        return nil
-    }
-
-    private func rendererDoubleProperty(
-        _ keys: [String],
-        from properties: [String: Any]
-    ) -> Double? {
-        for key in keys {
-            if let value = properties[key] as? Double { return value }
-            if let value = properties[key] as? Int { return Double(value) }
-            if let value = properties[key] as? NSNumber { return value.doubleValue }
-            if let value = properties[key] as? String { return Double(value) }
         }
         return nil
     }

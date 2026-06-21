@@ -329,9 +329,9 @@ final class FlowViewModelStateCoordinator {
 
     private static func collectTriggerPaths(from remoteFlow: RemoteFlow) -> Set<String> {
         var paths = Set<String>()
-        for interactions in remoteFlow.interactions.values {
-            for interaction in interactions {
-                collectTriggerPaths(from: interaction.actions, into: &paths)
+        for handlers in remoteFlow.handlers.values {
+            for handler in handlers {
+                collectTriggerPaths(from: handler.actions, into: &paths)
             }
         }
         return paths

@@ -54,6 +54,9 @@ public enum FlowRuntimeFixtureHost {
                     defaultInstanceId: nil
                 )
             },
+            events: fixtureFlow.events ?? [:],
+            handlers: fixtureFlow.handlers ?? [:],
+            scripts: fixtureFlow.scripts ?? [:],
             interactions: fixtureFlow.interactions ?? [:],
             viewModelValues: nil
         )
@@ -72,7 +75,7 @@ public enum FlowRuntimeFixtureHost {
             artifactStore: artifactStore
         )
 
-        if fixtureFlow.interactions?.isEmpty == false {
+        if fixtureFlow.hasJourneyRuntime {
             return FlowRuntimeFixtureContainerViewController(
                 flowViewController: flowViewController,
                 flow: flow,
@@ -98,7 +101,14 @@ public enum FlowRuntimeFixtureHost {
 
     private struct FixtureFlowDefinition: Decodable {
         var screens: [RemoteFlowScreen]? = nil
+        var events: [String: [EventDeclaration]]? = nil
+        var handlers: [String: [JourneyEventHandler]]? = nil
+        var scripts: [String: ScreenScriptRef]? = nil
         var interactions: [String: [Interaction]]? = nil
+
+        var hasJourneyRuntime: Bool {
+            handlers?.isEmpty == false || interactions?.isEmpty == false
+        }
     }
 
     private final class FlowRuntimeFixtureContainerViewController: UIViewController {
@@ -224,12 +234,15 @@ public enum FlowRuntimeFixtureHost {
         }
 
         func handleInteraction(_ interaction: FlowRendererInteraction) async -> FlowJourneyRunner.RunOutcome? {
-            await runner.dispatchTrigger(
-                trigger: interaction.trigger,
-                screenId: interaction.screenId ?? currentScreenId,
-                componentId: interaction.componentId,
-                instanceId: interaction.instanceId,
-                event: nil
+            guard case .event(let eventName, _) = interaction.trigger else { return nil }
+            return await handleEvent(
+                FlowRendererEvent(
+                    name: eventName,
+                    properties: interaction.properties,
+                    screenId: interaction.screenId,
+                    componentId: interaction.componentId,
+                    instanceId: interaction.instanceId
+                )
             )
         }
 
@@ -239,12 +252,11 @@ public enum FlowRuntimeFixtureHost {
                 distinctId: "fixture-distinct-id",
                 properties: event.properties
             )
-            return await runner.dispatchTrigger(
-                trigger: .event(eventName: event.name, filter: nil),
+            return await runner.dispatchScreenEvent(
+                runtimeEvent,
                 screenId: event.screenId ?? currentScreenId,
                 componentId: event.componentId,
-                instanceId: event.instanceId,
-                event: runtimeEvent
+                instanceId: event.instanceId
             )
         }
 
@@ -254,13 +266,7 @@ public enum FlowRuntimeFixtureHost {
                 distinctId: "fixture-distinct-id",
                 properties: [:]
             )
-            return await runner.dispatchTrigger(
-                trigger: .event(eventName: eventName, filter: nil),
-                screenId: currentScreenId,
-                componentId: nil,
-                instanceId: nil,
-                event: runtimeEvent
-            )
+            return await runner.dispatchJourneyEvent(runtimeEvent)
         }
     }
 
