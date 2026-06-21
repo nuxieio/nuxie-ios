@@ -471,20 +471,6 @@ public actor JourneyService: JourneyServiceProtocol {
       )
       return
     }
-
-    guard let journey = inMemoryJourneysById[journeyId],
-          let runner = flowRunners[journeyId] else { return }
-
-    let screenId = interaction.screenId ?? journey.flowState.currentScreenId
-    let outcome = await runner.dispatchTrigger(
-      trigger: interaction.trigger,
-      screenId: screenId,
-      componentId: interaction.componentId,
-      instanceId: interaction.instanceId,
-      event: nil
-    )
-    handleOutcome(outcome, journey: journey)
-    persistJourney(journey)
   }
 
   fileprivate func handleRendererEvent(
@@ -505,12 +491,11 @@ public actor JourneyService: JourneyServiceProtocol {
       distinctId: journey.distinctId,
       properties: eventProperties
     )
-    let outcome = await runner.dispatchTrigger(
-      trigger: .event(eventName: rendererEvent.name, filter: nil),
+    let outcome = await runner.dispatchScreenEvent(
+      event,
       screenId: rendererEvent.screenId ?? journey.flowState.currentScreenId,
       componentId: rendererEvent.componentId,
-      instanceId: rendererEvent.instanceId,
-      event: event
+      instanceId: rendererEvent.instanceId
     )
     handleOutcome(outcome, journey: journey)
     persistJourney(journey)

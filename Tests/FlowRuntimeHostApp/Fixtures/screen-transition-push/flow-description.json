@@ -11,15 +11,13 @@
       "defaultInstanceId": null
     }
   ],
-  "interactions": {
-    "__global__": [
+  "events": {},
+  "handlers": {
+    "__journey__": [
       {
         "id": "interaction_auto_push",
+        "eventName": "__nuxie_test_run_transition",
         "enabled": true,
-        "trigger": {
-          "type": "event",
-          "eventName": "__nuxie_test_run_transition"
-        },
         "actions": [
           {
             "type": "navigate",

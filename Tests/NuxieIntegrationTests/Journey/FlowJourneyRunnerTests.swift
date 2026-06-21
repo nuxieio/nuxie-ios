@@ -356,12 +356,12 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 }
                 runner.attach(viewController: controller)
 
-                _ = await runner.dispatchTrigger(
-                    trigger: .event(eventName: "promo_ready", filter: nil),
-                    screenId: "screen-1",
-                    componentId: nil,
-                    instanceId: nil,
-                    event: nil
+                _ = await runner.dispatchEventTrigger(
+                    NuxieEvent(
+                        name: "promo_ready",
+                        distinctId: "user-1",
+                        properties: [:]
+                    )
                 )
 
                 await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
@@ -405,7 +405,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(journey.flowState.navigationStack).to(beEmpty())
             }
 
-            it("dispatches global did_set interactions") {
+            it("does not dispatch legacy global did_set interactions") {
                 let flowId = "flow-global-did-set"
                 let viewModel = ViewModel(
                     id: "vm-1",
@@ -459,7 +459,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     instanceId: nil
                 )
 
-                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                expect(controller.navigationRequests.map(\.screenId)).toNot(contain("screen-2"))
             }
 
             it("does not echo Rive-origin trigger did_set changes back into the renderer") {
@@ -524,14 +525,14 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     isTrigger: true
                 )
 
-                await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("rive_trigger_seen"))
                 try? await Task.sleep(nanoseconds: 50_000_000)
+                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("rive_trigger_seen"))
                 expect(controller.viewModelTriggers).to(beEmpty())
                 let values = journey.flowState.viewModelSnapshot?.viewModelInstances.first?.values
                 expect(values?["pulse"]?.value as? Int).to(equal(0))
             }
 
-            it("isolates debounced did_set dispatch per interaction across screen and global scopes") {
+            it("does not dispatch legacy debounced did_set interactions across screen and global scopes") {
                 let flowId = "flow-did-set-debounce-scope"
                 let path = vmPath("pulse")
                 let viewModel = ViewModel(
@@ -606,8 +607,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     instanceId: nil
                 )
 
-                await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("screen_did_set"))
-                await expect(mocks.eventService.trackedEvents.map(\.name)).toEventually(contain("global_did_set"))
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("screen_did_set"))
+                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("global_did_set"))
             }
 
             it("applies set_view_model on screen shown and emits patch") {

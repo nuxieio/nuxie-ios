@@ -40,6 +40,7 @@ final class FlowJourneyRunner {
         let componentId: String?
         let interactionId: String?
         let instanceId: String?
+        let payload: [String: Any]?
     }
 
     private struct ResponseRuntimeContext {
@@ -96,8 +97,10 @@ final class FlowJourneyRunner {
     var onShowScreen: ((String, AnyCodable?) async -> Void)?
     private(set) var isRuntimeReady = false
 
-    private var interactionsById: [String: [Interaction]] = [:]
-    private let globalInteractionsKey = "__global__"
+    private var handlersByHost: [String: [JourneyEventHandler]] = [:]
+    private var eventDeclarationsByHost: [String: [EventDeclaration]] = [:]
+    private var handlerActionsById: [String: [InteractionAction]] = [:]
+    private let journeyEventHostKey = RemoteFlow.journeyEventHostKey
 
     private var actionQueue: [ActionRequest] = []
     private var activeRequest: ActionRequest?
@@ -130,12 +133,24 @@ final class FlowJourneyRunner {
         self.onGoalHit = onGoalHit
         self.viewController = viewController
 
-        self.interactionsById = flow.remoteFlow.interactions
+        self.handlersByHost = flow.remoteFlow.handlers.mapValues(Self.sortedHandlers)
+        self.eventDeclarationsByHost = flow.remoteFlow.events
+        self.handlerActionsById = Self.indexHandlerActions(flow.remoteFlow.handlers)
 
         if let snapshot = journey.flowState.viewModelSnapshot {
             viewModelState.hydrate(snapshot)
         } else {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
+        }
+    }
+
+    private static func indexHandlerActions(
+        _ handlersByHost: [String: [JourneyEventHandler]]
+    ) -> [String: [InteractionAction]] {
+        handlersByHost.values.flatMap { $0 }.reduce(into: [:]) { result, handler in
+            if result[handler.id] == nil {
+                result[handler.id] = handler.actions
+            }
         }
     }
 
@@ -187,13 +202,7 @@ final class FlowJourneyRunner {
             name: SystemEventNames.screenDismissed,
             properties: ["screen_id": screenId, "method": method]
         )
-        let outcome = await dispatchTrigger(
-            trigger: .event(eventName: event.name, filter: nil),
-            screenId: screenId,
-            componentId: nil,
-            instanceId: nil,
-            event: event
-        )
+        let outcome = await dispatchJourneyEvent(event)
 
         let didRevealScreen = reconcileDismissedScreenState(
             dismissedScreenId: screenId,
@@ -207,13 +216,7 @@ final class FlowJourneyRunner {
             name: SystemEventNames.screenShown,
             properties: ["screen_id": revealingScreenId]
         )
-        return await dispatchTrigger(
-            trigger: .event(eventName: shownEvent.name, filter: nil),
-            screenId: revealingScreenId,
-            componentId: nil,
-            instanceId: nil,
-            event: shownEvent
-        )
+        return await dispatchJourneyEvent(shownEvent)
     }
 
     @discardableResult
@@ -287,7 +290,8 @@ final class FlowJourneyRunner {
                 screenId: screenId,
                 componentId: nil,
                 interactionId: nil,
-                instanceId: instanceId
+                instanceId: instanceId,
+                payload: nil
             )
         )
     }
@@ -309,7 +313,8 @@ final class FlowJourneyRunner {
                 screenId: screenId,
                 componentId: nil,
                 interactionId: nil,
-                instanceId: instanceId
+                instanceId: instanceId,
+                payload: nil
             )
         )
         guard let urlString = resolved as? String, !urlString.isEmpty else { return }
@@ -335,12 +340,34 @@ final class FlowJourneyRunner {
     }
 
     func dispatchEventTrigger(_ event: NuxieEvent) async -> RunOutcome? {
-        return await dispatchTrigger(
-            trigger: .event(eventName: event.name, filter: nil),
+        return await dispatchJourneyEvent(event)
+    }
+
+    func dispatchJourneyEvent(_ event: NuxieEvent) async -> RunOutcome? {
+        return await dispatchEvent(
+            hostId: journeyEventHostKey,
+            event: event,
             screenId: journey.flowState.currentScreenId,
             componentId: nil,
-            instanceId: nil,
-            event: event
+            instanceId: nil
+        )
+    }
+
+    func dispatchScreenEvent(
+        _ event: NuxieEvent,
+        screenId: String?,
+        componentId: String?,
+        instanceId: String?
+    ) async -> RunOutcome? {
+        guard let hostId = screenId ?? journey.flowState.currentScreenId,
+              !hostId.isEmpty else { return nil }
+
+        return await dispatchEvent(
+            hostId: hostId,
+            event: event,
+            screenId: hostId,
+            componentId: componentId,
+            instanceId: instanceId
         )
     }
 
@@ -351,50 +378,53 @@ final class FlowJourneyRunner {
         instanceId: String?,
         event: NuxieEvent?
     ) async -> RunOutcome? {
+        guard case .event(let eventName, _) = trigger else { return nil }
+        let runtimeEvent = event ?? NuxieEvent(
+            name: eventName,
+            distinctId: journey.distinctId,
+            properties: [:]
+        )
+        if screenId != nil {
+            return await dispatchScreenEvent(
+                runtimeEvent,
+                screenId: screenId,
+                componentId: componentId,
+                instanceId: instanceId
+            )
+        }
+        return await dispatchJourneyEvent(runtimeEvent)
+    }
+
+    private func dispatchEvent(
+        hostId: String,
+        event: NuxieEvent,
+        screenId: String?,
+        componentId: String?,
+        instanceId: String?
+    ) async -> RunOutcome? {
         if isPaused { return nil }
 
-        // Renderer interaction callbacks include screenId. If the ready → navigate
-        // handshake is still in flight, we may not have received a screen change yet.
-        // Seed currentScreenId so navigation stack behavior (navigate/back) can work reliably.
-        if journey.flowState.currentScreenId == nil, let screenId, !screenId.isEmpty {
-            journey.flowState.currentScreenId = screenId
+        if hostId != journeyEventHostKey,
+           journey.flowState.currentScreenId == nil,
+           !hostId.isEmpty {
+            journey.flowState.currentScreenId = hostId
         }
 
-        var interactions: [Interaction] = []
-        if let componentId {
-            interactions.append(contentsOf: interactionsById[componentId] ?? [])
+        guard canDispatchEvent(hostId: hostId, event: event) else { return nil }
+        let handlers = (handlersByHost[hostId] ?? []).filter {
+            $0.enabled != false && $0.eventName == event.name
         }
-        if let screenId {
-            interactions.append(contentsOf: interactionsById[screenId] ?? [])
-        }
-        interactions.append(contentsOf: interactionsById[globalInteractionsKey] ?? [])
+        if handlers.isEmpty { return nil }
 
-        if interactions.isEmpty { return nil }
-
-        for interaction in interactions {
-            if interaction.enabled == false { continue }
-            if !matchesTrigger(interaction.trigger, trigger) { continue }
-
-            if case .event(let expectedName, let filter) = interaction.trigger,
-               case .event(let actualName, _) = trigger {
-                if expectedName != actualName { continue }
-                if let filter {
-                    let ok = await evalConditionIR(filter, event: event)
-                    if !ok { continue }
-                }
-            }
-
-            if case .didSet = interaction.trigger {
-                continue
-            }
-
+        for handler in handlers {
             enqueueActions(
-                interaction.actions,
+                handler.actions,
                 context: TriggerContext(
                     screenId: screenId,
                     componentId: componentId,
-                    interactionId: interaction.id,
-                    instanceId: instanceId
+                    interactionId: handler.id,
+                    instanceId: instanceId,
+                    payload: event.properties
                 )
             )
         }
@@ -412,7 +442,8 @@ final class FlowJourneyRunner {
             screenId: pending.screenId,
             componentId: pending.componentId,
             interactionId: pending.interactionId,
-            instanceId: nil
+            instanceId: nil,
+            payload: event?.properties
         )
 
         if let resumeActions = pending.resumeActions {
@@ -531,27 +562,118 @@ final class FlowJourneyRunner {
         )
     }
 
-    private func runEntryActionsIfNeeded() async -> RunOutcome? {
-        guard let globalInteractions = interactionsById[globalInteractionsKey], !globalInteractions.isEmpty else { return nil }
+    private static func sortedHandlers(_ handlers: [JourneyEventHandler]) -> [JourneyEventHandler] {
+        handlers.enumerated().sorted { lhs, rhs in
+            let leftOrder = lhs.element.order ?? lhs.offset
+            let rightOrder = rhs.element.order ?? rhs.offset
+            if leftOrder != rightOrder {
+                return leftOrder < rightOrder
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+    }
 
-        var queued = false
-        for interaction in globalInteractions {
-            if interaction.enabled == false { continue }
-            guard case .start = interaction.trigger else { continue }
+    private func canDispatchEvent(hostId: String, event: NuxieEvent) -> Bool {
+        let declarations = eventDeclarationsByHost[hostId] ?? []
+        guard let declaration = declarations.first(where: { $0.eventName == event.name }) else {
+            return hostId == journeyEventHostKey
+        }
+        guard let payloadSchema = declaration.payloadSchema else {
+            return true
+        }
+        return payloadMatchesSchema(event.properties, schema: payloadSchema)
+    }
+
+    private func payloadMatchesSchema(_ payload: [String: Any], schema: EventPayloadSchema) -> Bool {
+        for (field, expectedType) in schema {
+            guard let value = resolvePayloadPath(field, in: payload) else {
+                return false
+            }
+            if !payloadValue(value, matches: expectedType) {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func payloadValue(_ value: Any, matches expectedType: EventPayloadFieldType) -> Bool {
+        let unwrapped = unwrapRuntimeValue(value)
+        switch expectedType {
+        case .string:
+            return unwrapped is String
+        case .number:
+            return unwrapped is Int || unwrapped is Double || unwrapped is Float || unwrapped is NSNumber
+        case .boolean:
+            return unwrapped is Bool
+        case .object:
+            return unwrapped is [String: Any] || unwrapped is [String: AnyCodable]
+        case .array:
+            return unwrapped is [Any] || unwrapped is [AnyCodable]
+        }
+    }
+
+    private func resolvePayloadPath(_ path: String, in payload: [String: Any]?) -> Any? {
+        guard let payload else { return nil }
+        var current: Any? = payload
+        for segment in path.split(separator: ".").map(String.init) {
+            if let dict = current as? [String: Any] {
+                current = dict[segment]
+            } else if let dict = current as? [String: AnyCodable] {
+                current = dict[segment]?.value
+            } else {
+                return nil
+            }
+        }
+        return current
+    }
+
+    private func unwrapRuntimeValue(_ value: Any) -> Any {
+        if let anyCodable = value as? AnyCodable {
+            return unwrapRuntimeValue(anyCodable.value)
+        }
+        return value
+    }
+
+    private func runEntryActionsIfNeeded() async -> RunOutcome? {
+        let handlers = handlersByHost[journeyEventHostKey] ?? []
+        let enabledHandlers = handlers.filter { $0.enabled != false }
+        if enabledHandlers.isEmpty { return nil }
+
+        let campaignEventName = campaignTriggerEventName()
+        let preferredEventName =
+            campaignEventName.flatMap { eventName in
+                enabledHandlers.contains { $0.eventName == eventName } ? eventName : nil
+            } ??
+            (enabledHandlers.contains { $0.eventName == "$app_opened" } ? "$app_opened" : nil) ??
+            enabledHandlers.first?.eventName
+        guard let preferredEventName else { return nil }
+
+        let matchingHandlers = enabledHandlers.filter { $0.eventName == preferredEventName }
+        if matchingHandlers.isEmpty { return nil }
+
+        let event = makeSystemEvent(name: preferredEventName, properties: [:])
+        for handler in matchingHandlers {
             enqueueActions(
-                interaction.actions,
+                handler.actions,
                 context: TriggerContext(
                     screenId: journey.flowState.currentScreenId,
                     componentId: nil,
-                    interactionId: interaction.id,
-                    instanceId: nil
+                    interactionId: handler.id,
+                    instanceId: nil,
+                    payload: event.properties
                 )
             )
-            queued = true
         }
 
-        if !queued { return nil }
         return await processQueue(resumeContext: nil)
+    }
+
+    private func campaignTriggerEventName() -> String? {
+        let trigger = journey.triggerSnapshot ?? campaign.trigger
+        if case .event(let config) = trigger {
+            return config.eventName
+        }
+        return nil
     }
 
     private func enqueueActions(_ actions: [InteractionAction], context: TriggerContext) {
@@ -1409,7 +1531,8 @@ final class FlowJourneyRunner {
                         screenId: journey.flowState.currentScreenId,
                         componentId: nil,
                         interactionId: nil,
-                        instanceId: nil
+                        instanceId: nil,
+                        payload: nil
                     )
                 )
             }
@@ -1587,7 +1710,7 @@ final class FlowJourneyRunner {
         await MainActor.run {
             controller.performDismiss(reason: .userDismissed)
         }
-        return .continue
+        return .stopSequence
     }
 
     private func handleRemote(
@@ -1999,52 +2122,7 @@ final class FlowJourneyRunner {
         screenId: String?,
         instanceId: String?
     ) async -> RunOutcome? {
-        var interactions: [Interaction] = []
-        if let screenId {
-            interactions.append(contentsOf: interactionsById[screenId] ?? [])
-        }
-        interactions.append(contentsOf: interactionsById[globalInteractionsKey] ?? [])
-        if interactions.isEmpty { return nil }
-
-        for interaction in interactions {
-            if interaction.enabled == false { continue }
-            guard case .didSet(let triggerPath, let debounceMs) = interaction.trigger else { continue }
-            if !matchesViewModelPath(triggerPath: triggerPath, inputPath: path) { continue }
-
-            if let debounceMs, debounceMs > 0 {
-                let key = didSetDebounceKey(interactionId: interaction.id, path: triggerPath)
-                debounceTasks[key]?.cancel()
-                debounceTasks[key] = Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: UInt64(debounceMs) * 1_000_000)
-                    guard let self else { return }
-                    self.deferredTaskQueue.enqueue { [weak self] in
-                        guard let self else { return }
-                        self.enqueueActions(
-                            interaction.actions,
-                            context: TriggerContext(
-                                screenId: screenId,
-                                componentId: nil,
-                                interactionId: interaction.id,
-                                instanceId: instanceId
-                            )
-                        )
-                        _ = await self.processQueue(resumeContext: nil)
-                    }
-                }
-            } else {
-                enqueueActions(
-                    interaction.actions,
-                    context: TriggerContext(
-                        screenId: screenId,
-                        componentId: nil,
-                        interactionId: interaction.id,
-                        instanceId: instanceId
-                    )
-                )
-            }
-        }
-
-        return await processQueue(resumeContext: nil)
+        return nil
     }
 
     private func didSetDebounceKey(interactionId: String, path: VmPathRef) -> String {
@@ -2080,25 +2158,7 @@ final class FlowJourneyRunner {
         screenId: String?,
         componentId: String?
     ) -> [InteractionAction]? {
-        if let screenId,
-           let list = interactionsById[screenId],
-           let match = list.first(where: { $0.id == interactionId }) {
-            return match.actions
-        }
-
-        if let componentId,
-           let list = interactionsById[componentId],
-           let match = list.first(where: { $0.id == interactionId }) {
-            return match.actions
-        }
-
-        for (_, list) in interactionsById {
-            if let match = list.first(where: { $0.id == interactionId }) {
-                return match.actions
-            }
-        }
-
-        return nil
+        handlerActionsById[interactionId]
     }
     private func makePendingAction(
         kind: FlowPendingActionKind,
@@ -2281,6 +2341,9 @@ final class FlowJourneyRunner {
                     instanceId: context.instanceId
                 ) as Any
             }
+            if dict.count == 1, let refValue = dict["ref"], let payloadPath = parsePayloadRefPath(refValue) {
+                return resolvePayloadPath(payloadPath, in: context.payload) as Any
+            }
             var resolved: [String: Any] = [:]
             for (key, entry) in dict {
                 resolved[key] = resolveValueRefs(entry, context: context)
@@ -2297,6 +2360,9 @@ final class FlowJourneyRunner {
                     screenId: context.screenId ?? journey.flowState.currentScreenId,
                     instanceId: context.instanceId
                 ) as Any
+            }
+            if dict.count == 1, let refValue = dict["ref"]?.value, let payloadPath = parsePayloadRefPath(refValue) {
+                return resolvePayloadPath(payloadPath, in: context.payload) as Any
             }
             var resolved: [String: Any] = [:]
             for (key, entry) in dict {
@@ -2326,6 +2392,22 @@ final class FlowJourneyRunner {
                     isRelative: dict["isRelative"]?.value as? Bool
                 )
             }
+        }
+        return nil
+    }
+
+    private func parsePayloadRefPath(_ value: Any) -> String? {
+        if let dict = value as? [String: Any],
+           dict["kind"] as? String == "payload",
+           let path = dict["path"] as? String,
+           !path.isEmpty {
+            return path
+        }
+        if let dict = value as? [String: AnyCodable],
+           dict["kind"]?.value as? String == "payload",
+           let path = dict["path"]?.value as? String,
+           !path.isEmpty {
+            return path
         }
         return nil
     }
