@@ -338,7 +338,7 @@ final class FlowViewModelStateCoordinator {
     }
 
     private static func collectTriggerPaths(
-        from actions: [InteractionAction],
+        from actions: [JourneyAction],
         into paths: inout Set<String>
     ) {
         for action in actions {

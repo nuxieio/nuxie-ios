@@ -635,7 +635,6 @@ final class FlowViewModelBridgeTests: XCTestCase {
                     defaultInstanceId: "instance-test"
                 ),
             ],
-            interactions: [:],
             viewModelValues: nil
         )
     }

@@ -20,18 +20,13 @@ public struct RemoteFlow: Codable {
         events: [String: [EventDeclaration]] = [:],
         handlers: [String: [JourneyEventHandler]] = [:],
         scripts: [String: ScreenScriptRef] = [:],
-        interactions: [String: [Interaction]] = [:],
         viewModelValues: [RemoteFlowViewModelValue]? = nil
     ) {
         self.id = id
         self.flowArtifact = flowArtifact
         self.screens = screens
-        self.events = events.isEmpty && !interactions.isEmpty
-            ? Self.events(fromLegacyInteractions: interactions)
-            : events
-        self.handlers = handlers.isEmpty && !interactions.isEmpty
-            ? Self.handlers(fromLegacyInteractions: interactions)
-            : handlers
+        self.events = events
+        self.handlers = handlers
         self.scripts = scripts
         self.viewModelValues = viewModelValues
     }
@@ -68,69 +63,6 @@ public struct RemoteFlow: Codable {
         try container.encodeIfPresent(viewModelValues, forKey: .viewModelValues)
     }
 
-    private static func handlers(fromLegacyInteractions interactions: [String: [Interaction]]) -> [String: [JourneyEventHandler]] {
-        var result: [String: [JourneyEventHandler]] = [:]
-        for (hostId, entries) in interactions {
-            for interaction in entries {
-                guard let handler = handler(fromLegacyInteraction: interaction) else { continue }
-                let handlerHostId = legacyHandlerHostId(hostId: hostId, handler: handler)
-                result[handlerHostId, default: []].append(handler)
-            }
-        }
-        return result
-    }
-
-    private static func events(fromLegacyInteractions interactions: [String: [Interaction]]) -> [String: [EventDeclaration]] {
-        var result: [String: [EventDeclaration]] = [:]
-        var seen: [String: Set<String>] = [:]
-        for (hostId, entries) in interactions {
-            for interaction in entries {
-                guard let handler = handler(fromLegacyInteraction: interaction) else { continue }
-                let handlerHostId = legacyHandlerHostId(hostId: hostId, handler: handler)
-                guard handlerHostId != Self.journeyEventHostKey else { continue }
-                if seen[handlerHostId, default: []].contains(handler.eventName) { continue }
-                seen[handlerHostId, default: []].insert(handler.eventName)
-                result[handlerHostId, default: []].append(EventDeclaration(
-                    id: "\(interaction.id):event",
-                    eventName: handler.eventName
-                ))
-            }
-        }
-        return result
-    }
-
-    private static func handler(fromLegacyInteraction interaction: Interaction) -> JourneyEventHandler? {
-        switch interaction.trigger {
-        case .start:
-            return JourneyEventHandler(
-                id: interaction.id,
-                eventName: "$app_opened",
-                enabled: interaction.enabled,
-                order: nil,
-                actions: interaction.actions
-            )
-        case .event(let eventName, _):
-            return JourneyEventHandler(
-                id: interaction.id,
-                eventName: eventName,
-                enabled: interaction.enabled,
-                order: nil,
-                actions: interaction.actions
-            )
-        default:
-            return nil
-        }
-    }
-
-    private static func legacyHandlerHostId(
-        hostId: String,
-        handler: JourneyEventHandler
-    ) -> String {
-        if hostId == "__global__" || handler.eventName.hasPrefix("$screen_") {
-            return Self.journeyEventHostKey
-        }
-        return hostId
-    }
 }
 
 public struct RemoteFlowViewModelValue: Codable {
@@ -202,8 +134,6 @@ public struct RemoteFlowScreen: Codable {
     }
 }
 
-public typealias RemoteFlowInteractions = [String: [Interaction]]
-
 public typealias RemoteFlowEventMap = [String: [EventDeclaration]]
 public typealias RemoteFlowHandlerMap = [String: [JourneyEventHandler]]
 
@@ -238,14 +168,14 @@ public struct JourneyEventHandler: Codable {
     public let eventName: String
     public let enabled: Bool?
     public let order: Int?
-    public let actions: [InteractionAction]
+    public let actions: [JourneyAction]
 
     public init(
         id: String,
         eventName: String,
         enabled: Bool? = nil,
         order: Int? = nil,
-        actions: [InteractionAction]
+        actions: [JourneyAction]
     ) {
         self.id = id
         self.eventName = eventName
@@ -335,138 +265,7 @@ public struct VmPathRef: Codable, Equatable {
     }
 }
 
-// MARK: - Interaction Models
-
-public struct Interaction: Codable {
-    public let id: String
-    public let trigger: InteractionTrigger
-    public let actions: [InteractionAction]
-    public let enabled: Bool?
-}
-
-public enum InteractionTrigger: Codable {
-    case longPress(minMs: Int?)
-    case hover
-    case press
-    case drag(direction: DragDirection?, threshold: Double?)
-    case start(config: [String: AnyCodable]?)
-    case event(eventName: String, filter: IREnvelope?)
-    case manual(label: String?)
-    case didSet(path: VmPathRef, debounceMs: Int?)
-    case unknown(type: String, payload: [String: AnyCodable]?)
-
-    public enum DragDirection: String, Codable {
-        case left
-        case right
-        case up
-        case down
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case type
-        case minMs
-        case direction
-        case threshold
-        case method
-        case delayMs
-        case eventName
-        case filter
-        case config
-        case label
-        case path
-        case debounceMs
-    }
-
-    private enum TriggerType: String, Codable {
-        case longPress = "long_press"
-        case hover
-        case press
-        case drag
-        case start
-        case event
-        case manual
-        case didSet = "did_set"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let typeValue = (try? container.decode(TriggerType.self, forKey: .type))
-        switch typeValue {
-        case .longPress:
-            self = .longPress(minMs: try container.decodeIfPresent(Int.self, forKey: .minMs))
-        case .hover:
-            self = .hover
-        case .press:
-            self = .press
-        case .drag:
-            let direction = try container.decodeIfPresent(DragDirection.self, forKey: .direction)
-            let threshold = try container.decodeIfPresent(Double.self, forKey: .threshold)
-            self = .drag(direction: direction, threshold: threshold)
-        case .start:
-            self = .start(config: try container.decodeIfPresent([String: AnyCodable].self, forKey: .config))
-        case .event:
-            let eventName = try container.decode(String.self, forKey: .eventName)
-            let filter = try container.decodeIfPresent(IREnvelope.self, forKey: .filter)
-            self = .event(eventName: eventName, filter: filter)
-        case .manual:
-            self = .manual(label: try container.decodeIfPresent(String.self, forKey: .label))
-        case .didSet:
-            let path = try container.decode(VmPathRef.self, forKey: .path)
-            let debounceMs = try container.decodeIfPresent(Int.self, forKey: .debounceMs)
-            self = .didSet(path: path, debounceMs: debounceMs)
-        case .none:
-            let rawType = (try? container.decode(String.self, forKey: .type)) ?? "unknown"
-            var payload: [String: AnyCodable] = [:]
-            for key in container.allKeys {
-                if key == .type { continue }
-                payload[key.stringValue] = (try? container.decode(AnyCodable.self, forKey: key)) ?? AnyCodable(NSNull())
-            }
-            self = .unknown(type: rawType, payload: payload)
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .longPress(let minMs):
-            try container.encode(TriggerType.longPress, forKey: .type)
-            try container.encodeIfPresent(minMs, forKey: .minMs)
-        case .hover:
-            try container.encode(TriggerType.hover, forKey: .type)
-        case .press:
-            try container.encode(TriggerType.press, forKey: .type)
-        case .drag(let direction, let threshold):
-            try container.encode(TriggerType.drag, forKey: .type)
-            try container.encodeIfPresent(direction, forKey: .direction)
-            try container.encodeIfPresent(threshold, forKey: .threshold)
-        case .start(let config):
-            try container.encode(TriggerType.start, forKey: .type)
-            try container.encodeIfPresent(config, forKey: .config)
-        case .event(let eventName, let filter):
-            try container.encode(TriggerType.event, forKey: .type)
-            try container.encode(eventName, forKey: .eventName)
-            try container.encodeIfPresent(filter, forKey: .filter)
-        case .manual(let label):
-            try container.encode(TriggerType.manual, forKey: .type)
-            try container.encodeIfPresent(label, forKey: .label)
-        case .didSet(let path, let debounceMs):
-            try container.encode(TriggerType.didSet, forKey: .type)
-            try container.encode(path, forKey: .path)
-            try container.encodeIfPresent(debounceMs, forKey: .debounceMs)
-        case .unknown(let type, let payload):
-            try container.encode(type, forKey: .type)
-            if let payload {
-                for (key, value) in payload {
-                    if let codingKey = CodingKeys(rawValue: key) {
-                        try container.encode(AnyCodable(value.value), forKey: codingKey)
-                    }
-                }
-            }
-        }
-    }
-}
-
-public enum InteractionAction: Codable {
+public enum JourneyAction: Codable {
     case navigate(NavigateAction)
     case back(BackAction)
     case delay(DelayAction)
@@ -728,7 +527,7 @@ public struct TimeWindowAction: Codable {
     public let endTime: String
     public let timezone: String
     public let daysOfWeek: [Int]?
-    public let successActions: [InteractionAction]?
+    public let successActions: [JourneyAction]?
 
     public init(
         type: String = "time_window",
@@ -736,7 +535,7 @@ public struct TimeWindowAction: Codable {
         endTime: String,
         timezone: String,
         daysOfWeek: [Int]? = nil,
-        successActions: [InteractionAction]? = nil
+        successActions: [JourneyAction]? = nil
     ) {
         self.type = type
         self.startTime = startTime
@@ -762,9 +561,9 @@ public struct WaitUntilAction: Codable {
 public struct ConditionAction: Codable {
     public let type: String
     public let branches: [ConditionBranch]
-    public let defaultActions: [InteractionAction]?
+    public let defaultActions: [JourneyAction]?
 
-    public init(type: String = "condition", branches: [ConditionBranch], defaultActions: [InteractionAction]? = nil) {
+    public init(type: String = "condition", branches: [ConditionBranch], defaultActions: [JourneyAction]? = nil) {
         self.type = type
         self.branches = branches
         self.defaultActions = defaultActions
@@ -775,7 +574,7 @@ public struct ConditionBranch: Codable {
     public let id: String
     public let label: String?
     public let condition: IREnvelope?
-    public let actions: [InteractionAction]
+    public let actions: [JourneyAction]
 }
 
 public struct ExperimentAction: Codable {
@@ -794,7 +593,7 @@ public struct ExperimentVariant: Codable {
     public let id: String
     public let name: String?
     public let percentage: Double
-    public let actions: [InteractionAction]
+    public let actions: [JourneyAction]
 }
 
 public struct SendEventAction: Codable {

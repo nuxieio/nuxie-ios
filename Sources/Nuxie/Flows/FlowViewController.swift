@@ -316,14 +316,6 @@ private extension TrackingAuthorizationStatus {
 }
 #endif
 
-struct FlowRendererInteraction {
-    let trigger: InteractionTrigger
-    let screenId: String?
-    let componentId: String?
-    let instanceId: String?
-    let properties: [String: Any]
-}
-
 struct FlowRendererEvent {
     let name: String
     let properties: [String: Any]
@@ -360,11 +352,6 @@ protocol FlowRuntimeDelegate: AnyObject {
         _ controller: FlowViewController,
         didDismissScreen screenId: String,
         revealingScreenId: String?
-    )
-
-    func flowViewController(
-        _ controller: FlowViewController,
-        didEmitInteraction interaction: FlowRendererInteraction
     )
 
     func flowViewController(
@@ -430,11 +417,6 @@ extension FlowRuntimeDelegate {
         _ controller: FlowViewController,
         didDismissScreen screenId: String,
         revealingScreenId: String?
-    ) {}
-
-    func flowViewController(
-        _ controller: FlowViewController,
-        didEmitInteraction interaction: FlowRendererInteraction
     ) {}
 
     func flowViewController(
@@ -1264,13 +1246,6 @@ private extension FlowViewController {
 extension FlowViewController: FlowScreenViewControllerDelegate {
     func flowScreenViewControllerDidAdvance(_ controller: FlowScreenViewController) {
         flowTransitionCoordinator?.layoutTextInputs()
-    }
-
-    func flowScreenViewController(
-        _ controller: FlowScreenViewController,
-        didEmitInteraction interaction: FlowRendererInteraction
-    ) {
-        runtimeDelegate?.flowViewController(self, didEmitInteraction: interaction)
     }
 
     func flowScreenViewController(

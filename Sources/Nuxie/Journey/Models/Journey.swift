@@ -9,7 +9,7 @@ public enum FlowPendingActionKind: String, Codable {
 }
 
 public struct FlowPendingAction: Codable {
-    public let interactionId: String
+    public let handlerId: String
     public let screenId: String?
     public let componentId: String?
     public let actionIndex: Int
@@ -18,11 +18,11 @@ public struct FlowPendingAction: Codable {
     public let condition: IREnvelope?
     public let maxTimeMs: Int?
     public let startedAt: Date
-    public let resumeActions: [InteractionAction]?
+    public let resumeActions: [JourneyAction]?
 
-    func withResumeActions(_ actions: [InteractionAction]) -> FlowPendingAction {
+    func withResumeActions(_ actions: [JourneyAction]) -> FlowPendingAction {
         FlowPendingAction(
-            interactionId: interactionId,
+            handlerId: handlerId,
             screenId: screenId,
             componentId: componentId,
             actionIndex: actionIndex,

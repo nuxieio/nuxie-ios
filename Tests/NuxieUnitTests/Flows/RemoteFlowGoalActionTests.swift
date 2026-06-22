@@ -13,7 +13,7 @@ final class RemoteFlowGoalActionTests: XCTestCase {
             """.utf8
         )
 
-        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+        let action = try JSONDecoder().decode(JourneyAction.self, from: data)
 
         switch action {
         case .goal(let goal):
@@ -34,7 +34,7 @@ final class RemoteFlowGoalActionTests: XCTestCase {
             """.utf8
         )
 
-        XCTAssertThrowsError(try JSONDecoder().decode(InteractionAction.self, from: data))
+        XCTAssertThrowsError(try JSONDecoder().decode(JourneyAction.self, from: data))
     }
 
     func testGoalActionRejectsBlankGoalId() {
@@ -47,6 +47,6 @@ final class RemoteFlowGoalActionTests: XCTestCase {
             """.utf8
         )
 
-        XCTAssertThrowsError(try JSONDecoder().decode(InteractionAction.self, from: data))
+        XCTAssertThrowsError(try JSONDecoder().decode(JourneyAction.self, from: data))
     }
 }

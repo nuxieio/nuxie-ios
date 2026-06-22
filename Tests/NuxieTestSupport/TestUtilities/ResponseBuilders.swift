@@ -144,7 +144,6 @@ struct ResponseBuilders {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: [:],
             viewModelValues: nil
         )
     }

@@ -454,25 +454,6 @@ public actor JourneyService: JourneyServiceProtocol {
     persistJourney(journey)
   }
 
-  fileprivate func handleRendererInteraction(
-    journeyId: String,
-    interaction: FlowRendererInteraction
-  ) async {
-    if case .event(let eventName, _) = interaction.trigger {
-      await handleRendererEvent(
-        journeyId: journeyId,
-        event: FlowRendererEvent(
-          name: eventName,
-          properties: interaction.properties,
-          screenId: interaction.screenId,
-          componentId: interaction.componentId,
-          instanceId: interaction.instanceId
-        )
-      )
-      return
-    }
-  }
-
   fileprivate func handleRendererEvent(
     journeyId: String,
     event rendererEvent: FlowRendererEvent
@@ -798,7 +779,7 @@ public actor JourneyService: JourneyServiceProtocol {
     goalId: String,
     goalLabel: String?,
     screenId: String?,
-    interactionId: String? = nil
+    handlerId: String? = nil
   ) async {
     guard let journey = inMemoryJourneysById[journeyId] else {
       return
@@ -808,7 +789,7 @@ public actor JourneyService: JourneyServiceProtocol {
     let properties = JourneyEvents.journeyGoalHitProperties(
       journey: journey,
       screenId: screenId,
-      interactionId: interactionId,
+      handlerId: handlerId,
       goalId: goalId,
       goalLabel: goalLabel
     )
@@ -1107,13 +1088,13 @@ public actor JourneyService: JourneyServiceProtocol {
         journey: journey,
         campaign: campaign,
         flow: flow,
-        onGoalHit: { [weak self, journeyId = journey.id] goalId, goalLabel, screenId, interactionId in
+        onGoalHit: { [weak self, journeyId = journey.id] goalId, goalLabel, screenId, handlerId in
           await self?.handleScopedGoalEvent(
             journeyId: journeyId,
             goalId: goalId,
             goalLabel: goalLabel,
             screenId: screenId,
-            interactionId: interactionId
+            handlerId: handlerId
           )
         }
       )
@@ -1763,18 +1744,6 @@ private final class FlowRuntimeDelegateAdapter:
         journeyId: journeyId,
         screenId: screenId,
         revealingScreenId: revealingScreenId
-      )
-    }
-  }
-
-  func flowViewController(
-    _ controller: FlowViewController,
-    didEmitInteraction interaction: FlowRendererInteraction
-  ) {
-    Task { [weak journeyService] in
-      await journeyService?.handleRendererInteraction(
-        journeyId: journeyId,
-        interaction: interaction
       )
     }
   }

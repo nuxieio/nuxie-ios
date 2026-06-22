@@ -219,7 +219,18 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             )
         }
 
-        func makeFlow(flowId: String = flowId, interactions: [String: [Interaction]] = [:]) -> Flow {
+        func makeFlow(flowId: String = flowId, handlers: RemoteFlowHandlerMap = [:]) -> Flow {
+            var events: RemoteFlowEventMap = [:]
+            for (hostId, hostHandlers) in handlers where hostId != RemoteFlow.journeyEventHostKey {
+                for handler in hostHandlers {
+                    events[hostId, default: []].append(
+                        EventDeclaration(
+                            id: "\(handler.id):event",
+                            eventName: handler.eventName
+                        )
+                    )
+                }
+            }
             let remoteFlow = RemoteFlow(
                 id: flowId,
                 flowArtifact: FlowArtifact(
@@ -238,20 +249,20 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         defaultInstanceId: nil
                     )
                 ],
-                interactions: interactions,
+                events: events,
+                handlers: handlers,
                 viewModelValues: nil
             )
             return Flow(remoteFlow: remoteFlow, products: [])
         }
 
-        func pressInteractions(_ actions: [InteractionAction]) -> [String: [Interaction]] {
+        func pressHandlers(_ actions: [JourneyAction]) -> RemoteFlowHandlerMap {
             [
                 "screen-1": [
-                    Interaction(
+                    JourneyEventHandler(
                         id: "press-host-action",
-                        trigger: .event(eventName: "__nuxie_test_press", filter: nil),
-                        actions: actions,
-                        enabled: true
+                        eventName: "__nuxie_test_press",
+                        actions: actions
                     )
                 ]
             ]
@@ -286,12 +297,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
         func emitTaggedRendererEvent(_ controller: FlowViewController, name: String) {
             controller.runtimeDelegate?.flowViewController(
                 controller,
-                didEmitInteraction: FlowRendererInteraction(
-                    trigger: .event(eventName: name, filter: nil),
+                didEmitEvent: FlowRendererEvent(
+                    name: name,
+                    properties: ["eventName": name],
                     screenId: "screen-1",
                     componentId: nil,
-                    instanceId: nil,
-                    properties: ["eventName": name]
+                    instanceId: nil
                 )
             )
         }
@@ -423,13 +434,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     goal: nil,
                     exitPolicy: nil
                 )
-                let flow = makeFlow(interactions: [
+                let flow = makeFlow(handlers: [
                     "screen-1": [
-                        Interaction(
-                            id: "renderer-event-interaction",
-                            trigger: .event(eventName: "renderer_event", filter: nil),
-                            actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
-                            enabled: true
+                        JourneyEventHandler(
+                            id: "renderer-event-handler",
+                            eventName: "renderer_event",
+                            actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))]
                         )
                     ]
                 ])
@@ -438,7 +448,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 await service.initialize()
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-renderer-event",
+                    handlerId: "wait-renderer-event",
                     screenId: "screen-1",
                     componentId: nil,
                     actionIndex: 0,
@@ -475,7 +485,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("renderer_event"))
             }
 
-            it("tracks tagged renderer event interactions through the event routing path") {
+            it("tracks tagged renderer events through the event routing path") {
                 let ordering = OrderingRecorder()
                 let eventController = OrderingMockFlowViewController(mockFlowId: flowId, recorder: ordering)
                 controller = eventController
@@ -489,13 +499,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     goal: nil,
                     exitPolicy: nil
                 )
-                let flow = makeFlow(interactions: [
+                let flow = makeFlow(handlers: [
                     "screen-1": [
-                        Interaction(
-                            id: "tagged-renderer-event-interaction",
-                            trigger: .event(eventName: "tagged_renderer_event", filter: nil),
-                            actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
-                            enabled: true
+                        JourneyEventHandler(
+                            id: "tagged-renderer-event-handler",
+                            eventName: "tagged_renderer_event",
+                            actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))]
                         )
                     ]
                 ])
@@ -611,16 +620,15 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(0), timeout: .seconds(2))
             }
 
-            it("reevaluates goals triggered by dismiss interactions before falling back to dismissed") {
-                let dismissGoal = Interaction(
+            it("reevaluates goals triggered by dismiss handlers before falling back to dismissed") {
+                let dismissGoal = JourneyEventHandler(
                     id: "dismiss-goal",
-                    trigger: .event(eventName: SystemEventNames.screenDismissed, filter: nil),
+                    eventName: SystemEventNames.screenDismissed,
                     actions: [
                         .updateCustomer(
                             UpdateCustomerAction(attributes: ["dismissed": AnyCodable(true)])
                         )
-                    ],
-                    enabled: true
+                    ]
                 )
                 let campaign = makeCampaign(
                     goal: GoalConfig(
@@ -634,7 +642,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     ),
                     exitPolicy: ExitPolicy(mode: .onGoal)
                 )
-                let flow = makeFlow(interactions: ["__global__": [dismissGoal]])
+                let flow = makeFlow(handlers: [RemoteFlow.journeyEventHostKey: [dismissGoal]])
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -800,9 +808,9 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             }
 
             it("routes goal-driven closures through dismissal hooks and flow dismissal tracking") {
-                let dismissFollowUp = Interaction(
+                let dismissFollowUp = JourneyEventHandler(
                     id: "dismiss-follow-up",
-                    trigger: .event(eventName: SystemEventNames.screenDismissed, filter: nil),
+                    eventName: SystemEventNames.screenDismissed,
                     actions: [
                         .sendEvent(
                             SendEventAction(
@@ -810,14 +818,13 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                                 properties: nil
                             )
                         )
-                    ],
-                    enabled: true
+                    ]
                 )
                 let campaign = makeCampaign(
                     goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
                     exitPolicy: ExitPolicy(mode: .onGoal)
                 )
-                let flow = makeFlow(interactions: ["__global__": [dismissFollowUp]])
+                let flow = makeFlow(handlers: [RemoteFlow.journeyEventHostKey: [dismissFollowUp]])
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -991,10 +998,10 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal(.triggerUnmatched), timeout: .seconds(2))
             }
 
-            it("replays source goal-hit interactions after the scoped profile cache expires") {
-                let goalHitFollowUp = Interaction(
+            it("replays source goal-hit handlers after the scoped profile cache expires") {
+                let goalHitFollowUp = JourneyEventHandler(
                     id: "goal-hit-follow-up",
-                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    eventName: JourneyEvents.journeyGoalHit,
                     actions: [
                         .sendEvent(
                             SendEventAction(
@@ -1002,11 +1009,10 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                                 properties: nil
                             )
                         )
-                    ],
-                    enabled: true
+                    ]
                 )
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let flow = makeFlow(interactions: ["__global__": [goalHitFollowUp]])
+                let flow = makeFlow(handlers: [RemoteFlow.journeyEventHostKey: [goalHitFollowUp]])
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1026,9 +1032,9 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             }
 
             it("does not replay scoped goal actions back into the source journey after goal completion") {
-                let goalHitFollowUp = Interaction(
+                let goalHitFollowUp = JourneyEventHandler(
                     id: "goal-hit-follow-up",
-                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    eventName: JourneyEvents.journeyGoalHit,
                     actions: [
                         .sendEvent(
                             SendEventAction(
@@ -1036,14 +1042,13 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                                 properties: nil
                             )
                         )
-                    ],
-                    enabled: true
+                    ]
                 )
                 let campaign = makeCampaign(
                     goal: GoalConfig(kind: .event, eventName: JourneyEvents.journeyGoalHit),
                     exitPolicy: ExitPolicy(mode: .onGoal)
                 )
-                let flow = makeFlow(interactions: ["__global__": [goalHitFollowUp]])
+                let flow = makeFlow(handlers: [RemoteFlow.journeyEventHostKey: [goalHitFollowUp]])
                 await primeProfile(campaign: campaign, flow: flow)
                 await service.initialize()
 
@@ -1095,7 +1100,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 }.toEventually(equal([campaignId, "camp-goal-trigger"].sorted()), timeout: .seconds(2))
             }
 
-            it("dispatches source goal-hit interactions before starting goal-triggered flows") {
+            it("dispatches source goal-hit handlers before starting goal-triggered flows") {
                 let ordering = OrderingRecorder()
                 let orderingPresentationService = DismissingOrderingFlowPresentationService(recorder: ordering)
                 let sourceController = OrderingMockFlowViewController(mockFlowId: flowId, recorder: ordering)
@@ -1105,13 +1110,12 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 Container.shared.flowPresentationService.register { @MainActor in orderingPresentationService }
                 service = JourneyService(journeyStore: journeyStore)
 
-                let goalHitFollowUp = Interaction(
+                let goalHitFollowUp = JourneyEventHandler(
                     id: "goal-hit-follow-up",
-                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    eventName: JourneyEvents.journeyGoalHit,
                     actions: [
                         .navigate(NavigateAction(screenId: "screen-2", transition: nil))
-                    ],
-                    enabled: true
+                    ]
                 )
                 let goalCampaign = makeCampaign(
                     id: "camp-goal-trigger",
@@ -1121,7 +1125,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                     exitPolicy: nil
                 )
                 let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
-                let primaryFlow = makeFlow(interactions: ["__global__": [goalHitFollowUp]])
+                let primaryFlow = makeFlow(handlers: [RemoteFlow.journeyEventHostKey: [goalHitFollowUp]])
                 let goalFlow = makeFlow(flowId: "flow-goal-trigger")
 
                 await primeProfile(
@@ -1373,9 +1377,9 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             }
 
             it("dispatches goal-hit triggers into sibling runners after the cache expires") {
-                let siblingFollowUp = Interaction(
+                let siblingFollowUp = JourneyEventHandler(
                     id: "goal-hit-sibling-follow-up",
-                    trigger: .event(eventName: JourneyEvents.journeyGoalHit, filter: nil),
+                    eventName: JourneyEvents.journeyGoalHit,
                     actions: [
                         .sendEvent(
                             SendEventAction(
@@ -1383,8 +1387,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                                 properties: nil
                             )
                         )
-                    ],
-                    enabled: true
+                    ]
                 )
                 let primaryCampaign = makeCampaign(
                     id: "camp-primary-sibling-dispatch",
@@ -1405,7 +1408,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                         makeFlow(flowId: "flow-primary-sibling-dispatch"),
                         makeFlow(
                             flowId: "flow-sibling-dispatch",
-                            interactions: ["__global__": [siblingFollowUp]]
+                            handlers: [RemoteFlow.journeyEventHostKey: [siblingFollowUp]]
                         ),
                     ]
                 )
@@ -1533,7 +1536,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
                 )
                 let primaryCampaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let primaryFlow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestTracking(RequestTrackingAction())
                     ])
                 )
@@ -1561,7 +1564,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("completes dismissed journeys after unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestTracking(RequestTrackingAction())
                     ])
                 )
@@ -1603,7 +1606,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-generic-dismiss",
+                    handlerId: "wait-generic-dismiss",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -1635,7 +1638,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("completes deferred dismissals after scoped tracking outcomes resolve") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestTracking(RequestTrackingAction())
                     ])
                 )
@@ -1672,7 +1675,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("completes dismissed journeys after unsupported request permission kinds") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestPermission(RequestPermissionAction(permissionType: "location_always"))
                     ])
                 )
@@ -1707,7 +1710,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("keeps deferred dismiss waiting when another request permission is still pending") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestPermission(RequestPermissionAction(permissionType: "location_always")),
                         .requestPermission(RequestPermissionAction(permissionType: "camera"))
                     ])
@@ -1753,7 +1756,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("resumes wait_until work on unsupported tracking requests") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestTracking(RequestTrackingAction())
                     ])
                 )
@@ -1762,7 +1765,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-unsupported-tracking",
+                    handlerId: "wait-unsupported-tracking",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -1834,7 +1837,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("tracks unsupported scoped tracking outcomes against the original user across identify races") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestTracking(RequestTrackingAction())
                     ])
                 )
@@ -1857,7 +1860,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
             it("tracks unsupported scoped request permission outcomes against the original user across identify races") {
                 let campaign = makeCampaign(goal: nil, exitPolicy: nil)
                 let flow = makeFlow(
-                    interactions: pressInteractions([
+                    handlers: pressHandlers([
                         .requestPermission(RequestPermissionAction(permissionType: "camera"))
                     ])
                 )
@@ -1885,7 +1888,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-notifications",
+                    handlerId: "wait-notifications",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -1919,7 +1922,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-tracking",
+                    handlerId: "wait-tracking",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -1953,7 +1956,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-permission",
+                    handlerId: "wait-permission",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -1990,7 +1993,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-unsupported-permission",
+                    handlerId: "wait-unsupported-permission",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -2123,7 +2126,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-notifications",
+                    handlerId: "wait-notifications",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,
@@ -2333,7 +2336,7 @@ final class JourneyServiceExitTimingTests: AsyncSpec {
 
                 let journey = await startJourney()
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "wait-notifications",
+                    handlerId: "wait-notifications",
                     screenId: nil,
                     componentId: nil,
                     actionIndex: 0,

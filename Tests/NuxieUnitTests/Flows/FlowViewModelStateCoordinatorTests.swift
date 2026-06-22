@@ -8,7 +8,7 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
         func makeRemoteFlow(
             values: [RemoteFlowViewModelValue] = [],
             screens: [RemoteFlowScreen]? = nil,
-            interactions: [String: [Interaction]] = [:]
+            handlers: RemoteFlowHandlerMap = [:]
         ) -> RemoteFlow {
             RemoteFlow(
                 id: "flow-runtime",
@@ -28,7 +28,7 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
                         defaultInstanceId: "runtime-instance"
                     )
                 ],
-                interactions: interactions,
+                handlers: handlers,
                 viewModelValues: values
             )
         }
@@ -216,15 +216,14 @@ final class FlowViewModelStateCoordinatorTests: QuickSpec {
             it("tracks fire-trigger action paths as trigger paths") {
                 let pulse = path("pulse")
                 let coordinator = FlowViewModelStateCoordinator(remoteFlow: makeRemoteFlow(
-                    interactions: [
+                    handlers: [
                         "screen-1": [
-                            Interaction(
-                                id: "int-trigger",
-                                trigger: .event(eventName: "screen_shown", filter: nil),
+                            JourneyEventHandler(
+                                id: "handler-trigger",
+                                eventName: "screen_shown",
                                 actions: [
                                     .fireTrigger(FireTriggerAction(path: pulse)),
-                                ],
-                                enabled: true
+                                ]
                             ),
                         ],
                     ]

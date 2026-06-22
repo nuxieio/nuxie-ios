@@ -230,7 +230,6 @@ public actor MockNuxieApi: NuxieApiProtocol {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: [:],
             viewModelValues: nil
         )
     }

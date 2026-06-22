@@ -25,7 +25,7 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
             """.utf8
         )
 
-        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+        let action = try JSONDecoder().decode(JourneyAction.self, from: data)
 
         switch action {
         case .purchase(let purchase):
@@ -71,7 +71,7 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
             """.utf8
         )
 
-        XCTAssertThrowsError(try JSONDecoder().decode(InteractionAction.self, from: data))
+        XCTAssertThrowsError(try JSONDecoder().decode(JourneyAction.self, from: data))
     }
 
     func testPurchaseActionRequiresPlacementIndex() {
@@ -90,6 +90,6 @@ final class RemoteFlowPurchaseActionTests: XCTestCase {
             """.utf8
         )
 
-        XCTAssertThrowsError(try JSONDecoder().decode(InteractionAction.self, from: data))
+        XCTAssertThrowsError(try JSONDecoder().decode(JourneyAction.self, from: data))
     }
 }

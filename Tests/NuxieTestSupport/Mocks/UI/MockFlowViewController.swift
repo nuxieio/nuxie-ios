@@ -28,7 +28,6 @@ class MockFlowViewController: FlowViewController {
                     defaultInstanceId: nil
                 )
             ],
-            interactions: [:],
             viewModelValues: nil
         )
 
