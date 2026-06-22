@@ -239,6 +239,58 @@ targets:
       CODE_SIGN_STYLE: Automatic
       CODE_SIGN_IDENTITY: ""
 
+  NuxieE2EApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: Examples/E2EApp/Sources
+        name: E2EApp
+    dependencies:
+      - target: NuxieSDK
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.nuxie.e2eapp
+      PRODUCT_NAME: NuxieE2EApp
+      MARKETING_VERSION: 1.0
+      CURRENT_PROJECT_VERSION: 1
+      SWIFT_VERSION: 5.9
+      INFOPLIST_FILE: Examples/E2EApp/Sources/App/Info.plist
+      SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+      SUPPORTS_MACCATALYST: NO
+      TARGETED_DEVICE_FAMILY: "1"
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+
+  NuxieE2EAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Examples/E2EApp/Tests/Unit
+        name: E2EAppTests
+    dependencies:
+      - target: NuxieE2EApp
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.nuxie.e2eapp.tests
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+
+  NuxieE2EAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Examples/E2EApp/Tests/UI
+        name: E2EAppUITests
+    dependencies:
+      - target: NuxieE2EApp
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: io.nuxie.e2eapp.uitests
+      GENERATE_INFOPLIST_FILE: YES
+      SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+      SUPPORTS_MACCATALYST: NO
+      TARGETED_DEVICE_FAMILY: "1"
+      CODE_SIGN_STYLE: Automatic
+      CODE_SIGN_IDENTITY: ""
+
   NuxieFlowRuntimeUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -327,4 +379,16 @@ schemes:
     test:
       targets:
         - NuxieFlowRuntimeUITests
+      gatherCoverageData: false
+
+  NuxieSDKE2ETests:
+    build:
+      targets:
+        NuxieE2EApp: all
+        NuxieE2EAppTests: all
+        NuxieE2EAppUITests: all
+    test:
+      targets:
+        - NuxieE2EAppTests
+        - NuxieE2EAppUITests
       gatherCoverageData: false
