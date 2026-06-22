@@ -34,7 +34,7 @@ final class FlowScreenViewController: UIViewController {
     private var riveView: RiveView!
     private var viewModelBridge: FlowViewModelBridge!
     private var textInputOverlayBridge: FlowTextInputOverlayBridge!
-    private var nuxieScriptingBridge: RiveNuxieScriptingBridge!
+    private var nuxieScriptBridge: NuxieRiveScriptBridge!
     private var pendingScreenBindingId: String?
     private var contentHidden = false
 
@@ -161,10 +161,10 @@ final class FlowScreenViewController: UIViewController {
     }
 
     private func loadRiveSession(for screen: FlowArtifactScreen) throws {
-        let nuxieScriptingBridge = RiveNuxieScriptingBridge()
+        let nuxieScriptBridge = NuxieRiveScriptBridge()
         let riveFile = try Self.makeRiveFile(
             artifact: artifact,
-            nuxieScriptingBridge: nuxieScriptingBridge
+            scriptRuntime: nuxieScriptBridge.scriptRuntime
         )
         let model = RiveModel(riveFile: riveFile)
         let riveViewModel = RiveViewModel(
@@ -216,7 +216,7 @@ final class FlowScreenViewController: UIViewController {
         self.riveView = riveView
         self.viewModelBridge = viewModelBridge
         self.textInputOverlayBridge = FlowTextInputOverlayBridge()
-        self.nuxieScriptingBridge = nuxieScriptingBridge
+        self.nuxieScriptBridge = nuxieScriptBridge
 
         do {
             _ = try bindViewModelForCurrentScreen()
@@ -306,42 +306,22 @@ final class FlowScreenViewController: UIViewController {
     }
 
     private func drainNuxieScriptEvents() {
-        guard let events = nuxieScriptingBridge?.drainTriggerEvents(),
-              !events.isEmpty else {
+        let events = nuxieScriptBridge?.drainEvents(currentScreenId: screenId) ?? []
+        guard !events.isEmpty else {
             return
         }
 
         for event in events {
-            let properties = event.payload
-            let eventScreenId = rendererStringProperty(
-                ["screenId", "screen_id"],
-                from: properties
-            ) ?? screenId
-            let componentId = rendererStringProperty(
-                ["componentId", "component_id", "elementId", "element_id"],
-                from: properties
-            )
-            let instanceId = rendererStringProperty(
-                ["instanceId", "instance_id"],
-                from: properties
-            )
-
             delegate?.flowScreenViewController(
                 self,
-                didEmitEvent: FlowRendererEvent(
-                    name: event.name,
-                    properties: properties,
-                    screenId: eventScreenId,
-                    componentId: componentId,
-                    instanceId: instanceId
-                )
+                didEmitEvent: event
             )
         }
     }
 
     private static func makeRiveFile(
         artifact: LoadedFlowArtifact,
-        nuxieScriptingBridge: RiveNuxieScriptingBridge
+        scriptRuntime: RiveScriptRuntime
     ) throws -> RiveFile {
         let data = try Data(contentsOf: artifact.rivURL)
         return try RiveFile(
@@ -355,7 +335,7 @@ final class FlowScreenViewController: UIViewController {
                     artifact: artifact
                 )
             },
-            nuxieScriptingBridge: nuxieScriptingBridge
+            scriptRuntime: scriptRuntime
         )
     }
 
