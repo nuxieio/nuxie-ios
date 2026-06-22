@@ -197,7 +197,6 @@ final class FlowArtifactStoreTests: AsyncSpec {
                         defaultInstanceId: nil
                     ),
                 ],
-                interactions: [:],
                 viewModelValues: nil
             )
             return (

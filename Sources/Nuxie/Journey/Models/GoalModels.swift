@@ -104,6 +104,6 @@ public enum ConversionAnchor: String, Codable {
     /// Anchor to last flow shown (default)
     case lastFlowShown = "last_flow_shown"
     
-    /// Anchor to last flow interaction (Phase 3)
-    case lastFlowInteraction = "last_flow_interaction"
+    /// Anchor to last flow handler (Phase 3)
+    case lastFlowHandler = "last_flow_handler"
 }

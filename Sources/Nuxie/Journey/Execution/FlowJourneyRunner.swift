@@ -38,7 +38,7 @@ final class FlowJourneyRunner {
     struct TriggerContext {
         let screenId: String?
         let componentId: String?
-        let interactionId: String?
+        let handlerId: String?
         let instanceId: String?
         let payload: [String: Any]?
     }
@@ -67,7 +67,7 @@ final class FlowJourneyRunner {
     }
 
     private struct ActionRequest {
-        let actions: [InteractionAction]
+        let actions: [JourneyAction]
         let context: TriggerContext
     }
 
@@ -82,7 +82,7 @@ final class FlowJourneyRunner {
     private let flow: Flow
     private let remoteFlow: RemoteFlow
     private let viewModelState: FlowViewModelStateCoordinator
-    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)?
+    private let onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ handlerId: String?) async -> Void)?
 
     @Injected(\.eventService) private var eventService: EventServiceProtocol
     @Injected(\.identityService) private var identityService: IdentityServiceProtocol
@@ -99,7 +99,7 @@ final class FlowJourneyRunner {
 
     private var handlersByHost: [String: [JourneyEventHandler]] = [:]
     private var eventDeclarationsByHost: [String: [EventDeclaration]] = [:]
-    private var handlerActionsById: [String: [InteractionAction]] = [:]
+    private var handlerActionsById: [String: [JourneyAction]] = [:]
     private let journeyEventHostKey = RemoteFlow.journeyEventHostKey
     private var activePaywallPurchaseInvocationId: String?
     private var activePaywallRestoreInvocationId: String?
@@ -114,7 +114,6 @@ final class FlowJourneyRunner {
     private var pendingRequestPermissionRequests = 0
     private var pendingTrackingPermissionRequests = 0
     private var deferredDismissReason: CloseReason?
-    private var debounceTasks: [String: Task<Void, Never>] = [:]
     private var triggerResetTasks: [String: Task<Void, Never>] = [:]
     private let deferredTaskQueue = SerialTaskQueue()
     private var didAttemptResponseDraftWrite = false
@@ -124,7 +123,7 @@ final class FlowJourneyRunner {
         journey: Journey,
         campaign: Campaign,
         flow: Flow,
-        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ interactionId: String?) async -> Void)? = nil,
+        onGoalHit: ((_ goalId: String, _ goalLabel: String?, _ screenId: String?, _ handlerId: String?) async -> Void)? = nil,
         viewController: FlowViewController? = nil
     ) {
         self.journey = journey
@@ -148,7 +147,7 @@ final class FlowJourneyRunner {
 
     private static func indexHandlerActions(
         _ handlersByHost: [String: [JourneyEventHandler]]
-    ) -> [String: [InteractionAction]] {
+    ) -> [String: [JourneyAction]] {
         handlersByHost.values.flatMap { $0 }.reduce(into: [:]) { result, handler in
             if result[handler.id] == nil {
                 result[handler.id] = handler.actions
@@ -265,12 +264,6 @@ final class FlowJourneyRunner {
         )
         journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
 
-        let outcome = await dispatchDidSetTrigger(
-            path: path,
-            value: value,
-            screenId: resolvedScreenId,
-            instanceId: instanceId
-        )
         scheduleTriggerReset(
             path: path,
             screenId: resolvedScreenId,
@@ -278,7 +271,7 @@ final class FlowJourneyRunner {
             notifyRenderer: source != "rive",
             force: isTrigger
         )
-        return outcome
+        return nil
     }
 
     func resolveRuntimeValue(
@@ -291,7 +284,7 @@ final class FlowJourneyRunner {
             context: TriggerContext(
                 screenId: screenId,
                 componentId: nil,
-                interactionId: nil,
+                handlerId: nil,
                 instanceId: instanceId,
                 payload: nil
             )
@@ -314,7 +307,7 @@ final class FlowJourneyRunner {
             context: TriggerContext(
                 screenId: screenId,
                 componentId: nil,
-                interactionId: nil,
+                handlerId: nil,
                 instanceId: instanceId,
                 payload: nil
             )
@@ -374,30 +367,6 @@ final class FlowJourneyRunner {
         )
     }
 
-    func dispatchTrigger(
-        trigger: InteractionTrigger,
-        screenId: String?,
-        componentId: String?,
-        instanceId: String?,
-        event: NuxieEvent?
-    ) async -> RunOutcome? {
-        guard case .event(let eventName, _) = trigger else { return nil }
-        let runtimeEvent = event ?? NuxieEvent(
-            name: eventName,
-            distinctId: journey.distinctId,
-            properties: [:]
-        )
-        if screenId != nil {
-            return await dispatchScreenEvent(
-                runtimeEvent,
-                screenId: screenId,
-                componentId: componentId,
-                instanceId: instanceId
-            )
-        }
-        return await dispatchJourneyEvent(runtimeEvent)
-    }
-
     private func dispatchEvent(
         hostId: String,
         event: NuxieEvent,
@@ -425,7 +394,7 @@ final class FlowJourneyRunner {
                 context: TriggerContext(
                     screenId: screenId,
                     componentId: componentId,
-                    interactionId: handler.id,
+                    handlerId: handler.id,
                     instanceId: instanceId,
                     payload: event.properties
                 )
@@ -444,7 +413,7 @@ final class FlowJourneyRunner {
         let context = TriggerContext(
             screenId: pending.screenId,
             componentId: pending.componentId,
-            interactionId: pending.interactionId,
+            handlerId: pending.handlerId,
             instanceId: nil,
             payload: event?.properties
         )
@@ -454,7 +423,7 @@ final class FlowJourneyRunner {
             activeIndex = 0
         } else {
             guard let actions = resolveActions(
-                interactionId: pending.interactionId,
+                handlerId: pending.handlerId,
                 screenId: pending.screenId,
                 componentId: pending.componentId
             ) else {
@@ -470,13 +439,6 @@ final class FlowJourneyRunner {
 
         let resumeContext = ResumeContext(pending: pending, reason: reason, event: event)
         return await processQueue(resumeContext: resumeContext)
-    }
-
-    func clearDebounces() {
-        for (_, task) in debounceTasks {
-            task.cancel()
-        }
-        debounceTasks.removeAll()
     }
 
     func hasPendingWork() -> Bool {
@@ -661,7 +623,7 @@ final class FlowJourneyRunner {
                 context: TriggerContext(
                     screenId: journey.flowState.currentScreenId,
                     componentId: nil,
-                    interactionId: handler.id,
+                    handlerId: handler.id,
                     instanceId: nil,
                     payload: event.properties
                 )
@@ -679,7 +641,7 @@ final class FlowJourneyRunner {
         return nil
     }
 
-    private func enqueueActions(_ actions: [InteractionAction], context: TriggerContext) {
+    private func enqueueActions(_ actions: [JourneyAction], context: TriggerContext) {
         guard !actions.isEmpty else { return }
         actionQueue.append(ActionRequest(actions: actions, context: context))
     }
@@ -757,7 +719,7 @@ final class FlowJourneyRunner {
     }
 
     private func executeAction(
-        _ action: InteractionAction,
+        _ action: JourneyAction,
         context: TriggerContext,
         index: Int,
         resumeContext: ResumeContext?
@@ -1208,7 +1170,7 @@ final class FlowJourneyRunner {
         let goalLabel = trimmedLabel.isEmpty ? nil : trimmedLabel
 
         if let onGoalHit {
-            await onGoalHit(goalId, goalLabel, resolvedScreenId, context.interactionId)
+            await onGoalHit(goalId, goalLabel, resolvedScreenId, context.handlerId)
             return (journey.status.isLive && deferredDismissReason == nil) ? .continue : .stopSequence
         }
 
@@ -1217,7 +1179,7 @@ final class FlowJourneyRunner {
             properties: JourneyEvents.journeyGoalHitProperties(
                 journey: journey,
                 screenId: resolvedScreenId,
-                interactionId: context.interactionId,
+                handlerId: context.handlerId,
                 goalId: goalId,
                 goalLabel: goalLabel
             ),
@@ -1533,7 +1495,7 @@ final class FlowJourneyRunner {
                     context: TriggerContext(
                         screenId: journey.flowState.currentScreenId,
                         componentId: nil,
-                        interactionId: nil,
+                        handlerId: nil,
                         instanceId: nil,
                         payload: nil
                     )
@@ -1723,7 +1685,7 @@ final class FlowJourneyRunner {
         context: TriggerContext,
         index: Int
     ) async -> ActionResult {
-        let nodeId = context.interactionId ?? context.screenId ?? journey.flowState.currentScreenId ?? "unknown"
+        let nodeId = context.handlerId ?? context.screenId ?? journey.flowState.currentScreenId ?? "unknown"
         let screenId = context.screenId ?? journey.flowState.currentScreenId
         let payload: [String: Any] = [
             "session_id": journey.id,
@@ -1818,12 +1780,6 @@ final class FlowJourneyRunner {
             instanceId: context.instanceId
         )
 
-        _ = await dispatchDidSetTrigger(
-            path: action.path,
-            value: resolvedValue,
-            screenId: screenId,
-            instanceId: context.instanceId
-        )
         scheduleTriggerReset(
             path: action.path,
             screenId: screenId,
@@ -1853,12 +1809,6 @@ final class FlowJourneyRunner {
             instanceId: context.instanceId
         )
 
-        _ = await dispatchDidSetTrigger(
-            path: action.path,
-            value: timestamp,
-            screenId: screenId,
-            instanceId: context.instanceId
-        )
         scheduleTriggerReset(
             path: action.path,
             screenId: screenId,
@@ -1890,13 +1840,6 @@ final class FlowJourneyRunner {
         if ok {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.insert, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
-            _ = await dispatchDidSetTrigger(
-                path: action.path,
-                value: updatedValue,
-                screenId: screenId,
-                instanceId: context.instanceId
-            )
         }
 
         return .continue
@@ -1920,13 +1863,6 @@ final class FlowJourneyRunner {
         if ok {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.remove, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
-            _ = await dispatchDidSetTrigger(
-                path: action.path,
-                value: updatedValue,
-                screenId: screenId,
-                instanceId: context.instanceId
-            )
         }
 
         return .continue
@@ -1953,13 +1889,6 @@ final class FlowJourneyRunner {
         if ok {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.swap, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
-            _ = await dispatchDidSetTrigger(
-                path: action.path,
-                value: updatedValue,
-                screenId: screenId,
-                instanceId: context.instanceId
-            )
         }
 
         return .continue
@@ -1986,13 +1915,6 @@ final class FlowJourneyRunner {
         if ok {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.move, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
-            _ = await dispatchDidSetTrigger(
-                path: action.path,
-                value: updatedValue,
-                screenId: screenId,
-                instanceId: context.instanceId
-            )
         }
 
         return .continue
@@ -2020,13 +1942,6 @@ final class FlowJourneyRunner {
         if ok {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.set, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
-            _ = await dispatchDidSetTrigger(
-                path: action.path,
-                value: updatedValue,
-                screenId: screenId,
-                instanceId: context.instanceId
-            )
         }
 
         return .continue
@@ -2050,20 +1965,13 @@ final class FlowJourneyRunner {
         if ok {
             journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
             applyViewModelListOperation(.clear, path: action.path, payload: payload, screenId: screenId, instanceId: context.instanceId)
-            let updatedValue = viewModelState.getValue(path: action.path, screenId: screenId, instanceId: context.instanceId) ?? NSNull()
-            _ = await dispatchDidSetTrigger(
-                path: action.path,
-                value: updatedValue,
-                screenId: screenId,
-                instanceId: context.instanceId
-            )
         }
 
         return .continue
     }
 
     private func runNestedActions(
-        _ actions: [InteractionAction],
+        _ actions: [JourneyAction],
         context: TriggerContext
     ) async -> ActionResult {
         guard !actions.isEmpty else { return .continue }
@@ -2090,10 +1998,10 @@ final class FlowJourneyRunner {
     }
 
     private func buildResumeActions(
-        from actions: [InteractionAction],
+        from actions: [JourneyAction],
         pausedIndex: Int,
         pendingKind: FlowPendingActionKind
-    ) -> [InteractionAction] {
+    ) -> [JourneyAction] {
         let resumeIndex = pendingKind == .delay ? pausedIndex + 1 : pausedIndex
         guard resumeIndex > 0 else { return actions }
         guard resumeIndex < actions.count else { return [] }
@@ -2102,7 +2010,7 @@ final class FlowJourneyRunner {
 
     private func attachResumeActions(
         to pending: FlowPendingAction,
-        from actions: [InteractionAction],
+        from actions: [JourneyAction],
         pausedIndex: Int
     ) -> FlowPendingAction {
         let trailingActions =
@@ -2119,19 +2027,6 @@ final class FlowJourneyRunner {
                 pendingKind: pending.kind
             )
         return pending.withResumeActions(resumeActions)
-    }
-
-    private func dispatchDidSetTrigger(
-        path: VmPathRef,
-        value: Any,
-        screenId: String?,
-        instanceId: String?
-    ) async -> RunOutcome? {
-        return nil
-    }
-
-    private func didSetDebounceKey(interactionId: String, path: VmPathRef) -> String {
-        return "\(interactionId):\(path.normalizedPath)"
     }
 
     private func scheduleTriggerReset(
@@ -2159,11 +2054,11 @@ final class FlowJourneyRunner {
     }
 
     private func resolveActions(
-        interactionId: String,
+        handlerId: String,
         screenId: String?,
         componentId: String?
-    ) -> [InteractionAction]? {
-        handlerActionsById[interactionId]
+    ) -> [JourneyAction]? {
+        handlerActionsById[handlerId]
     }
     private func makePendingAction(
         kind: FlowPendingActionKind,
@@ -2175,7 +2070,7 @@ final class FlowJourneyRunner {
         startedAt: Date? = nil
     ) -> FlowPendingAction {
         FlowPendingAction(
-            interactionId: context.interactionId ?? "entry",
+            handlerId: context.handlerId ?? "entry",
             screenId: context.screenId,
             componentId: context.componentId,
             actionIndex: index,
@@ -2207,13 +2102,13 @@ final class FlowJourneyRunner {
         }
     }
 
-    private func trackAction(_ action: InteractionAction, context: TriggerContext, error: String?) {
+    private func trackAction(_ action: JourneyAction, context: TriggerContext, error: String?) {
         eventService.track(
             JourneyEvents.journeyAction,
             properties: JourneyEvents.journeyActionProperties(
                 journey: journey,
                 screenId: context.screenId ?? journey.flowState.currentScreenId,
-                interactionId: context.interactionId,
+                handlerId: context.handlerId,
                 actionType: action.actionType,
                 error: error
             ),
@@ -2412,40 +2307,6 @@ final class FlowJourneyRunner {
         await MainActor.run {
             controller.navigate(to: screenId, transition: transition?.value)
         }
-    }
-
-    private func matchesTrigger(
-        _ interactionTrigger: InteractionTrigger,
-        _ inputTrigger: InteractionTrigger
-    ) -> Bool {
-        switch (interactionTrigger, inputTrigger) {
-        case (.hover, .hover),
-             (.press, .press),
-             (.manual, .manual):
-            return true
-        case (.longPress, .longPress):
-            return true
-        case (.drag(let dir, let threshold), .drag(let inputDir, let inputThreshold)):
-            if let dir, let inputDir, dir != inputDir { return false }
-            if let threshold, let inputThreshold, threshold > inputThreshold { return false }
-            return true
-        case (.event(let name, _), .event(let inputName, _)):
-            return name == inputName
-        case (.didSet(let path, _), .didSet(let inputPath, _)):
-            return matchesViewModelPath(triggerPath: path, inputPath: inputPath)
-        case (.start, .start):
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func matchesViewModelPath(triggerPath: VmPathRef, inputPath: VmPathRef) -> Bool {
-        pathKey(for: triggerPath) == pathKey(for: inputPath)
-    }
-
-    private func pathKey(for ref: VmPathRef) -> String {
-        ref.normalizedPath
     }
 
     private func resolveValueRefs(_ value: Any, context: TriggerContext) -> Any {
@@ -2701,7 +2562,7 @@ final class FlowJourneyRunner {
     }
 }
 
-private extension InteractionAction {
+private extension JourneyAction {
     var actionType: String {
         switch self {
         case .navigate: return "navigate"

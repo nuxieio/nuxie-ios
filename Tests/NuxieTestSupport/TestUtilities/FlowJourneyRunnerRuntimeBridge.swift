@@ -25,19 +25,6 @@ actor FlowJourneyRunnerRuntimeBridge {
         _ = await runner.handleScreenChanged(screenId)
     }
 
-    func handleInteraction(_ interaction: FlowRendererInteraction) async {
-        guard case .event(let eventName, _) = interaction.trigger else { return }
-        await handleEvent(
-            FlowRendererEvent(
-                name: eventName,
-                properties: interaction.properties,
-                screenId: interaction.screenId,
-                componentId: interaction.componentId,
-                instanceId: interaction.instanceId
-            )
-        )
-    }
-
     func handleEvent(_ event: FlowRendererEvent) async {
         let runtimeEvent = NuxieEvent(
             name: event.name,
@@ -96,26 +83,6 @@ final class FlowJourneyRunnerRuntimeDelegate: FlowRuntimeDelegate {
         onEvent?("renderer/screen_changed", ["screenId": screenId])
         Task { [bridge] in
             await bridge.handleScreenChanged(screenId)
-        }
-    }
-
-    func flowViewController(
-        _ controller: FlowViewController,
-        didEmitInteraction interaction: FlowRendererInteraction
-    ) {
-        var payload = interaction.properties
-        if let screenId = interaction.screenId {
-            payload["screenId"] = screenId
-        }
-        if let componentId = interaction.componentId {
-            payload["componentId"] = componentId
-        }
-        if let instanceId = interaction.instanceId {
-            payload["instanceId"] = instanceId
-        }
-        onEvent?("renderer/interaction", payload)
-        Task { [bridge] in
-            await bridge.handleInteraction(interaction)
         }
     }
 

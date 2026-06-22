@@ -142,7 +142,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             return value
         }
 
-        func normalizeAction(_ action: InteractionAction, viewModels: [ViewModel]) -> InteractionAction {
+        func normalizeAction(_ action: JourneyAction, viewModels: [ViewModel]) -> JourneyAction {
             switch action {
             case .setViewModel(let action):
                 return .setViewModel(SetViewModelAction(
@@ -240,13 +240,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             }
         }
 
-        func normalizeTrigger(_ trigger: InteractionTrigger, viewModels: [ViewModel]) -> InteractionTrigger {
-            if case .didSet(let path, let debounceMs) = trigger {
-                return .didSet(path: path, debounceMs: debounceMs)
-            }
-            return trigger
-        }
-
         func defaultValues(for viewModel: ViewModel) -> [String: AnyCodable] {
             viewModel.properties.compactMapValues { $0.defaultValue }
         }
@@ -282,8 +275,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
         func makeRemoteFlow(
             flowId: String,
-            entryActions: [InteractionAction]? = nil,
-            interactionsByScreen: [String: [Interaction]] = [:],
+            entryActions: [JourneyAction]? = nil,
             events: RemoteFlowEventMap = [:],
             handlers: RemoteFlowHandlerMap = [:],
             scripts: [String: ScreenScriptRef] = [:],
@@ -291,16 +283,16 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             viewModelInstances: [ViewModelInstance]? = nil,
             screens: [RemoteFlowScreen]? = nil
         ) -> RemoteFlow {
-            var interactions = interactionsByScreen
+            var handlerMap = handlers
             if let entryActions, !entryActions.isEmpty {
-                interactions["__global__"] = [
-                    Interaction(
+                handlerMap[RemoteFlow.journeyEventHostKey, default: []].append(
+                    JourneyEventHandler(
                         id: "start",
-                        trigger: .start(config: nil),
-                        actions: entryActions.map { normalizeAction($0, viewModels: viewModels) },
-                        enabled: true
+                        eventName: "$app_opened",
+                        enabled: true,
+                        actions: entryActions.map { normalizeAction($0, viewModels: viewModels) }
                     )
-                ]
+                )
             }
             let resolvedScreens = (screens ?? [
                 RemoteFlowScreen(
@@ -317,17 +309,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     defaultInstanceId: screen.defaultInstanceId
                 )
             }
-            let normalizedInteractions = interactions.mapValues { interactions in
-                interactions.map { interaction in
-                    Interaction(
-                        id: interaction.id,
-                        trigger: normalizeTrigger(interaction.trigger, viewModels: viewModels),
-                        actions: interaction.actions.map { normalizeAction($0, viewModels: viewModels) },
-                        enabled: interaction.enabled
-                    )
-                }
-            }
-            let normalizedHandlers = handlers.mapValues { handlers in
+            let normalizedHandlers = handlerMap.mapValues { handlers in
                 handlers.map { handler in
                     JourneyEventHandler(
                         id: handler.id,
@@ -335,6 +317,19 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         enabled: handler.enabled,
                         order: handler.order,
                         actions: handler.actions.map { normalizeAction($0, viewModels: viewModels) }
+                    )
+                }
+            }
+            var eventMap = events
+            for (hostId, handlers) in normalizedHandlers where hostId != RemoteFlow.journeyEventHostKey {
+                var seen = Set(eventMap[hostId, default: []].map(\.eventName))
+                for handler in handlers where !seen.contains(handler.eventName) {
+                    seen.insert(handler.eventName)
+                    eventMap[hostId, default: []].append(
+                        EventDeclaration(
+                            id: "\(handler.id):event",
+                            eventName: handler.eventName
+                        )
                     )
                 }
             }
@@ -352,10 +347,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     )
                 ),
                 screens: resolvedScreens,
-                events: events,
+                events: eventMap,
                 handlers: normalizedHandlers,
                 scripts: scripts,
-                interactions: normalizedInteractions,
                 viewModelValues: values.isEmpty ? nil : values
             )
         }
@@ -430,17 +424,19 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(snapshot?.snapshot.viewModelInstances.first?.viewModelId).to(equal("VM"))
             }
 
-            it("dispatches global event interactions") {
+            it("dispatches journey event handlers") {
                 let flowId = "flow-global-event"
-                let interaction = Interaction(
-                    id: "int-global",
-                    trigger: .event(eventName: "promo_ready", filter: nil),
-                    actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["__global__": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "handler-promo-ready",
+                                eventName: "promo_ready",
+                                actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))]
+                            )
+                        ]
+                    ],
                     screens: [
                         RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
                         RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
@@ -470,15 +466,17 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             it("reconciles visible screen state before returning a paused dismiss hook") {
                 let flowId = "flow-dismiss-pauses"
-                let dismissInteraction = Interaction(
-                    id: "screen-dismiss-delay",
-                    trigger: .event(eventName: SystemEventNames.screenDismissed, filter: nil),
-                    actions: [.delay(DelayAction(durationMs: 5000))],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-2": [dismissInteraction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "screen-dismiss-delay",
+                                eventName: SystemEventNames.screenDismissed,
+                                actions: [.delay(DelayAction(durationMs: 5000))]
+                            )
+                        ]
+                    ],
                     screens: [
                         RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
                         RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
@@ -500,68 +498,10 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 if case .paused(let pending) = outcome {
                     expect(pending.kind).to(equal(.delay))
                 } else {
-                    fail("Expected the screen_dismissed interaction to pause")
+                    fail("Expected the screen_dismissed handler to pause")
                 }
                 expect(journey.flowState.currentScreenId).to(equal("screen-1"))
                 expect(journey.flowState.navigationStack).to(beEmpty())
-            }
-
-            it("does not dispatch legacy global did_set interactions") {
-                let flowId = "flow-global-did-set"
-                let viewModel = ViewModel(
-                    id: "vm-1",
-                    name: "VM",
-                    viewModelPathId: 0,
-                    properties: [
-                        "pulse": ViewModelProperty(
-                            type: .trigger,
-                            propertyId: 1,
-                            defaultValue: AnyCodable(0),
-                            required: nil,
-                            enumValues: nil,
-                            itemType: nil,
-                            schema: nil,
-                            viewModelId: nil,
-                            validation: nil
-                        )
-                    ]
-                )
-                let interaction = Interaction(
-                    id: "int-global-did-set",
-                    trigger: .didSet(path: vmPath("pulse"), debounceMs: nil),
-                    actions: [.navigate(NavigateAction(screenId: "screen-2", transition: nil))],
-                    enabled: true
-                )
-                let remoteFlow = makeRemoteFlow(
-                    flowId: flowId,
-                    interactionsByScreen: ["__global__": [interaction]],
-                    viewModels: [viewModel],
-                    screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil),
-                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: "vm-1", defaultInstanceId: nil),
-                    ]
-                )
-                let flow = Flow(remoteFlow: remoteFlow, products: [])
-                let campaign = makeCampaign(flowId: flowId)
-                let journey = Journey(campaign: campaign, distinctId: "user-1")
-                journey.flowState.currentScreenId = "screen-1"
-                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
-
-                let controller = await MainActor.run {
-                    SpyFlowViewController(flow: flow)
-                }
-                runner.attach(viewController: controller)
-
-                _ = await runner.handleDidSet(
-                    path: vmPath("pulse"),
-                    value: 1,
-                    source: "runtime",
-                    screenId: "screen-1",
-                    instanceId: nil
-                )
-
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                expect(controller.navigationRequests.map(\.screenId)).toNot(contain("screen-2"))
             }
 
             it("does not echo Rive-origin trigger did_set changes back into the renderer") {
@@ -585,22 +525,8 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         )
                     ]
                 )
-                let interaction = Interaction(
-                    id: "int-rive-did-set",
-                    trigger: .didSet(path: path, debounceMs: nil),
-                    actions: [
-                        .sendEvent(
-                            SendEventAction(
-                                eventName: "rive_trigger_seen",
-                                properties: nil
-                            )
-                        )
-                    ],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
                     viewModels: [viewModel],
                     screens: [
                         RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil)
@@ -633,86 +559,6 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(values?["pulse"]?.value as? Int).to(equal(0))
             }
 
-            it("does not dispatch legacy debounced did_set interactions across screen and global scopes") {
-                let flowId = "flow-did-set-debounce-scope"
-                let path = vmPath("pulse")
-                let viewModel = ViewModel(
-                    id: "vm-1",
-                    name: "VM",
-                    viewModelPathId: 0,
-                    properties: [
-                        "pulse": ViewModelProperty(
-                            type: .trigger,
-                            propertyId: 1,
-                            defaultValue: AnyCodable(0),
-                            required: nil,
-                            enumValues: nil,
-                            itemType: nil,
-                            schema: nil,
-                            viewModelId: nil,
-                            validation: nil
-                        )
-                    ]
-                )
-
-                let screenInteraction = Interaction(
-                    id: "int-screen-did-set",
-                    trigger: .didSet(path: path, debounceMs: 5),
-                    actions: [
-                        .sendEvent(
-                            SendEventAction(
-                                eventName: "screen_did_set",
-                                properties: nil
-                            )
-                        )
-                    ],
-                    enabled: true
-                )
-
-                let globalInteraction = Interaction(
-                    id: "int-global-did-set",
-                    trigger: .didSet(path: path, debounceMs: 5),
-                    actions: [
-                        .sendEvent(
-                            SendEventAction(
-                                eventName: "global_did_set",
-                                properties: nil
-                            )
-                        )
-                    ],
-                    enabled: true
-                )
-
-                let remoteFlow = makeRemoteFlow(
-                    flowId: flowId,
-                    interactionsByScreen: [
-                        "screen-1": [screenInteraction],
-                        "__global__": [globalInteraction]
-                    ],
-                    viewModels: [viewModel],
-                    screens: [
-                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: "vm-1", defaultInstanceId: nil)
-                    ]
-                )
-                let flow = Flow(remoteFlow: remoteFlow, products: [])
-                let campaign = makeCampaign(flowId: flowId)
-                let journey = Journey(campaign: campaign, distinctId: "user-1")
-                journey.flowState.currentScreenId = "screen-1"
-                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
-
-                _ = await runner.handleDidSet(
-                    path: path,
-                    value: 1,
-                    source: "runtime",
-                    screenId: "screen-1",
-                    instanceId: nil
-                )
-
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("screen_did_set"))
-                expect(mocks.eventService.trackedEvents.map(\.name)).toNot(contain("global_did_set"))
-            }
-
             it("applies set_view_model on screen shown and emits patch") {
                 let flowId = "flow-vm"
                 let viewModel = ViewModel(
@@ -733,20 +579,22 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         )
                     ]
                 )
-                let interaction = Interaction(
-                    id: "int-1",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [
-                        .setViewModel(SetViewModelAction(
-                            path: vmPath("flag"),
-                            value: AnyCodable(["literal": true] as [String: Any])
-                        ))
-                    ],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "screen-shown-set-flag",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [
+                                    .setViewModel(SetViewModelAction(
+                                        path: vmPath("flag"),
+                                        value: AnyCodable(["literal": true] as [String: Any])
+                                    ))
+                                ]
+                            )
+                        ]
+                    ],
                     viewModels: [viewModel]
                 )
 
@@ -829,20 +677,22 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             it("projects paywall purchase status through the native view model patch path") {
                 let flowId = "flow-purchase-status"
                 let viewModel = makePaywallViewModel()
-                let interaction = Interaction(
-                    id: "purchase-on-show",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [
-                        .purchase(PurchaseAction(
-                            placementIndex: AnyCodable(0),
-                            productId: AnyCodable("prod_1")
-                        ))
-                    ],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "purchase-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [
+                                    .purchase(PurchaseAction(
+                                        placementIndex: AnyCodable(0),
+                                        productId: AnyCodable("prod_1")
+                                    ))
+                                ]
+                            )
+                        ]
+                    ],
                     viewModels: [viewModel]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -972,22 +822,24 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         "pulse": triggerProperty
                     ]
                 )
-                let interaction = Interaction(
-                    id: "int-1",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [
-                        .listInsert(ListInsertAction(
-                            path: vmPath("items"),
-                            index: 0,
-                            value: AnyCodable(["literal": "a"] as [String: Any])
-                        )),
-                        .fireTrigger(FireTriggerAction(path: vmPath("pulse")))
-                    ],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "insert-and-fire-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [
+                                    .listInsert(ListInsertAction(
+                                        path: vmPath("items"),
+                                        index: 0,
+                                        value: AnyCodable(["literal": "a"] as [String: Any])
+                                    )),
+                                    .fireTrigger(FireTriggerAction(path: vmPath("pulse")))
+                                ]
+                            )
+                        ]
+                    ],
                     viewModels: [viewModel]
                 )
 
@@ -1049,27 +901,29 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         "items": listProperty
                     ]
                 )
-                let interaction = Interaction(
-                    id: "int-ops",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [
-                        .listMove(ListMoveAction(
-                            path: vmPath("items"),
-                            from: 0,
-                            to: 2
-                        )),
-                        .listSet(ListSetAction(
-                            path: vmPath("items"),
-                            index: 1,
-                            value: AnyCodable(["literal": "z"] as [String: Any])
-                        )),
-                        .listClear(ListClearAction(path: vmPath("items")))
-                    ],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "list-ops-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [
+                                    .listMove(ListMoveAction(
+                                        path: vmPath("items"),
+                                        from: 0,
+                                        to: 2
+                                    )),
+                                    .listSet(ListSetAction(
+                                        path: vmPath("items"),
+                                        index: 1,
+                                        value: AnyCodable(["literal": "z"] as [String: Any])
+                                    )),
+                                    .listClear(ListClearAction(path: vmPath("items")))
+                                ]
+                            )
+                        ]
+                    ],
                     viewModels: [viewModel]
                 )
 
@@ -1135,7 +989,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         "selectedIndex": AnyCodable(2)
                     ]
                 )
-                let purchaseAction = InteractionAction.purchase(
+                let purchaseAction = JourneyAction.purchase(
                     PurchaseAction(
                         placementIndex: AnyCodable([
                             "ref": [
@@ -1153,23 +1007,25 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                         ])
                     )
                 )
-                let interaction = Interaction(
-                    id: "int-1",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [
-                        purchaseAction,
-                        .restore(RestoreAction()),
-                        .requestNotifications(RequestNotificationsAction()),
-                        .requestPermission(RequestPermissionAction(permissionType: "camera")),
-                        .requestTracking(RequestTrackingAction()),
-                        .openLink(OpenLinkAction(url: AnyCodable("https://example.com"), target: "external")),
-                        .dismiss(DismissAction())
-                    ],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "capability-actions-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [
+                                    purchaseAction,
+                                    .restore(RestoreAction()),
+                                    .requestNotifications(RequestNotificationsAction()),
+                                    .requestPermission(RequestPermissionAction(permissionType: "camera")),
+                                    .requestTracking(RequestTrackingAction()),
+                                    .openLink(OpenLinkAction(url: AnyCodable("https://example.com"), target: "external")),
+                                    .dismiss(DismissAction())
+                                ]
+                            )
+                        ]
+                    ],
                     viewModels: [viewModel],
                     viewModelInstances: [instance]
                 )
@@ -2080,19 +1936,21 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             it("uses explicit back transitions when provided") {
                 let flowId = "flow-back-transition"
                 let transition = AnyCodable(["type": "push"])
-                let interaction = Interaction(
-                    id: "int-back",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [.back(BackAction(steps: 1, transition: transition))],
-                    enabled: true
-                )
                 let screens = [
                     RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
                     RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil)
                 ]
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-2": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "back-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [.back(BackAction(steps: 1, transition: transition))]
+                            )
+                        ]
+                    ],
                     screens: screens
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -2116,19 +1974,21 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             it("omits back transitions when not configured") {
                 let flowId = "flow-back-no-transition"
-                let interaction = Interaction(
-                    id: "int-back",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [.back(BackAction(steps: 1))],
-                    enabled: true
-                )
                 let screens = [
                     RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
                     RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil)
                 ]
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-2": [interaction]],
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "back-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [.back(BackAction(steps: 1))]
+                            )
+                        ]
+                    ],
                     screens: screens
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
@@ -2150,15 +2010,17 @@ final class FlowJourneyRunnerTests: AsyncSpec {
 
             it("no-ops back when history is empty") {
                 let flowId = "flow-back-empty"
-                let interaction = Interaction(
-                    id: "int-back",
-                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
-                    actions: [.back(BackAction(steps: 1))],
-                    enabled: true
-                )
                 let remoteFlow = makeRemoteFlow(
                     flowId: flowId,
-                    interactionsByScreen: ["screen-1": [interaction]]
+                    handlers: [
+                        RemoteFlow.journeyEventHostKey: [
+                            JourneyEventHandler(
+                                id: "back-on-show",
+                                eventName: SystemEventNames.screenShown,
+                                actions: [.back(BackAction(steps: 1))]
+                            )
+                        ]
+                    ]
                 )
                 let flow = Flow(remoteFlow: remoteFlow, products: [])
                 let campaign = makeCampaign(flowId: flowId)
@@ -2220,7 +2082,7 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 expect(goalEvent?.properties?["campaign_id"] as? String).to(equal(campaign.id))
                 expect(goalEvent?.properties?["goal_id"] as? String).to(equal("signup_complete"))
                 expect(goalEvent?.properties?["goal_label"] as? String).to(equal("Signed Up"))
-                expect(goalEvent?.properties?["interaction_id"] as? String).to(equal("start"))
+                expect(goalEvent?.properties?["handler_id"] as? String).to(equal("start"))
                 expect(goalEvent?.properties?["journeyId"]).to(beNil())
                 expect(goalEvent?.properties?["campaignId"]).to(beNil())
                 expect(goalEvent?.properties?["goalId"]).to(beNil())

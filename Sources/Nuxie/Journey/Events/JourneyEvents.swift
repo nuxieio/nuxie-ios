@@ -164,7 +164,7 @@ public class JourneyEvents {
     public static func journeyActionProperties(
         journey: Journey,
         screenId: String?,
-        interactionId: String?,
+        handlerId: String?,
         actionType: String,
         error: String?
     ) -> [String: Any] {
@@ -177,8 +177,8 @@ public class JourneyEvents {
         if let screenId {
             properties["screen_id"] = screenId
         }
-        if let interactionId {
-            properties["interaction_id"] = interactionId
+        if let handlerId {
+            properties["handler_id"] = handlerId
         }
         if let error {
             properties["error_message"] = error
@@ -190,7 +190,7 @@ public class JourneyEvents {
     public static func journeyGoalHitProperties(
         journey: Journey,
         screenId: String?,
-        interactionId: String?,
+        handlerId: String?,
         goalId: String,
         goalLabel: String?
     ) -> [String: Any] {
@@ -203,8 +203,8 @@ public class JourneyEvents {
         if let screenId {
             properties["screen_id"] = screenId
         }
-        if let interactionId {
-            properties["interaction_id"] = interactionId
+        if let handlerId {
+            properties["handler_id"] = handlerId
         }
         if let goalLabel, !goalLabel.isEmpty {
             properties["goal_label"] = goalLabel

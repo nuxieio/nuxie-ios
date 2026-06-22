@@ -43,7 +43,6 @@ final class FlowStoreTests: AsyncSpec {
                         defaultInstanceId: "runtime-instance"
                     ),
                 ],
-                interactions: [:],
                 viewModelValues: values
             )
         }

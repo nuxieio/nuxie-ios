@@ -57,7 +57,6 @@ public enum FlowRuntimeFixtureHost {
             events: fixtureFlow.events ?? [:],
             handlers: fixtureFlow.handlers ?? [:],
             scripts: fixtureFlow.scripts ?? [:],
-            interactions: fixtureFlow.interactions ?? [:],
             viewModelValues: nil
         )
 
@@ -104,10 +103,9 @@ public enum FlowRuntimeFixtureHost {
         var events: [String: [EventDeclaration]]? = nil
         var handlers: [String: [JourneyEventHandler]]? = nil
         var scripts: [String: ScreenScriptRef]? = nil
-        var interactions: [String: [Interaction]]? = nil
 
         var hasJourneyRuntime: Bool {
-            handlers?.isEmpty == false || interactions?.isEmpty == false
+            handlers?.isEmpty == false
         }
     }
 
@@ -233,19 +231,6 @@ public enum FlowRuntimeFixtureHost {
             )
         }
 
-        func handleInteraction(_ interaction: FlowRendererInteraction) async -> FlowJourneyRunner.RunOutcome? {
-            guard case .event(let eventName, _) = interaction.trigger else { return nil }
-            return await handleEvent(
-                FlowRendererEvent(
-                    name: eventName,
-                    properties: interaction.properties,
-                    screenId: interaction.screenId,
-                    componentId: interaction.componentId,
-                    instanceId: interaction.instanceId
-                )
-            )
-        }
-
         func handleEvent(_ event: FlowRendererEvent) async -> FlowJourneyRunner.RunOutcome? {
             let runtimeEvent = NuxieEvent(
                 name: event.name,
@@ -359,17 +344,6 @@ public enum FlowRuntimeFixtureHost {
                         revealingScreenId: revealingScreenId
                     )
                 )
-            }
-        }
-
-        func flowViewController(
-            _ controller: FlowViewController,
-            didEmitInteraction interaction: FlowRendererInteraction
-        ) {
-            setStatus("interaction:\(interaction.componentId ?? "unknown")")
-            Task { [bridge, weak self] in
-                guard let self else { return }
-                await self.handleOutcome(await bridge.handleInteraction(interaction))
             }
         }
 

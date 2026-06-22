@@ -9,11 +9,6 @@ protocol FlowScreenViewControllerDelegate: AnyObject {
 
     func flowScreenViewController(
         _ controller: FlowScreenViewController,
-        didEmitInteraction interaction: FlowRendererInteraction
-    )
-
-    func flowScreenViewController(
-        _ controller: FlowScreenViewController,
         didEmitEvent event: FlowRendererEvent
     )
 

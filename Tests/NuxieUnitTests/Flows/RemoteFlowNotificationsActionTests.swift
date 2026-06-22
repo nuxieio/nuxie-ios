@@ -11,7 +11,7 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
             """.utf8
         )
 
-        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+        let action = try JSONDecoder().decode(JourneyAction.self, from: data)
 
         switch action {
         case .requestNotifications(let requestNotifications):
@@ -22,7 +22,7 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
     }
 
     func testEncodesRequestNotificationsAction() throws {
-        let action = InteractionAction.requestNotifications(RequestNotificationsAction())
+        let action = JourneyAction.requestNotifications(RequestNotificationsAction())
 
         let data = try JSONEncoder().encode(action)
         let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -39,7 +39,7 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
             """.utf8
         )
 
-        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+        let action = try JSONDecoder().decode(JourneyAction.self, from: data)
 
         switch action {
         case .requestTracking(let requestTracking):
@@ -50,7 +50,7 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
     }
 
     func testEncodesRequestTrackingAction() throws {
-        let action = InteractionAction.requestTracking(RequestTrackingAction())
+        let action = JourneyAction.requestTracking(RequestTrackingAction())
 
         let data = try JSONEncoder().encode(action)
         let decoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -68,7 +68,7 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
             """.utf8
         )
 
-        let action = try JSONDecoder().decode(InteractionAction.self, from: data)
+        let action = try JSONDecoder().decode(JourneyAction.self, from: data)
 
         switch action {
         case .requestPermission(let requestPermission):
@@ -80,7 +80,7 @@ final class RemoteFlowNotificationsActionTests: XCTestCase {
     }
 
     func testEncodesRequestPermissionAction() throws {
-        let action = InteractionAction.requestPermission(
+        let action = JourneyAction.requestPermission(
             RequestPermissionAction(permissionType: "camera")
         )
 

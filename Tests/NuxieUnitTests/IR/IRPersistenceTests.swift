@@ -107,7 +107,7 @@ final class IRPersistenceTests: QuickSpec {
 
                 let journey = Journey(id: "journey_1", campaign: campaign, distinctId: "user_1")
                 journey.flowState.pendingAction = FlowPendingAction(
-                    interactionId: "interaction_1",
+                    handlerId: "handler_1",
                     screenId: "screen_1",
                     componentId: "component_1",
                     actionIndex: 2,
