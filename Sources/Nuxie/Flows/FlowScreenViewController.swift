@@ -34,6 +34,7 @@ final class FlowScreenViewController: UIViewController {
     private var riveView: RiveView!
     private var viewModelBridge: FlowViewModelBridge!
     private var textInputOverlayBridge: FlowTextInputOverlayBridge!
+    private var nuxieScriptingBridge: RiveNuxieScriptingBridge!
     private var pendingScreenBindingId: String?
     private var contentHidden = false
 
@@ -108,7 +109,7 @@ final class FlowScreenViewController: UIViewController {
         if shouldBindCurrentScreen,
            viewModelBridge?.bindDefaultInstance(forScreenId: screenId) == true {
             pendingScreenBindingId = nil
-            riveView?.advance(delta: 0)
+            advanceRiveView(delta: 0)
         }
         bindPendingScreenIfNeeded()
         return didApply
@@ -156,11 +157,15 @@ final class FlowScreenViewController: UIViewController {
     }
 
     func advance(delta: Double = 0) {
-        riveView?.advance(delta: delta)
+        advanceRiveView(delta: delta)
     }
 
     private func loadRiveSession(for screen: FlowArtifactScreen) throws {
-        let riveFile = try Self.makeRiveFile(artifact: artifact)
+        let nuxieScriptingBridge = RiveNuxieScriptingBridge()
+        let riveFile = try Self.makeRiveFile(
+            artifact: artifact,
+            nuxieScriptingBridge: nuxieScriptingBridge
+        )
         let model = RiveModel(riveFile: riveFile)
         let riveViewModel = RiveViewModel(
             model,
@@ -211,6 +216,7 @@ final class FlowScreenViewController: UIViewController {
         self.riveView = riveView
         self.viewModelBridge = viewModelBridge
         self.textInputOverlayBridge = FlowTextInputOverlayBridge()
+        self.nuxieScriptingBridge = nuxieScriptingBridge
 
         do {
             _ = try bindViewModelForCurrentScreen()
@@ -243,7 +249,7 @@ final class FlowScreenViewController: UIViewController {
             guard try bindViewModelForCurrentScreen() else {
                 return
             }
-            riveView?.advance(delta: 0)
+            advanceRiveView(delta: 0)
         } catch {
             LogWarning("FlowScreenViewController: failed to bind native ViewModel for screen \(screenId): \(error)")
         }
@@ -294,7 +300,49 @@ final class FlowScreenViewController: UIViewController {
         textInputOverlayBridge.setHidden(contentHidden)
     }
 
-    private static func makeRiveFile(artifact: LoadedFlowArtifact) throws -> RiveFile {
+    private func advanceRiveView(delta: Double) {
+        riveView?.advance(delta: delta)
+        drainNuxieScriptEvents()
+    }
+
+    private func drainNuxieScriptEvents() {
+        guard let events = nuxieScriptingBridge?.drainTriggerEvents(),
+              !events.isEmpty else {
+            return
+        }
+
+        for event in events {
+            let properties = event.payload
+            let eventScreenId = rendererStringProperty(
+                ["screenId", "screen_id"],
+                from: properties
+            ) ?? screenId
+            let componentId = rendererStringProperty(
+                ["componentId", "component_id", "elementId", "element_id"],
+                from: properties
+            )
+            let instanceId = rendererStringProperty(
+                ["instanceId", "instance_id"],
+                from: properties
+            )
+
+            delegate?.flowScreenViewController(
+                self,
+                didEmitEvent: FlowRendererEvent(
+                    name: event.name,
+                    properties: properties,
+                    screenId: eventScreenId,
+                    componentId: componentId,
+                    instanceId: instanceId
+                )
+            )
+        }
+    }
+
+    private static func makeRiveFile(
+        artifact: LoadedFlowArtifact,
+        nuxieScriptingBridge: RiveNuxieScriptingBridge
+    ) throws -> RiveFile {
         let data = try Data(contentsOf: artifact.rivURL)
         return try RiveFile(
             data: data,
@@ -306,7 +354,8 @@ final class FlowScreenViewController: UIViewController {
                     factory: factory,
                     artifact: artifact
                 )
-            }
+            },
+            nuxieScriptingBridge: nuxieScriptingBridge
         )
     }
 
@@ -373,6 +422,7 @@ extension FlowScreenViewController: @preconcurrency RivePlayerDelegate {
     public func player(didAdvanceby seconds: Double, riveModel: RiveModel?) {
         viewModelBridge?.updateBoundListeners()
         textInputOverlayBridge?.layout()
+        drainNuxieScriptEvents()
         delegate?.flowScreenViewControllerDidAdvance(self)
     }
 }

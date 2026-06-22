@@ -57,10 +57,10 @@
     {
       "identity" : "rive-ios",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/rive-app/rive-ios.git",
+      "location" : "https://github.com/nuxieio/rive-ios.git",
       "state" : {
-        "revision" : "0bab74395b47df0423be3c1b3eec0e86751889b2",
-        "version" : "6.20.3"
+        "revision" : "bec98d71010131b92ac7f3a4cf6cb0e209469cf6",
+        "version" : "6.20.3-nuxie.1"
       }
     },
     {
