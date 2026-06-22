@@ -38,6 +38,90 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             VmPathRef(viewModelName: viewModelName, path: propertyPath)
         }
 
+        func makePaywallViewModel() -> ViewModel {
+            let stringProperty = { (id: Int, defaultValue: String?) in
+                ViewModelProperty(
+                    type: .string,
+                    propertyId: id,
+                    defaultValue: defaultValue.map(AnyCodable.init),
+                    required: nil,
+                    enumValues: nil,
+                    itemType: nil,
+                    schema: nil,
+                    viewModelId: nil,
+                    validation: nil
+                )
+            }
+            let statusProperty = { (id: Int, values: [String]) in
+                ViewModelProperty(
+                    type: .enum,
+                    propertyId: id,
+                    defaultValue: AnyCodable("idle"),
+                    required: nil,
+                    enumValues: values,
+                    itemType: nil,
+                    schema: nil,
+                    viewModelId: nil,
+                    validation: nil
+                )
+            }
+            return ViewModel(
+                id: "vm-1",
+                name: "VM",
+                viewModelPathId: 0,
+                properties: [
+                    "paywall": ViewModelProperty(
+                        type: .object,
+                        propertyId: 1,
+                        defaultValue: nil,
+                        required: nil,
+                        enumValues: nil,
+                        itemType: nil,
+                        schema: [
+                            "purchase": ViewModelProperty(
+                                type: .object,
+                                propertyId: 2,
+                                defaultValue: nil,
+                                required: nil,
+                                enumValues: nil,
+                                itemType: nil,
+                                schema: [
+                                    "status": statusProperty(3, ["idle", "running", "success", "error", "cancelled"]),
+                                    "errorCode": stringProperty(4, ""),
+                                    "invocationId": stringProperty(5, ""),
+                                ],
+                                viewModelId: nil,
+                                validation: nil
+                            ),
+                            "restore": ViewModelProperty(
+                                type: .object,
+                                propertyId: 6,
+                                defaultValue: nil,
+                                required: nil,
+                                enumValues: nil,
+                                itemType: nil,
+                                schema: [
+                                    "status": statusProperty(7, ["idle", "running", "success", "error", "not_found"]),
+                                    "errorCode": stringProperty(8, ""),
+                                    "invocationId": stringProperty(9, ""),
+                                ],
+                                viewModelId: nil,
+                                validation: nil
+                            ),
+                        ],
+                        viewModelId: nil,
+                        validation: nil
+                    )
+                ]
+            )
+        }
+
+        func snapshotValue(_ journey: Journey, path: String) -> Any? {
+            journey.flowState.viewModelSnapshot?.viewModelInstances
+                .compactMap { $0.values[path]?.value }
+                .first
+        }
+
         func normalizeAnyCodable(_ value: AnyCodable) -> AnyCodable {
             AnyCodable(normalizeAny(value.value))
         }
@@ -200,6 +284,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
             flowId: String,
             entryActions: [InteractionAction]? = nil,
             interactionsByScreen: [String: [Interaction]] = [:],
+            events: RemoteFlowEventMap = [:],
+            handlers: RemoteFlowHandlerMap = [:],
+            scripts: [String: ScreenScriptRef] = [:],
             viewModels: [ViewModel] = [],
             viewModelInstances: [ViewModelInstance]? = nil,
             screens: [RemoteFlowScreen]? = nil
@@ -240,6 +327,17 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     )
                 }
             }
+            let normalizedHandlers = handlers.mapValues { handlers in
+                handlers.map { handler in
+                    JourneyEventHandler(
+                        id: handler.id,
+                        eventName: handler.eventName,
+                        enabled: handler.enabled,
+                        order: handler.order,
+                        actions: handler.actions.map { normalizeAction($0, viewModels: viewModels) }
+                    )
+                }
+            }
             let values = viewModelValues(viewModels: viewModels, instances: viewModelInstances)
 
             return RemoteFlow(
@@ -254,6 +352,9 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                     )
                 ),
                 screens: resolvedScreens,
+                events: events,
+                handlers: normalizedHandlers,
+                scripts: scripts,
                 interactions: normalizedInteractions,
                 viewModelValues: values.isEmpty ? nil : values
             )
@@ -669,6 +770,163 @@ final class FlowJourneyRunnerTests: AsyncSpec {
                 await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
                     contain(vmPath("flag").normalizedPath)
                 )
+            }
+
+            it("dispatches structured screen events from the native renderer event path") {
+                let flowId = "flow-structured-renderer-event"
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    events: [
+                        "screen-1": [
+                            EventDeclaration(
+                                id: "event-purchase-tapped",
+                                eventName: "purchase_tapped",
+                                payloadSchema: ["productId": .string]
+                            )
+                        ]
+                    ],
+                    handlers: [
+                        "screen-1": [
+                            JourneyEventHandler(
+                                id: "handler-purchase-tapped",
+                                eventName: "purchase_tapped",
+                                actions: [
+                                    .navigate(NavigateAction(screenId: "screen-2", transition: nil))
+                                ]
+                            )
+                        ]
+                    ],
+                    screens: [
+                        RemoteFlowScreen(id: "screen-1", defaultViewModelName: nil, defaultInstanceId: nil),
+                        RemoteFlowScreen(id: "screen-2", defaultViewModelName: nil, defaultInstanceId: nil),
+                    ]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                journey.flowState.currentScreenId = "screen-1"
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.dispatchScreenEvent(
+                    NuxieEvent(
+                        name: "purchase_tapped",
+                        distinctId: "user-1",
+                        properties: ["productId": "prod_1"]
+                    ),
+                    screenId: "screen-1",
+                    componentId: "button-1",
+                    instanceId: nil
+                )
+
+                await expect(controller.navigationRequests.map(\.screenId)).toEventually(contain("screen-2"))
+            }
+
+            it("projects paywall purchase status through the native view model patch path") {
+                let flowId = "flow-purchase-status"
+                let viewModel = makePaywallViewModel()
+                let interaction = Interaction(
+                    id: "purchase-on-show",
+                    trigger: .event(eventName: SystemEventNames.screenShown, filter: nil),
+                    actions: [
+                        .purchase(PurchaseAction(
+                            placementIndex: AnyCodable(0),
+                            productId: AnyCodable("prod_1")
+                        ))
+                    ],
+                    enabled: true
+                )
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    interactionsByScreen: ["screen-1": [interaction]],
+                    viewModels: [viewModel]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleScreenChanged("screen-1")
+
+                let statusPath = "paywall/purchase/status"
+                let errorPath = "paywall/purchase/errorCode"
+                let invocationPath = "paywall/purchase/invocationId"
+                let statusPatchPath = VmPathRef(path: statusPath)
+
+                expect(snapshotValue(journey, path: statusPath) as? String).to(equal("running"))
+                expect(snapshotValue(journey, path: errorPath) as? String).to(equal(""))
+                expect(snapshotValue(journey, path: invocationPath) as? String).toNot(beEmpty())
+                await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
+                    contain(statusPatchPath.normalizedPath)
+                )
+
+                _ = await runner.dispatchEventTrigger(
+                    NuxieEvent(
+                        name: SystemEventNames.purchaseCompleted,
+                        distinctId: "user-1",
+                        properties: ["product_id": "prod_1"]
+                    )
+                )
+
+                expect(snapshotValue(journey, path: statusPath) as? String).to(equal("success"))
+                await expect(controller.viewModelValues.compactMap { request in
+                    request.path.normalizedPath == statusPatchPath.normalizedPath ? request.value as? String : nil
+                }).toEventually(contain("success"))
+            }
+
+            it("projects paywall restore status through the native view model patch path") {
+                let flowId = "flow-restore-status"
+                let viewModel = makePaywallViewModel()
+                let remoteFlow = makeRemoteFlow(
+                    flowId: flowId,
+                    entryActions: [.restore(RestoreAction())],
+                    viewModels: [viewModel]
+                )
+                let flow = Flow(remoteFlow: remoteFlow, products: [])
+                let campaign = makeCampaign(flowId: flowId)
+                let journey = Journey(campaign: campaign, distinctId: "user-1")
+                let runner = FlowJourneyRunner(journey: journey, campaign: campaign, flow: flow)
+
+                let controller = await MainActor.run {
+                    SpyFlowViewController(flow: flow)
+                }
+                runner.attach(viewController: controller)
+
+                _ = await runner.handleRuntimeReady()
+
+                let statusPath = "paywall/restore/status"
+                let errorPath = "paywall/restore/errorCode"
+                let invocationPath = "paywall/restore/invocationId"
+                let statusPatchPath = VmPathRef(path: statusPath)
+
+                expect(snapshotValue(journey, path: statusPath) as? String).to(equal("running"))
+                expect(snapshotValue(journey, path: errorPath) as? String).to(equal(""))
+                expect(snapshotValue(journey, path: invocationPath) as? String).toNot(beEmpty())
+                await expect(controller.viewModelValues.map(\.path.normalizedPath)).toEventually(
+                    contain(statusPatchPath.normalizedPath)
+                )
+
+                _ = await runner.dispatchEventTrigger(
+                    NuxieEvent(
+                        name: SystemEventNames.restoreNoPurchases,
+                        distinctId: "user-1",
+                        properties: [:]
+                    )
+                )
+
+                expect(snapshotValue(journey, path: statusPath) as? String).to(equal("not_found"))
+                await expect(controller.viewModelValues.compactMap { request in
+                    request.path.normalizedPath == statusPatchPath.normalizedPath ? request.value as? String : nil
+                }).toEventually(contain("not_found"))
             }
 
             it("handles list_insert and fire_trigger actions") {

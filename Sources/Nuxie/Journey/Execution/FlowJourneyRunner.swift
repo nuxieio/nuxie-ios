@@ -101,6 +101,8 @@ final class FlowJourneyRunner {
     private var eventDeclarationsByHost: [String: [EventDeclaration]] = [:]
     private var handlerActionsById: [String: [InteractionAction]] = [:]
     private let journeyEventHostKey = RemoteFlow.journeyEventHostKey
+    private var activePaywallPurchaseInvocationId: String?
+    private var activePaywallRestoreInvocationId: String?
 
     private var actionQueue: [ActionRequest] = []
     private var activeRequest: ActionRequest?
@@ -344,6 +346,7 @@ final class FlowJourneyRunner {
     }
 
     func dispatchJourneyEvent(_ event: NuxieEvent) async -> RunOutcome? {
+        projectPaywallStatus(from: event)
         return await dispatchEvent(
             hostId: journeyEventHostKey,
             event: event,
@@ -1585,6 +1588,7 @@ final class FlowJourneyRunner {
             return .continue
         }
         let placementIndex = resolveValueRefs(action.placementIndex.value, context: context)
+        beginPaywallPurchaseStatus(screenId: resolvedScreenId)
         await MainActor.run {
             controller.performPurchase(productId: productId, placementIndex: placementIndex)
         }
@@ -1611,6 +1615,7 @@ final class FlowJourneyRunner {
         context: TriggerContext
     ) async -> ActionResult {
         guard let controller = viewController else { return .continue }
+        beginPaywallRestoreStatus(screenId: context.screenId ?? journey.flowState.currentScreenId)
         await MainActor.run {
             controller.performRestore()
         }
@@ -2242,6 +2247,126 @@ final class FlowJourneyRunner {
                 instanceId: instanceId
             )
         }
+    }
+
+    private func beginPaywallPurchaseStatus(screenId: String?) {
+        let invocationId = UUID().uuidString
+        activePaywallPurchaseInvocationId = invocationId
+        updatePaywallPurchaseStatus(
+            status: "running",
+            errorCode: "",
+            invocationId: invocationId,
+            screenId: screenId
+        )
+    }
+
+    private func beginPaywallRestoreStatus(screenId: String?) {
+        let invocationId = UUID().uuidString
+        activePaywallRestoreInvocationId = invocationId
+        updatePaywallRestoreStatus(
+            status: "running",
+            errorCode: "",
+            invocationId: invocationId,
+            screenId: screenId
+        )
+    }
+
+    private func projectPaywallStatus(from event: NuxieEvent) {
+        let screenId = journey.flowState.currentScreenId
+        switch event.name {
+        case SystemEventNames.purchaseCompleted:
+            updatePaywallPurchaseStatus(
+                status: "success",
+                errorCode: "",
+                invocationId: activePaywallPurchaseInvocationId ?? UUID().uuidString,
+                screenId: screenId
+            )
+            activePaywallPurchaseInvocationId = nil
+        case SystemEventNames.purchaseFailed:
+            updatePaywallPurchaseStatus(
+                status: "error",
+                errorCode: errorCode(from: event),
+                invocationId: activePaywallPurchaseInvocationId ?? UUID().uuidString,
+                screenId: screenId
+            )
+            activePaywallPurchaseInvocationId = nil
+        case SystemEventNames.purchaseCancelled:
+            updatePaywallPurchaseStatus(
+                status: "cancelled",
+                errorCode: "",
+                invocationId: activePaywallPurchaseInvocationId ?? UUID().uuidString,
+                screenId: screenId
+            )
+            activePaywallPurchaseInvocationId = nil
+        case SystemEventNames.restoreCompleted:
+            updatePaywallRestoreStatus(
+                status: "success",
+                errorCode: "",
+                invocationId: activePaywallRestoreInvocationId ?? UUID().uuidString,
+                screenId: screenId
+            )
+            activePaywallRestoreInvocationId = nil
+        case SystemEventNames.restoreFailed:
+            updatePaywallRestoreStatus(
+                status: "error",
+                errorCode: errorCode(from: event),
+                invocationId: activePaywallRestoreInvocationId ?? UUID().uuidString,
+                screenId: screenId
+            )
+            activePaywallRestoreInvocationId = nil
+        case SystemEventNames.restoreNoPurchases:
+            updatePaywallRestoreStatus(
+                status: "not_found",
+                errorCode: "",
+                invocationId: activePaywallRestoreInvocationId ?? UUID().uuidString,
+                screenId: screenId
+            )
+            activePaywallRestoreInvocationId = nil
+        default:
+            return
+        }
+    }
+
+    private func updatePaywallPurchaseStatus(
+        status: String,
+        errorCode: String,
+        invocationId: String,
+        screenId: String?
+    ) {
+        updatePaywallCapabilityValue(path: "paywall/purchase/status", value: status, screenId: screenId)
+        updatePaywallCapabilityValue(path: "paywall/purchase/errorCode", value: errorCode, screenId: screenId)
+        updatePaywallCapabilityValue(path: "paywall/purchase/invocationId", value: invocationId, screenId: screenId)
+    }
+
+    private func updatePaywallRestoreStatus(
+        status: String,
+        errorCode: String,
+        invocationId: String,
+        screenId: String?
+    ) {
+        updatePaywallCapabilityValue(path: "paywall/restore/status", value: status, screenId: screenId)
+        updatePaywallCapabilityValue(path: "paywall/restore/errorCode", value: errorCode, screenId: screenId)
+        updatePaywallCapabilityValue(path: "paywall/restore/invocationId", value: invocationId, screenId: screenId)
+    }
+
+    private func updatePaywallCapabilityValue(
+        path: String,
+        value: Any,
+        screenId: String?
+    ) {
+        let pathRef = VmPathRef(path: path)
+        guard viewModelState.setValue(path: pathRef, value: value, screenId: screenId) else { return }
+        journey.flowState.viewModelSnapshot = viewModelState.getSnapshot()
+        applyViewModelValue(path: pathRef, value: value, screenId: screenId)
+    }
+
+    private func errorCode(from event: NuxieEvent) -> String {
+        for key in ["error_code", "errorCode", "code", "error"] {
+            if let value = event.properties[key] as? String, !value.isEmpty {
+                return value
+            }
+        }
+        return ""
     }
 
     private func applyViewModelListOperation(
