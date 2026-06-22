@@ -71,7 +71,7 @@ struct MoodLogApp: App {
     /// 4. Call setup() to initialize the SDK
     private func setupNuxieSDK() {
         /// **Step 1: Create configuration with API key**
-        /// Get your API key from https://nuxie.io dashboard
+        /// Get your API key from https://nuxie.ai dashboard
         let config = NuxieConfiguration(apiKey: "your_api_key_here")
 
         /// **Step 2: Configure API endpoint (optional)**

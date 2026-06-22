@@ -14,7 +14,7 @@ public actor NuxieApi: NuxieApiProtocol {
     
     // MARK: - Initialization
     
-    init(apiKey: String, baseURL: URL = URL(string: "https://i.nuxie.io")!, useGzipCompression: Bool = false, urlSession: URLSession? = nil) {
+    init(apiKey: String, baseURL: URL = URL(string: "https://i.nuxie.ai")!, useGzipCompression: Bool = false, urlSession: URLSession? = nil) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.useGzipCompression = useGzipCompression

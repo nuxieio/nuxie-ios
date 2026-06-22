@@ -155,7 +155,7 @@ config.purchaseDelegate = StoreKitManager.shared
 ### Prerequisites
 - Xcode 15.0+
 - iOS 15.0+ device or simulator
-- Nuxie API key (get one at [nuxie.io](https://nuxie.io))
+- Nuxie API key (get one at [nuxie.ai](https://nuxie.ai))
 
 ### Setup
 
@@ -310,7 +310,7 @@ To build your own app with Nuxie:
 
 ## Support
 
-- **Nuxie Documentation**: [docs.nuxie.io](https://docs.nuxie.io)
+- **Nuxie Documentation**: [nuxie.ai/docs](https://nuxie.ai/docs)
 - **SDK Reference**: [github.com/nuxie-io/nuxie-ios](https://github.com/nuxie-io/nuxie-ios)
 - **Issues**: [github.com/nuxie-io/nuxie-ios/issues](https://github.com/nuxie-io/nuxie-ios/issues)
 

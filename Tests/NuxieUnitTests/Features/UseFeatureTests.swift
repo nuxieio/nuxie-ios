@@ -14,7 +14,7 @@ final class UseFeatureTests: AsyncSpec {
             var api: NuxieApi!
             var session: URLSession!
             let apiKey = "test-api-key"
-            let baseURL = URL(string: "https://test.nuxie.io")!
+            let baseURL = URL(string: "https://test.nuxie.ai")!
 
             beforeEach {
                 // Reset protocol handlers

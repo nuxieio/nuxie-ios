@@ -10,13 +10,13 @@ public enum Environment: String {
     var defaultEndpoint: URL {
         switch self {
         case .production:
-            return URL(string: "https://i.nuxie.io")!
+            return URL(string: "https://i.nuxie.ai")!
         case .staging:
-            return URL(string: "https://staging-i.nuxie.io")!
+            return URL(string: "https://staging-i.nuxie.ai")!
         case .development:
-            return URL(string: "https://dev-i.nuxie.io")!
+            return URL(string: "https://dev-i.nuxie.ai")!
         case .custom:
-            return URL(string: "https://i.nuxie.io")!
+            return URL(string: "https://i.nuxie.ai")!
         }
     }
 }
@@ -46,7 +46,7 @@ public class NuxieConfiguration {
     public let apiKey: String
     
     /// API endpoint (defaults to production)
-    public var apiEndpoint: URL = URL(string: "https://i.nuxie.io")!
+    public var apiEndpoint: URL = URL(string: "https://i.nuxie.ai")!
     
     /// Environment setting
     public var environment: Environment = .production {
