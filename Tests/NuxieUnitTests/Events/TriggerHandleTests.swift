@@ -24,11 +24,20 @@ private func runAsyncAndWait(
     }
 }
 
-actor TriggerUpdateRecorder {
-    private(set) var updates: [TriggerUpdate] = []
+final class TriggerUpdateRecorder {
+    private let lock = NSLock()
+    private var updates: [TriggerUpdate] = []
 
     func append(_ update: TriggerUpdate) {
+        lock.lock()
+        defer { lock.unlock() }
         updates.append(update)
+    }
+
+    func snapshot() -> [TriggerUpdate] {
+        lock.lock()
+        defer { lock.unlock() }
+        return updates
     }
 }
 
@@ -93,7 +102,7 @@ final class TriggerHandleTests: AsyncSpec {
 
                 let recorder = TriggerUpdateRecorder()
                 let handle: Nuxie.TriggerHandle = NuxieSDK.shared.trigger("test_event") { update in
-                    Task { await recorder.append(update) }
+                    recorder.append(update)
                 }
 
                 var streamed: [TriggerUpdate] = []
@@ -102,7 +111,7 @@ final class TriggerHandleTests: AsyncSpec {
                 }
 
                 expect(streamed).to(equal(updates))
-                let recorded = await recorder.updates
+                let recorded = recorder.snapshot()
                 expect(recorded).to(equal(updates))
             }
 
