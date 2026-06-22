@@ -42,7 +42,7 @@ let package = Package(
             ],
             path: "Sources/Nuxie"
         ),
-        .testTarget(
+        .target(
             name: "NuxieTestSupport",
             dependencies: [
                 "Nuxie",

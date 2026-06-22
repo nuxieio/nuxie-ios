@@ -1,4 +1,4 @@
-.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-flow-runtime-ui test-all build-macos build-reference-app install-reference-app clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
+.PHONY: generate test test-ios test-xcode test-unit test-macos-unit test-integration test-e2e test-flow-runtime-ui test-all build-macos build-reference-app install-reference-app clean help coverage coverage-html coverage-json coverage-summary install-deps check-xcodegen
 
 XCODEGEN_STAMP := .xcodegen.stamp
 XCODEGEN_INPUTS := .xcodegen.inputs
@@ -6,6 +6,7 @@ XCODEPROJ := NuxieSDK.xcodeproj
 SCHEME_UNIT := NuxieSDKUnitTests
 SCHEME_MACOS_UNIT := NuxieSDKMacUnitTests
 SCHEME_INTEGRATION := NuxieSDKIntegrationTests
+SCHEME_E2E := NuxieSDKE2ETests
 SCHEME_FLOW_RUNTIME_UI := NuxieFlowRuntimeUITests
 SCHEME_MACOS := NuxieSDKMac
 SCHEME_REFERENCE_APP := NuxieFlowRuntimeReferenceApp
@@ -40,6 +41,7 @@ help:
 	@echo "  test-unit        - Run unit tests"
 	@echo "  test-macos-unit  - Run unit tests on macOS"
 	@echo "  test-integration - Run integration tests"
+	@echo "  test-e2e         - Run the example app end-to-end tests"
 	@echo "  test-flow-runtime-ui - Run native flow runtime UI screenshot tests"
 	@echo "  test-all         - Run unit + integration tests"
 	@echo "  build-macos      - Build macOS framework target"
@@ -100,6 +102,9 @@ test-macos-unit: generate
 
 test-integration: SCHEME = $(SCHEME_INTEGRATION)
 test-integration: test-xcode
+
+test-e2e: SCHEME = $(SCHEME_E2E)
+test-e2e: test-xcode
 
 test-flow-runtime-ui: generate
 	@echo "Running native flow runtime UI tests on iOS Simulator..."

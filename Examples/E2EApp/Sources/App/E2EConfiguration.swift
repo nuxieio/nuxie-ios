@@ -71,13 +71,17 @@ struct E2EConfiguration: Equatable {
   }
 
   private static func resolveArtifactFilePath(_ rawPath: String) -> String {
+    let artifactURL = URL(fileURLWithPath: rawPath)
     var isDirectory: ObjCBool = false
     if FileManager.default.fileExists(atPath: rawPath, isDirectory: &isDirectory),
        isDirectory.boolValue {
-      return URL(fileURLWithPath: rawPath)
-        .appendingPathComponent("runtime/launch-config.json")
-        .path
+      return artifactURL.appendingPathComponent("runtime/launch-config.json").path
     }
+
+    if artifactURL.pathExtension.isEmpty {
+      return artifactURL.appendingPathComponent("runtime/launch-config.json").path
+    }
+
     return rawPath
   }
 }
