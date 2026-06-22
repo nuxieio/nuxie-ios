@@ -18,7 +18,7 @@ packages:
     url: https://github.com/hmlongco/Factory.git
     from: 2.5.0
   RiveRuntime:
-    url: https://github.com/nuxieio/rive-ios.git
+    url: https://github.com/nuxieai/rive-ios.git
     branch: main
     
 targets:

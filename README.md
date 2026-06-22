@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="https://nuxie.io" target="_blank" rel="noopener">
-    <img alt="Nuxie" src="https://nuxie.io/favicon-192.png" width="64" height="64" />
+  <a href="https://nuxie.ai" target="_blank" rel="noopener">
+    <img alt="Nuxie" src="https://nuxie.ai/favicon-192.png" width="64" height="64" />
   </a>
 </p>
 
@@ -9,7 +9,7 @@
   <br />
   Bring targeted in‑app flows, paywalls, and analytics to your iOS or macOS app.
   <br /><br />
-  <a href="https://nuxie.io" target="_blank" rel="noopener">Website</a>
+  <a href="https://nuxie.ai" target="_blank" rel="noopener">Website</a>
 </div>
 
 ---
@@ -18,7 +18,7 @@
 
 Nuxie is a platform for running targeted in‑app flows such as paywalls, upgrade prompts, surveys, and more — without shipping new app releases. This SDK connects your iOS or macOS app to Nuxie so you can track events, identify users, and automatically present flows configured in the Nuxie dashboard.
 
-Learn more at https://nuxie.io
+Learn more at https://nuxie.ai
 
 ## Features
 
@@ -42,14 +42,14 @@ Learn more at https://nuxie.io
 Add the package to your app:
 
 1) Xcode → File → Add Package Dependencies…
-- Package URL: `https://github.com/nuxieio/nuxie-ios`
+- Package URL: `https://github.com/nuxieai/nuxie-ios`
 - Add the `Nuxie` product to your app target
 
 Or via `Package.swift`:
 
 ```swift
 dependencies: [
-  .package(url: "https://github.com/nuxieio/nuxie-ios", from: "0.1.0")
+  .package(url: "https://github.com/nuxieai/nuxie-ios", from: "0.1.0")
 ]
 ```
 
@@ -221,7 +221,7 @@ final class MyPurchaseDelegate: NuxiePurchaseDelegate {
 
 ## Need Help?
 
-- Learn more and get access at https://nuxie.io
+- Learn more and get access at https://nuxie.ai
 
 ## License
 
