@@ -19,7 +19,7 @@ packages:
     from: 2.5.0
   RiveRuntime:
     url: https://github.com/nuxieio/rive-ios.git
-    exactVersion: 6.20.3-nuxie.1
+    branch: main
     
 targets:
   NuxieSDK:
