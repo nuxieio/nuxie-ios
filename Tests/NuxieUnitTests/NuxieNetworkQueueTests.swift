@@ -299,11 +299,10 @@ final class NuxieNetworkQueueTests: AsyncSpec {
                         await testQueue.enqueue(event)
                     }
                     
-                    // Wait for flush to complete
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
-                    
-                    await expect { await mockApi.sendBatchCalled }.to(beTrue())
-                    await expect { await mockApi.lastBatchSent?.count }.to(equal(5))
+                    await expect { await mockApi.sendBatchCalled }
+                        .toEventually(beTrue(), timeout: .seconds(2))
+                    await expect { await mockApi.lastBatchSent?.count }
+                        .toEventually(equal(5), timeout: .seconds(2))
                     
                     await testQueue.shutdown()
                 }
