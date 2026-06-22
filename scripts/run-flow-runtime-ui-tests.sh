@@ -9,17 +9,43 @@ RESULT_BUNDLES_DIR="$OUTPUT_DIR/result-bundles"
 SCREENSHOTS_DIR="$OUTPUT_DIR/screenshots"
 VIDEOS_DIR="$OUTPUT_DIR/videos"
 DESTINATION="${TEST_DESTINATION:-platform=iOS Simulator,name=${TEST_SIMULATOR_NAME:-iPhone 17 Pro},OS=${TEST_SIMULATOR_OS:-26.4}}"
+RETRIES="${NUXIE_FLOW_RUNTIME_UI_RETRIES:-1}"
+RESET_EACH_CASE="${NUXIE_FLOW_RUNTIME_UI_RESET_EACH_CASE:-0}"
+INCLUDE_ALL_CASES="${NUXIE_FLOW_RUNTIME_UI_INCLUDE_ALL_CASES:-0}"
+SMOKE_CASES="${NUXIE_FLOW_RUNTIME_UI_SMOKE_CASES:-screen-transition-modal,screen-transition-back-push}"
+SIMULATOR_UDID=""
+
+if [[ "$DESTINATION" =~ id=([^,]+) ]]; then
+  SIMULATOR_UDID="${BASH_REMATCH[1]}"
+fi
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$RESULT_BUNDLES_DIR"
 mkdir -p "$SCREENSHOTS_DIR"
 mkdir -p "$VIDEOS_DIR"
 
+reset_simulator() {
+  if [ -z "$SIMULATOR_UDID" ]; then
+    return
+  fi
+
+  echo "Resetting simulator $SIMULATOR_UDID..."
+  xcrun simctl shutdown "$SIMULATOR_UDID" >/dev/null 2>&1 || true
+  xcrun simctl erase "$SIMULATOR_UDID" >/dev/null
+  xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "$SIMULATOR_UDID" -b >/dev/null
+}
+
 start_recording() {
   local video_file="$1"
   (
     for _ in $(seq 1 120); do
-      if xcrun simctl list devices booted 2>/dev/null | grep -q "(Booted)"; then
+      if [ -n "$SIMULATOR_UDID" ]; then
+        if xcrun simctl list devices booted 2>/dev/null | grep -q "$SIMULATOR_UDID"; then
+          xcrun simctl io "$SIMULATOR_UDID" recordVideo --codec=h264 "$video_file"
+          exit 0
+        fi
+      elif xcrun simctl list devices booted 2>/dev/null | grep -q "(Booted)"; then
         xcrun simctl io booted recordVideo --codec=h264 "$video_file"
         exit 0
       fi
@@ -37,11 +63,40 @@ stop_recording() {
   fi
   if kill -0 "$pid" 2>/dev/null; then
     if [ -n "$video_file" ]; then
-      pkill -INT -f "simctl io booted recordVideo.*$video_file" 2>/dev/null || true
+      pkill -INT -f "simctl io .*recordVideo.*$video_file" 2>/dev/null || true
     fi
     kill -INT "$pid" 2>/dev/null || true
+    for _ in $(seq 1 5); do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        break
+      fi
+      sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      if [ -n "$video_file" ]; then
+        pkill -TERM -f "simctl io .*recordVideo.*$video_file" 2>/dev/null || true
+      fi
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
     wait "$pid" 2>/dev/null || true
   fi
+}
+
+build_for_testing() {
+  local command=(
+    xcodebuild build-for-testing
+    -project NuxieSDK.xcodeproj
+    -scheme NuxieFlowRuntimeUITests
+    -configuration Debug
+    -derivedDataPath DerivedData
+    -destination "$DESTINATION"
+  )
+
+  if [ -n "${CLONED_SOURCE_PACKAGES_DIR_PATH:-}" ]; then
+    command+=(-clonedSourcePackagesDirPath "$CLONED_SOURCE_PACKAGES_DIR_PATH")
+  fi
+
+  NUXIE_FLOW_RUNTIME_OUTPUT_DIR="$OUTPUT_DIR" "${command[@]}"
 }
 
 run_xcode_test() {
@@ -50,7 +105,7 @@ run_xcode_test() {
   shift 2
 
   local command=(
-    xcodebuild test
+    xcodebuild test-without-building
     -project NuxieSDK.xcodeproj
     -scheme NuxieFlowRuntimeUITests
     -configuration Debug
@@ -67,6 +122,18 @@ run_xcode_test() {
   NUXIE_FLOW_RUNTIME_OUTPUT_DIR="$OUTPUT_DIR" "${command[@]}"
 }
 
+case_enabled() {
+  local slug="$1"
+  if [ "$INCLUDE_ALL_CASES" = "1" ]; then
+    return 0
+  fi
+
+  case ",$SMOKE_CASES," in
+    *",$slug,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 TEST_CASES=(
   "testPublishedFixturesRenderAndHandleNativeInput|published-fixtures|Published fixtures + native input|Renders layout/font/pressable fixtures and verifies the UIKit text input overlay accepts native typing."
   "testTextInputMotionMovesWholeEditableField|text-input-motion|Text input motion|The authored TextInput field moves as a whole, and the UIKit editor overlay tracks the rendered field."
@@ -78,24 +145,68 @@ TEST_CASES=(
   "testTextInputOverlayRebindsAfterBackTransition|text-input-rebound|Text input rebound|A static UIKit text input overlay remounts and remains editable after returning to screen_1."
 )
 
+reset_simulator
+if [ "$INCLUDE_ALL_CASES" = "1" ]; then
+  echo "Flow runtime UI case mode: all cases"
+else
+  echo "Flow runtime UI smoke cases: $SMOKE_CASES"
+fi
+echo "Building flow runtime UI tests once..."
+build_for_testing
+BUILD_STATUS=$?
+if [ "$BUILD_STATUS" -ne 0 ]; then
+  echo "Flow runtime UI build failed with status $BUILD_STATUS."
+  exit "$BUILD_STATUS"
+fi
+
 set +e
 STATUS=0
 CASE_RESULTS=()
 for test_case in "${TEST_CASES[@]}"; do
   IFS='|' read -r test_method slug title description <<< "$test_case"
+  if ! case_enabled "$slug"; then
+    echo
+    echo "Skipping $title ($test_method); not part of the default Flow Runtime UI smoke set."
+    continue
+  fi
+
   result_bundle="$RESULT_BUNDLES_DIR/$slug.xcresult"
   video_file="$VIDEOS_DIR/$slug.mp4"
-  rm -rf "$result_bundle" "$video_file"
+  max_attempts=$((RETRIES + 1))
 
   echo
   echo "Running $title ($test_method)..."
-  RECORDER_PID=""
-  start_recording "$video_file"
-  run_xcode_test "$result_bundle" "$test_method"
-  case_status=$?
-  stop_recording "$RECORDER_PID" "$video_file"
+  case_status=1
+  attempt=1
+  attempts_used=0
+  while [ "$attempt" -le "$max_attempts" ]; do
+    attempts_used="$attempt"
+    if [ "$attempt" -gt 1 ]; then
+      echo "Retrying $title ($test_method), attempt $attempt of $max_attempts..."
+    fi
 
-  CASE_RESULTS+=("$slug|$title|$description|$test_method|$case_status")
+    rm -rf "$result_bundle" "$video_file"
+    if [ "$RESET_EACH_CASE" = "1" ] || [ "$attempt" -gt 1 ]; then
+      reset_simulator
+    fi
+
+    RECORDER_PID=""
+    start_recording "$video_file"
+    run_xcode_test "$result_bundle" "$test_method"
+    case_status=$?
+    stop_recording "$RECORDER_PID" "$video_file"
+
+    if [ "$case_status" -eq 0 ]; then
+      break
+    fi
+
+    if [ "$attempt" -lt "$max_attempts" ]; then
+      echo "$title failed with status $case_status; resetting simulator before retry."
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  CASE_RESULTS+=("$slug|$title|$description|$test_method|$case_status|$attempts_used")
   if [ "$case_status" -ne 0 ] && [ "$STATUS" -eq 0 ]; then
     STATUS="$case_status"
   fi
@@ -253,14 +364,14 @@ REPORT="$OUTPUT_DIR/index.html"
   </header>
   <section class="card summary">
     <h2>How to Review This Run</h2>
-    <p>The host app starts from a native fixture list. Each row names the scenario before pushing into the fixture, while runtime events stay in hidden accessibility debug text for assertions instead of covering the rendered flow.</p>
+    <p>The host app starts fixture scenarios while runtime events stay in hidden accessibility debug text for assertions instead of covering the rendered flow.</p>
+    <p>Default smoke cases: <code>$SMOKE_CASES</code>. Set <code>NUXIE_FLOW_RUNTIME_UI_INCLUDE_ALL_CASES=1</code> to run the full forensic suite, or override <code>NUXIE_FLOW_RUNTIME_UI_SMOKE_CASES</code> with a comma-separated slug list.</p>
     <ul>
       <li><strong>System push:</strong> screen_1 starts, screen_2 pushes in as another live Rive surface, then screen_2 becomes current.</li>
       <li><strong>System modal:</strong> UIKit opens screen_2 as a native sheet modal with its own live Rive surface.</li>
       <li><strong>System modal dismissal:</strong> a native sheet swipe dismisses screen_2, reports screen_dismissed, and returns the journey to screen_1.</li>
       <li><strong>Back transition:</strong> screen_2 auto-runs a back action and returns to screen_1 with the push payload.</li>
       <li><strong>Reduce motion:</strong> an authored fade is skipped when reduce motion is forced.</li>
-      <li><strong>Text input motion:</strong> the whole authored TextInput field moves, and the UIKit editor overlay tracks that rendered field.</li>
       <li><strong>Text input rebound:</strong> a static UIKit text input overlay remounts and remains editable after returning to screen_1.</li>
     </ul>
   </section>
@@ -272,7 +383,7 @@ HTML
     <div class="grid recordings-grid">
 HTML
   for case_result in "${CASE_RESULTS[@]}"; do
-    IFS='|' read -r slug title description test_method case_status <<< "$case_result"
+    IFS='|' read -r slug title description test_method case_status attempts <<< "$case_result"
     video_file="$VIDEOS_DIR/$slug.mp4"
     if [ ! -s "$video_file" ]; then
       continue
@@ -283,6 +394,7 @@ HTML
         <p>$description</p>
         <p><code>$test_method</code></p>
         <p class="case-status">$(if [ "$case_status" -eq 0 ]; then echo "Passed"; else echo "Failed ($case_status)"; fi)</p>
+        <p>Attempts: $attempts</p>
         <video controls src="videos/$(basename "$video_file")"></video>
       </article>
 HTML

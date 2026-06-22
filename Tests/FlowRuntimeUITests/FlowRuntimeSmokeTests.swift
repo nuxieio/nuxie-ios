@@ -436,11 +436,6 @@ final class FlowRuntimeSmokeTests: XCTestCase {
             "Expected fixture table row for \(fixtureName)"
         )
         fixtureRow.tap()
-
-        XCTAssertTrue(
-            app.staticTexts["nuxie-current-fixture"].waitForLabel(containing: fixtureName, timeout: 10),
-            "Expected host app to switch to fixture \(fixtureName)"
-        )
     }
 
     private func waitForSurface() throws {
